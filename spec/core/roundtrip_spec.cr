@@ -1,0 +1,184 @@
+require "../spec_helper"
+require "../support/model_terminal"
+
+# The property the whole paint algorithm rests on:
+#
+#     model.apply(encode(paint(buffer))) == buffer.back
+#
+# Anything the painter decides — skipping a gap, erasing instead of writing
+# spaces, scrolling instead of redrawing — has to survive this. A cheaper byte
+# stream that puts the wrong thing on screen fails here and nowhere else.
+private ALPHABET = [
+  "a", "b", "Z", " ", "#", "0", "~",
+  "漢", "か", "한",
+  "é", "á̂",
+  "😀", "☀️",
+  "\u{1F1FA}\u{1F1F8}",
+  "क्ष",
+  "hello", "a漢b", "x́y", "  ",
+]
+
+private STYLES = [
+  TermBuf::Style::DEFAULT,
+  TermBuf::Style::DEFAULT.bold,
+  TermBuf::Style::DEFAULT.italic.fg(TermBuf::Color::RED),
+  TermBuf::Style::DEFAULT.fg(TermBuf::Color.indexed(200)),
+  TermBuf::Style::DEFAULT.bg(TermBuf::Color.rgb(10, 20, 30)),
+  TermBuf::Style::DEFAULT.fg(TermBuf::Color::BRIGHT_CYAN).bg(TermBuf::Color::BLUE),
+  TermBuf::Style::DEFAULT.underlined(TermBuf::Underline::Curly, TermBuf::Color::RED),
+  TermBuf::Style::DEFAULT.reverse.strike,
+  TermBuf::Style::DEFAULT.bold.faint.blink,
+]
+
+# Drives one paint cycle and reports any disagreement between the terminal's
+# screen and the buffer.
+private class Harness
+  getter buffer : TermBuf::Buffer
+  getter terminal : ModelTerminal
+  getter bytes = 0
+
+  def initialize(width : Int32, height : Int32, capabilities : TermBuf::Capabilities)
+    @buffer = TermBuf::Buffer.new width, height
+    @terminal = ModelTerminal.new width, height
+    @painter = TermBuf::Painter.new capabilities
+    @encoder = TermBuf::Encoder.new @buffer.styles, capabilities, width, height
+  end
+
+  # Paints, feeds the result to the model terminal, and reports what still
+  # differs. `nil` means the screen matches the buffer.
+  def cycle : String?
+    emit
+    @terminal.diff @buffer, @encoder
+  end
+
+  # Paints and returns the bytes, without checking the result.
+  def emit : String
+    output = @encoder.encode @painter.paint(@buffer)
+    @bytes += output.bytesize
+    @terminal.feed output
+    @buffer.commit_paint
+    output
+  end
+end
+
+private def apply_operation(buffer : TermBuf::Buffer, random : Random) : Nil
+  case random.rand 12
+  when 0..5
+    buffer.write random.rand(buffer.width), random.rand(buffer.height),
+      ALPHABET.sample(random), STYLES.sample(random)
+  when 6
+    buffer.write_char random.rand(buffer.width), random.rand(buffer.height),
+      ALPHABET.sample(random)[0], STYLES.sample(random)
+  when 7, 8
+    buffer.scroll random_rect(buffer, random), random.rand(-2..2), STYLES.sample(random)
+  when 9
+    buffer.fill random_rect(buffer, random), '#', STYLES.sample(random)
+  when 10
+    buffer.fill random_rect(buffer, random), ' ', TermBuf::Style::DEFAULT
+  else
+    buffer.clear STYLES.sample(random)
+  end
+end
+
+# Weighted toward full-width rectangles, which is what the scroll extractor can
+# actually act on.
+private def random_rect(buffer : TermBuf::Buffer, random : Random) : TermBuf::Rect
+  if random.rand(2).zero?
+    y = random.rand buffer.height
+    return TermBuf::Rect.new 0, y, buffer.width, random.rand(1..buffer.height - y)
+  end
+
+  x = random.rand buffer.width
+  y = random.rand buffer.height
+
+  TermBuf::Rect.new x, y, random.rand(1..buffer.width - x), random.rand(1..buffer.height - y)
+end
+
+Spectator.describe "paint round trip" do
+  {% for mask in %w[MODERN XTERM ANSI NONE] %}
+    describe "against a {{ mask.downcase.id }} terminal" do
+      let(caps) { TermBuf::Capabilities::{{ mask.id }} }
+
+      it "reproduces a screen written once" do
+        harness = Harness.new 20, 6, caps
+        harness.buffer.write 0, 0, "hello world"
+        harness.buffer.write 3, 2, "漢字テスト", STYLES[2]
+        harness.buffer.write 0, 4, "😀 flags \u{1F1FA}\u{1F1F8}", STYLES[4]
+
+        expect(harness.cycle).to be_nil
+      end
+
+      it "reproduces a screen changed a little at a time" do
+        harness = Harness.new 20, 6, caps
+        harness.buffer.write 0, 0, "the quick brown fox"
+        expect(harness.cycle).to be_nil
+
+        harness.buffer.write 4, 0, "slow", STYLES[1]
+        expect(harness.cycle).to be_nil
+
+        harness.buffer.write 0, 3, "and back again"
+        expect(harness.cycle).to be_nil
+      end
+
+      it "reproduces a scrolled screen" do
+        harness = Harness.new 20, 6, caps
+        6.times { |row| harness.buffer.write 0, row, "line #{row}" }
+        expect(harness.cycle).to be_nil
+
+        harness.buffer.scroll harness.buffer.bounds, 2
+        harness.buffer.write 0, 4, "line 6"
+        harness.buffer.write 0, 5, "line 7"
+        expect(harness.cycle).to be_nil
+      end
+
+      it "reproduces a partially scrolled screen" do
+        harness = Harness.new 20, 6, caps
+        6.times { |row| harness.buffer.write 0, row, "line #{row}" }
+        expect(harness.cycle).to be_nil
+
+        harness.buffer.scroll TermBuf::Rect.new(0, 1, 20, 4), 1
+        expect(harness.cycle).to be_nil
+      end
+
+      it "reproduces a cleared screen" do
+        harness = Harness.new 20, 6, caps
+        6.times { |row| harness.buffer.write 0, row, "filled #{row}" }
+        expect(harness.cycle).to be_nil
+
+        harness.buffer.clear
+        expect(harness.cycle).to be_nil
+      end
+
+      it "reproduces a screen tinted with a background" do
+        harness = Harness.new 20, 6, caps
+        harness.buffer.clear STYLES[4]
+        harness.buffer.write 2, 2, "on a tint", STYLES[4]
+
+        expect(harness.cycle).to be_nil
+      end
+
+      sample [1_u64, 2_u64, 3_u64, 4_u64, 5_u64, 6_u64] do |seed|
+        it "holds across a random sequence (seed #{seed})" do
+          random = Random.new seed
+          harness = Harness.new 16, 6, caps
+
+          60.times do |step|
+            random.rand(1..4).times { apply_operation harness.buffer, random }
+
+            if failure = harness.cycle
+              fail "seed #{seed}, step #{step}: #{failure}"
+            end
+          end
+        end
+      end
+    end
+  {% end %}
+
+  it "emits nothing when a paint would change nothing" do
+    harness = Harness.new 20, 6, TermBuf::Capabilities::MODERN
+    harness.buffer.write 0, 0, "settled"
+    harness.cycle
+
+    expect(harness.emit).to eq ""
+  end
+end
