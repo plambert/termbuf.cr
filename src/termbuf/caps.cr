@@ -1,0 +1,7 @@
+require "./caps/capability"
+require "./caps/response_scanner"
+require "./caps/environment"
+require "./caps/overrides"
+require "./caps/prober"
+require "./caps/screen_size"
+require "./caps/resolver"

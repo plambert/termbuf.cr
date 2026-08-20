@@ -1,4 +1,4 @@
-require "./caps/capability"
+require "./caps"
 require "./core/color"
 require "./core/style"
 require "./core/style_table"
