@@ -68,7 +68,7 @@ module TermBuf
       cursor = nil.as({Int32, Int32}?)
 
       collect do |kind, bytes|
-        if kind.input?
+        if kind.text?
           input.write bytes
           next false
         end
@@ -253,7 +253,7 @@ module TermBuf
       supported = false
 
       collect do |kind, bytes|
-        next false unless kind.response?
+        next false unless kind.sequence?
 
         response = String.new bytes
         supported = true if response.starts_with?("\e_G") && response.includes?("OK")

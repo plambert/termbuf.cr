@@ -10,12 +10,16 @@ module TermBuf
     ESC = 0x1B_u8
     BEL = 0x07_u8
 
+    # What a chunk of bytes looks like, which is all that can be told from the
+    # bytes alone. Whether an escape sequence is a reply the application asked
+    # for or an arrow key someone pressed is not visible here: both are
+    # `Sequence`, and `ResponseRegistry` is what tells them apart.
     enum Kind
-      # A complete escape sequence sent by the terminal.
-      Response
+      # A complete escape sequence.
+      Sequence
 
-      # Anything else, which is to say what the person at the keyboard typed.
-      Input
+      # Ordinary characters.
+      Text
     end
 
     # A sequence longer than this is treated as a stray escape followed by
@@ -61,14 +65,14 @@ module TermBuf
       @buffer.clear
     end
 
-    # Treats whatever is held back as ordinary input, which is what a timeout
+    # Treats whatever is held back as ordinary text, which is what a timeout
     # means: no more of that sequence is coming.
     def flush(& : Kind, Bytes ->) : Nil
       remainder = pending
       return if remainder.empty?
 
       @buffer.clear
-      yield Kind::Input, remainder
+      yield Kind::Text, remainder
     end
 
     # Consumes one chunk from the front of *data*, returning how many bytes it
@@ -81,7 +85,7 @@ module TermBuf
           length += 1
         end
 
-        yield Kind::Input, data[0, length]
+        yield Kind::Text, data[0, length]
         return length
       end
 
@@ -89,14 +93,14 @@ module TermBuf
       return force_input(data) { |kind, bytes| yield kind, bytes } if length.nil?
       return 0 if length.zero?
 
-      yield Kind::Response, data[0, length]
+      yield Kind::Sequence, data[0, length]
       length
     end
 
     # An escape that has run past the length any real sequence reaches is not
     # one; hand over the escape byte itself and resume from what follows.
     private def force_input(data : Bytes, & : Kind, Bytes ->) : Int32
-      yield Kind::Input, data[0, 1]
+      yield Kind::Text, data[0, 1]
       1
     end
 

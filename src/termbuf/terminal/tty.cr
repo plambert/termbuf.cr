@@ -23,6 +23,10 @@ module TermBuf
     # Set once `#enter` has run, cleared by `#leave`.
     getter? entered : Bool = false
 
+    # Set once the modes have been changed, which happens before `#enter` when
+    # the terminal is about to be probed.
+    getter? raw : Bool = false
+
     # Crystal's bindings carry `VMIN` but not `VTIME` on every platform, so the
     # index is filled in here when it is missing.
     {% if LibC.has_constant?(:VTIME) %}
@@ -73,7 +77,7 @@ module TermBuf
     def enter(capabilities : Capabilities = Capabilities::NONE) : Nil
       return if @entered
 
-      apply_raw_mode
+      raw!
       @output << "\e[?1049h" if capabilities.includes? Capability::AltScreen
       @output << "\e[?25l"
       @output << "\e[2J\e[H"
@@ -85,16 +89,19 @@ module TermBuf
     # safe to call when `#enter` never ran, which is what makes it usable from
     # a signal handler and from `at_exit`.
     def leave(capabilities : Capabilities = Capabilities::NONE) : Nil
-      return unless @entered
-      @entered = false
+      if @entered
+        @entered = false
 
-      @output << "\e[?25h"
-      @output << "\e[?1049l" if capabilities.includes? Capability::AltScreen
-      @output << "\e[0m"
-      @output.flush
+        @output << "\e[?25h"
+        @output << "\e[?1049l" if capabilities.includes? Capability::AltScreen
+        @output << "\e[0m"
+        @output.flush
+      end
+
       restore_modes
     rescue IO::Error
-      # The terminal has gone. Nothing left to restore it to.
+      # The terminal has gone; put the modes back regardless.
+      restore_modes
     end
 
     def write(text : String) : Nil
@@ -112,8 +119,17 @@ module TermBuf
     # restores to a *cooked* terminal rather than to whatever was there before,
     # which is not the same thing when a program was started from something
     # other than an ordinary shell.
-    private def apply_raw_mode : Nil
+    #
+    # This has to happen before the terminal is asked anything. A cooked
+    # terminal echoes the replies onto the screen and holds them in the line
+    # discipline until a newline that never comes, so the queries appear to go
+    # unanswered and then all arrive at once the moment raw mode is set.
+    #
+    # Idempotent: calling it again keeps the modes first found, not the raw
+    # ones, so `#restore_modes` still has somewhere to go back to.
+    def raw! : Nil
       fd = @input_fd
+      return if @raw
       return unless @managed && fd
 
       original = uninitialized LibC::Termios
@@ -136,6 +152,7 @@ module TermBuf
       raw.c_cc[VTIME] = 0_u8
 
       LibC.tcsetattr fd, LibC::TCSANOW, pointerof(raw)
+      @raw = true
     end
 
     def restore_modes : Nil
@@ -144,6 +161,7 @@ module TermBuf
       return unless fd && saved
 
       @saved = nil
+      @raw = false
 
       # A fresh local, because `pointerof` goes by the declared type and the
       # ivar's includes nil however narrow the check above made it.

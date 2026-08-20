@@ -4,6 +4,7 @@ require "../core/encoder"
 require "../core/painter"
 require "./command"
 require "./event"
+require "./responses"
 require "./tty"
 
 module TermBuf
@@ -43,6 +44,13 @@ module TermBuf
     getter events : Channel(Event)
 
     getter tty : Tty
+
+    # The replies the application is waiting for. Anything arriving from the
+    # terminal that matches one becomes an `Events::Response`; everything else
+    # is an `Events::Input`, because an escape sequence nobody asked for is a
+    # key someone pressed.
+    getter responses : ResponseRegistry
+
     getter? closed : Bool = false
     getter? started : Bool = false
 
@@ -67,6 +75,7 @@ module TermBuf
       @encoder = Encoder.new @buffer.styles, @capabilities, @size.columns, @size.rows
       @commands = Channel(Command).new COMMAND_CAPACITY
       @events = Channel(Event).new EVENT_CAPACITY
+      @responses = ResponseRegistry.new
       @pending_input = pending_input
       @initial_warnings = warnings
     end
@@ -80,11 +89,22 @@ module TermBuf
                   env : Hash(String, String) = ENV.to_h,
                   probe : Bool = true) : Terminal
       tty = Tty.new input, output
-      resolved = if probe && tty.managed?
-                   CapabilityResolver.resolve env, input, output
-                 else
-                   CapabilityResolver.resolve env
-                 end
+
+      # Raw mode first, and only then ask the terminal anything. A cooked
+      # terminal echoes the replies onto the screen and holds them in the line
+      # discipline waiting for a newline that never arrives, so the queries
+      # look unanswered and the replies turn up later as if they were typed.
+      resolved = begin
+        if probe && tty.managed?
+          tty.raw!
+          CapabilityResolver.resolve env, input, output
+        else
+          CapabilityResolver.resolve env
+        end
+      rescue error
+        tty.restore_modes
+        raise error
+      end
 
       terminal = new tty, resolved.capabilities, tty.size, resolved.input, resolved.warnings
       terminal.start
@@ -164,6 +184,16 @@ module TermBuf
     def sync(&action : Buffer -> Nil) : Nil
       reply = reply_channel
       await Commands::Apply.new(action, reply), reply
+    end
+
+    # Says that a reply beginning with *prefix* and ending with *terminator* is
+    # expected, so it arrives as an `Events::Response` rather than as input.
+    def expect_response(prefix : String, terminator : String) : ResponsePattern
+      @responses.register prefix, terminator
+    end
+
+    def forget_response(pattern : ResponsePattern) : Nil
+      @responses.unregister pattern
     end
 
     # ------------------------------------------------------------ scheduling
@@ -356,8 +386,19 @@ module TermBuf
       scanner.feed bytes do |kind, chunk|
         # The scanner's slices point into its own buffer, which it reuses.
         copy = chunk.dup
-        emit(kind.response? ? Events::Response.new(copy) : Events::Input.new(copy))
+        emit(reply?(kind, copy) ? Events::Response.new(copy) : Events::Input.new(copy))
       end
+    end
+
+    # An escape sequence is a reply only if the application said it was
+    # expecting one shaped like that. Otherwise it is a key: an arrow sends
+    # `ESC [ A`, and nothing about those bytes says whether the terminal or a
+    # finger produced them.
+    private def reply?(kind : ResponseScanner::Kind, bytes : Bytes) : Bool
+      return false unless kind.sequence?
+      return false if @responses.empty?
+
+      @responses.matches? String.new(bytes)
     end
 
     private def emit(event : Event) : Nil

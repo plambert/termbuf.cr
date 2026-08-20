@@ -283,13 +283,51 @@ Spectator.describe TermBuf::Terminal do
       end
     end
 
-    it "delivers a terminal reply separately from keystrokes" do
+    it "delivers a registered reply as a response" do
       with_harness do |harness|
+        harness.terminal.expect_response "\e[", "R"
         harness.type "\e[3;4R"
         response = harness.event_of TermBuf::Events::Response
 
         fail "no response arrived" unless response
         expect(String.new(response.bytes)).to eq "\e[3;4R"
+      end
+    end
+
+    # An arrow key sends `ESC [ A`; so could a terminal. Nothing in the bytes
+    # says which, so what settles it is whether the application asked for a
+    # reply shaped like that. With nothing registered, it is a key.
+    it "delivers an escape sequence nobody asked for as a keystroke" do
+      with_harness do |harness|
+        harness.type "\e[A"
+        input = harness.event_of TermBuf::Events::Input
+
+        fail "no input arrived" unless input
+        expect(String.new(input.bytes)).to eq "\e[A"
+      end
+    end
+
+    it "delivers a sequence that does not match what was registered as input" do
+      with_harness do |harness|
+        harness.terminal.expect_response "\e[?", "$y"
+        harness.type "\e[A"
+        input = harness.event_of TermBuf::Events::Input
+
+        fail "no input arrived" unless input
+        expect(String.new(input.bytes)).to eq "\e[A"
+      end
+    end
+
+    it "stops treating a reply as one once it is forgotten" do
+      with_harness do |harness|
+        pattern = harness.terminal.expect_response "\e[", "R"
+        harness.terminal.forget_response pattern
+
+        harness.type "\e[3;4R"
+        input = harness.event_of TermBuf::Events::Input
+
+        fail "no input arrived" unless input
+        expect(String.new(input.bytes)).to eq "\e[3;4R"
       end
     end
 
@@ -514,5 +552,64 @@ Spectator.describe TermBuf::Tty do
     expect(written).to contain "\e[?1049l"
     expect(written).to contain "\e[?25l"
     expect(written).to contain "\e[?25h"
+  end
+end
+
+Spectator.describe TermBuf::ResponseRegistry do
+  subject(registry) { TermBuf::ResponseRegistry.new }
+
+  it "starts empty, so every sequence is a keystroke" do
+    expect(registry.empty?).to be_true
+    expect(registry.matches?("\e[A")).to be_false
+  end
+
+  it "matches on both ends" do
+    registry.register "\e[?", "$y"
+
+    expect(registry.matches?("\e[?2026;2$y")).to be_true
+    expect(registry.matches?("\e[?2026;2c")).to be_false
+    expect(registry.matches?("\e[2026$y")).to be_false
+  end
+
+  # The two ends have to fit without overlapping, or `"\e["` would match a
+  # pattern whose prefix and terminator are both `"\e["`.
+  it "needs room for both ends" do
+    registry.register "\e[", "R"
+    expect(registry.matches?("\e[R")).to be_true
+    expect(registry.matches?("\e[1;1R")).to be_true
+
+    registry.clear
+    registry.register "\e[", "\e["
+    expect(registry.matches?("\e[")).to be_false
+    expect(registry.matches?("\e[x\e[")).to be_true
+  end
+
+  it "registers a pattern once" do
+    registry.register "\e[", "R"
+    registry.register "\e[", "R"
+
+    expect(registry.size).to eq 1
+  end
+
+  it "matches any of several patterns" do
+    registry.register "\e[?", "$y"
+    registry.register "\eP", "\e\\"
+
+    expect(registry.matches?("\e[?2026;2$y")).to be_true
+    expect(registry.matches?("\eP>|ghostty\e\\")).to be_true
+    expect(registry.matches?("\e[A")).to be_false
+  end
+
+  it "forgets a pattern" do
+    pattern = registry.register "\e[", "R"
+    registry.unregister pattern
+
+    expect(registry.matches?("\e[1;1R")).to be_false
+    expect(registry.empty?).to be_true
+  end
+
+  it "refuses a pattern with an empty end" do
+    expect { TermBuf::ResponsePattern.new("", "R") }.to raise_error(ArgumentError)
+    expect { TermBuf::ResponsePattern.new("\e[", "") }.to raise_error(ArgumentError)
   end
 end

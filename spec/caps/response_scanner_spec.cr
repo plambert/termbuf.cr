@@ -29,11 +29,11 @@ end
 Spectator.describe TermBuf::ResponseScanner do
   describe "ordinary input" do
     it "passes plain text through" do
-      expect(scan("hello")).to eq [{Kind::Input, "hello"}]
+      expect(scan("hello")).to eq [{Kind::Text, "hello"}]
     end
 
     it "passes control characters through" do
-      expect(scan("\r\n\t")).to eq [{Kind::Input, "\r\n\t"}]
+      expect(scan("\r\n\t")).to eq [{Kind::Text, "\r\n\t"}]
     end
 
     it "yields nothing for nothing" do
@@ -43,77 +43,77 @@ Spectator.describe TermBuf::ResponseScanner do
 
   describe "control sequences" do
     it "recognises a cursor position report" do
-      expect(scan("\e[12;34R")).to eq [{Kind::Response, "\e[12;34R"}]
+      expect(scan("\e[12;34R")).to eq [{Kind::Sequence, "\e[12;34R"}]
     end
 
     it "recognises a sequence with private and intermediate bytes" do
-      expect(scan("\e[?2026;2$y")).to eq [{Kind::Response, "\e[?2026;2$y"}]
+      expect(scan("\e[?2026;2$y")).to eq [{Kind::Sequence, "\e[?2026;2$y"}]
     end
 
     it "recognises a device attributes reply" do
-      expect(scan("\e[?62;22c")).to eq [{Kind::Response, "\e[?62;22c"}]
+      expect(scan("\e[?62;22c")).to eq [{Kind::Sequence, "\e[?62;22c"}]
     end
 
     it "ends a sequence at its first final byte" do
-      expect(scan("\e[Ax")).to eq [{Kind::Response, "\e[A"}, {Kind::Input, "x"}]
+      expect(scan("\e[Ax")).to eq [{Kind::Sequence, "\e[A"}, {Kind::Text, "x"}]
     end
   end
 
   describe "string sequences" do
     it "recognises a device control string" do
       expect(scan("\eP>|kitty(0.32.2)\e\\"))
-        .to eq [{Kind::Response, "\eP>|kitty(0.32.2)\e\\"}]
+        .to eq [{Kind::Sequence, "\eP>|kitty(0.32.2)\e\\"}]
     end
 
     it "recognises an application programming command" do
-      expect(scan("\e_Gi=31;OK\e\\")).to eq [{Kind::Response, "\e_Gi=31;OK\e\\"}]
+      expect(scan("\e_Gi=31;OK\e\\")).to eq [{Kind::Sequence, "\e_Gi=31;OK\e\\"}]
     end
 
     it "recognises an operating system command ended by a string terminator" do
-      expect(scan("\e]11;rgb:1/2/3\e\\")).to eq [{Kind::Response, "\e]11;rgb:1/2/3\e\\"}]
+      expect(scan("\e]11;rgb:1/2/3\e\\")).to eq [{Kind::Sequence, "\e]11;rgb:1/2/3\e\\"}]
     end
 
     it "recognises an operating system command ended by a bell" do
-      expect(scan("\e]11;rgb:1/2/3\a")).to eq [{Kind::Response, "\e]11;rgb:1/2/3\a"}]
+      expect(scan("\e]11;rgb:1/2/3\a")).to eq [{Kind::Sequence, "\e]11;rgb:1/2/3\a"}]
     end
 
     it "does not end a device control string at a bell" do
-      expect(scan("\ePa\ab\e\\")).to eq [{Kind::Response, "\ePa\ab\e\\"}]
+      expect(scan("\ePa\ab\e\\")).to eq [{Kind::Sequence, "\ePa\ab\e\\"}]
     end
   end
 
   describe "short sequences" do
     it "recognises a single shift three key" do
-      expect(scan("\eOP")).to eq [{Kind::Response, "\eOP"}]
+      expect(scan("\eOP")).to eq [{Kind::Sequence, "\eOP"}]
     end
 
     it "recognises a two byte escape" do
-      expect(scan("\eM")).to eq [{Kind::Response, "\eM"}]
+      expect(scan("\eM")).to eq [{Kind::Sequence, "\eM"}]
     end
   end
 
   describe "mixed streams" do
     it "separates a reply from the keystrokes around it" do
       expect(scan("ab\e[3;4Rcd"))
-        .to eq [{Kind::Input, "ab"}, {Kind::Response, "\e[3;4R"}, {Kind::Input, "cd"}]
+        .to eq [{Kind::Text, "ab"}, {Kind::Sequence, "\e[3;4R"}, {Kind::Text, "cd"}]
     end
 
     it "handles several sequences back to back" do
       expect(scan("\e[?62c\e[?2026;2$y\e[1;1R")).to eq [
-        {Kind::Response, "\e[?62c"},
-        {Kind::Response, "\e[?2026;2$y"},
-        {Kind::Response, "\e[1;1R"},
+        {Kind::Sequence, "\e[?62c"},
+        {Kind::Sequence, "\e[?2026;2$y"},
+        {Kind::Sequence, "\e[1;1R"},
       ]
     end
   end
 
   describe "sequences split across reads" do
     it "waits for the rest of a control sequence" do
-      expect(scan("\e[12", ";34R")).to eq [{Kind::Response, "\e[12;34R"}]
+      expect(scan("\e[12", ";34R")).to eq [{Kind::Sequence, "\e[12;34R"}]
     end
 
     it "waits for the rest of a string sequence" do
-      expect(scan("\eP>|kit", "ty\e", "\\")).to eq [{Kind::Response, "\eP>|kitty\e\\"}]
+      expect(scan("\eP>|kit", "ty\e", "\\")).to eq [{Kind::Sequence, "\eP>|kitty\e\\"}]
     end
 
     it "waits when only the escape has arrived" do
@@ -130,7 +130,7 @@ Spectator.describe TermBuf::ResponseScanner do
     end
 
     it "yields input that arrived before an incomplete sequence" do
-      expect(scan("ab\e[")).to eq [{Kind::Input, "ab"}]
+      expect(scan("ab\e[")).to eq [{Kind::Text, "ab"}]
     end
   end
 
@@ -138,15 +138,15 @@ Spectator.describe TermBuf::ResponseScanner do
     # A timeout means the rest of the sequence is not coming. What was held
     # back was a lone escape key, or something the terminal never finished.
     it "hands back a partial sequence as ordinary input" do
-      expect(scan_and_flush("\e[12")).to eq [{Kind::Input, "\e[12"}]
+      expect(scan_and_flush("\e[12")).to eq [{Kind::Text, "\e[12"}]
     end
 
     it "hands back a lone escape as ordinary input" do
-      expect(scan_and_flush("\e")).to eq [{Kind::Input, "\e"}]
+      expect(scan_and_flush("\e")).to eq [{Kind::Text, "\e"}]
     end
 
     it "has nothing to hand back when everything was complete" do
-      expect(scan_and_flush("\e[1;1R")).to eq [{Kind::Response, "\e[1;1R"}]
+      expect(scan_and_flush("\e[1;1R")).to eq [{Kind::Sequence, "\e[1;1R"}]
     end
   end
 
@@ -157,7 +157,7 @@ Spectator.describe TermBuf::ResponseScanner do
       runaway = "\e[" + ("1;" * 800)
       result = scan(runaway)
 
-      expect(result.first[0]).to eq Kind::Input
+      expect(result.first[0]).to eq Kind::Text
       expect(result.first[1]).to eq "\e"
     end
   end
