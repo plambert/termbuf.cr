@@ -89,7 +89,27 @@ module TermBuf
 
     # Reads until the block reports the sentinel has arrived, or the deadline
     # passes. Whatever is still half-arrived at that point is treated as input.
+    #
+    # The read deadline is put back the way it was found. Leaving one behind
+    # would make every later read of that stream give up after a quarter of a
+    # second, which reads exactly like the terminal having gone away.
     private def collect(& : ResponseScanner::Kind, Bytes -> Bool) : Nil
+      input = @input
+
+      if input.responds_to?(:read_timeout=) && input.responds_to?(:read_timeout)
+        previous = input.read_timeout
+
+        begin
+          gather { |kind, bytes| yield kind, bytes }
+        ensure
+          input.read_timeout = previous
+        end
+      else
+        gather { |kind, bytes| yield kind, bytes }
+      end
+    end
+
+    private def gather(& : ResponseScanner::Kind, Bytes -> Bool) : Nil
       deadline = Time.instant + @timeout
       buffer = Bytes.new 4096
       done = false
