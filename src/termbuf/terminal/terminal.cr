@@ -29,6 +29,15 @@ module TermBuf
     # shallow enough to be backpressure rather than an unbounded queue.
     COMMAND_CAPACITY = 256
 
+    # How long to wait for the rest of an escape sequence before deciding
+    # there is no rest.
+    #
+    # The escape key sends one byte, and so does the start of every arrow key,
+    # so the two are indistinguishable until either more bytes arrive or
+    # enough time passes that none will. Long enough to cover a sequence split
+    # across two reads, short enough that pressing escape feels immediate.
+    ESCAPE_TIMEOUT = 25.milliseconds
+
     # Events waiting for the application. Once this fills, the reader stops
     # reading, which is the right way round: the terminal's own buffer then
     # applies backpressure to the keyboard rather than memory growing here.
@@ -53,6 +62,10 @@ module TermBuf
 
     getter? closed : Bool = false
     getter? started : Bool = false
+
+    # See `ESCAPE_TIMEOUT`. Worth raising over a slow link, where a sequence
+    # can take longer than that to arrive in full.
+    property escape_timeout : Time::Span = ESCAPE_TIMEOUT
 
     @buffer : Buffer
     @painter : Painter
@@ -369,9 +382,11 @@ module TermBuf
       deliver scanner, @pending_input unless @pending_input.empty?
 
       buffer = Bytes.new 4096
+      input = @tty.input
 
       loop do
-        count = @tty.input.read buffer
+        count = read_next input, buffer, scanner
+        next if count.nil?
         break if count.zero?
 
         deliver scanner, buffer[0, count]
@@ -382,12 +397,43 @@ module TermBuf
       emit Events::Closed.new
     end
 
-    private def deliver(scanner : ResponseScanner, bytes : Bytes) : Nil
-      scanner.feed bytes do |kind, chunk|
-        # The scanner's slices point into its own buffer, which it reuses.
-        copy = chunk.dup
-        emit(reply?(kind, copy) ? Events::Response.new(copy) : Events::Input.new(copy))
+    # Reads the next chunk. Returns the number of bytes, zero at end of input,
+    # or `nil` when the wait for the rest of a sequence ran out and what was
+    # held back has been handed over as ordinary keys.
+    #
+    # The deadline is only applied while a partial sequence is pending. The
+    # rest of the time the read blocks, which is what it should do: waking up
+    # every 25 milliseconds to find nothing is work nobody asked for.
+    private def read_next(input : IO, buffer : Bytes, scanner : ResponseScanner) : Int32?
+      return input.read buffer unless scanner.pending?
+      return input.read buffer unless input.responds_to? :read_timeout=
+
+      input.read_timeout = @escape_timeout
+
+      begin
+        input.read buffer
+      rescue IO::TimeoutError
+        flush scanner
+        nil
+      ensure
+        input.read_timeout = nil
       end
+    end
+
+    private def deliver(scanner : ResponseScanner, bytes : Bytes) : Nil
+      scanner.feed(bytes) { |kind, chunk| emit_chunk kind, chunk }
+    end
+
+    # Hands over whatever was being held back, which after a timeout is the
+    # escape key rather than the start of something longer.
+    private def flush(scanner : ResponseScanner) : Nil
+      scanner.flush { |kind, chunk| emit_chunk kind, chunk }
+    end
+
+    private def emit_chunk(kind : ResponseScanner::Kind, chunk : Bytes) : Nil
+      # The scanner's slices point into its own buffer, which it reuses.
+      copy = chunk.dup
+      emit(reply?(kind, copy) ? Events::Response.new(copy) : Events::Input.new(copy))
     end
 
     # An escape sequence is a reply only if the application said it was

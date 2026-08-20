@@ -340,6 +340,58 @@ Spectator.describe TermBuf::Terminal do
       end
     end
 
+    # The escape key sends one byte, and so does the start of every arrow key.
+    # Only time separates them, so a lone escape has to be handed over once
+    # enough of it has passed that no more is coming.
+    it "delivers the escape key on its own" do
+      with_harness do |harness|
+        harness.terminal.escape_timeout = 30.milliseconds
+        harness.type "\e"
+        input = harness.event_of TermBuf::Events::Input
+
+        fail "the escape key never arrived" unless input
+        expect(String.new(input.bytes)).to eq "\e"
+      end
+    end
+
+    it "delivers two escape presses as two keys" do
+      with_harness do |harness|
+        harness.terminal.escape_timeout = 30.milliseconds
+        harness.type "\e\e"
+
+        first = harness.event_of TermBuf::Events::Input
+        second = harness.event_of TermBuf::Events::Input
+
+        fail "expected two keys" unless first && second
+        expect(String.new(first.bytes)).to eq "\e"
+        expect(String.new(second.bytes)).to eq "\e"
+      end
+    end
+
+    it "still waits for the rest of a sequence that is on its way" do
+      with_harness do |harness|
+        harness.terminal.escape_timeout = 500.milliseconds
+        harness.type "\e"
+        sleep 20.milliseconds
+        harness.type "[A"
+
+        input = harness.event_of TermBuf::Events::Input
+        fail "no key arrived" unless input
+        expect(String.new(input.bytes)).to eq "\e[A"
+      end
+    end
+
+    it "keeps an escape that begins an alt combination whole" do
+      with_harness do |harness|
+        harness.terminal.escape_timeout = 500.milliseconds
+        harness.type "\ea"
+
+        input = harness.event_of TermBuf::Events::Input
+        fail "no key arrived" unless input
+        expect(String.new(input.bytes)).to eq "\ea"
+      end
+    end
+
     it "says so when input ends" do
       harness = Harness.new
       harness.keyboard.close

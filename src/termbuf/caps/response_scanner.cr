@@ -60,6 +60,11 @@ module TermBuf
       @buffer.to_slice.dup
     end
 
+    # Whether anything is being held back, without copying it out.
+    def pending? : Bool
+      @buffer.bytesize > 0
+    end
+
     # Discards anything held back.
     def clear : Nil
       @buffer.clear
@@ -87,6 +92,13 @@ module TermBuf
 
         yield Kind::Text, data[0, length]
         return length
+      end
+
+      # An escape followed by another escape is two presses of the escape key,
+      # not a two byte sequence. Nothing else starts with two of them.
+      if data.size > 1 && data[1] == ESC
+        yield Kind::Text, data[0, 1]
+        return 1
       end
 
       length = sequence_length data

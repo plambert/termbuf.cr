@@ -90,6 +90,13 @@ Spectator.describe TermBuf::ResponseScanner do
     it "recognises a two byte escape" do
       expect(scan("\eM")).to eq [{Kind::Sequence, "\eM"}]
     end
+
+    # Two escapes are two presses of the escape key. Reading them as one two
+    # byte sequence is how a pair of them turns into a single event.
+    it "does not join two escapes into one sequence" do
+      expect(scan("\e\e")).to eq [{Kind::Text, "\e"}]
+      expect(scan("\e\e[A")).to eq [{Kind::Text, "\e"}, {Kind::Sequence, "\e[A"}]
+    end
   end
 
   describe "mixed streams" do
@@ -118,6 +125,16 @@ Spectator.describe TermBuf::ResponseScanner do
 
     it "waits when only the escape has arrived" do
       expect(scan("\e")).to be_empty
+    end
+
+    it "reports whether it is holding anything back" do
+      scanner = TermBuf::ResponseScanner.new
+
+      expect(scanner.pending?).to be_false
+      scanner.feed("\e[".to_slice) { }
+      expect(scanner.pending?).to be_true
+      scanner.feed("A".to_slice) { }
+      expect(scanner.pending?).to be_false
     end
 
     it "holds a partial sequence back rather than guessing" do
