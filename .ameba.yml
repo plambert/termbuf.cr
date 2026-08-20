@@ -1,0 +1,18 @@
+# global ameba configuration
+
+Metrics/CyclomaticComplexity:
+  Enabled: true
+  MaxComplexity: 12
+
+Naming/BlockParameterName:
+  Enabled: true
+  MinNameLength: 3
+  AllowNamesEndingInNumbers: true
+  AllowedNames: [a, b, db, ex, id, io, ip, op, rs, tx, wg, ws]
+  ForbiddenNames: []
+
+Style/VerboseNilType:
+  Enabled: false
+
+Lint/ElseNil:
+  Enabled: false
