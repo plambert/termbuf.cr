@@ -32,6 +32,7 @@ module TermBuf
     record Closed
   end
 
+  # Anything the terminal has to say, in the order it happened.
   alias Event = Events::Resize | Events::Input | Events::Response |
                 Events::Warning | Events::Failure | Events::Closed
 end

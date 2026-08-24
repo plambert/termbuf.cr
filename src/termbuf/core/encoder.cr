@@ -18,11 +18,14 @@ module TermBuf
   class Encoder
     CSI = "\e["
 
+    # What the terminal can do. Colours and attributes outside this are
+    # downgraded or dropped rather than emitted.
     getter capabilities : Capabilities
 
     # Where the terminal's cursor is, or `nil` when it is not known and the
     # next move has to be absolute.
     getter cursor_x : Int32?
+    # :ditto:
     getter cursor_y : Int32?
 
     @styles : StyleTable
@@ -54,6 +57,8 @@ module TermBuf
       @current = nil
     end
 
+    # Tells the encoder the screen changed size, and forgets where the cursor
+    # was.
     def resize(width : Int32, height : Int32) : Nil
       @width = width
       @height = height
@@ -70,10 +75,12 @@ module TermBuf
       capabilities
     end
 
+    # Encodes *ops* and returns the bytes.
     def encode(ops : Array(Op)) : String
       String.build { |io| encode ops, io }
     end
 
+    # Encodes *ops* straight to *io*.
     def encode(ops : Array(Op), io : IO) : Nil
       ops.each { |op| encode_one op, io }
     end
@@ -234,6 +241,8 @@ module TermBuf
 
     # --------------------------------------------------------------- style
 
+    # Emits whatever SGR takes the terminal from the style it is in to *id*,
+    # after capabilities have had their say. Nothing at all when they match.
     def set_style(id : StyleId, io : IO) : Nil
       target = effective id
       return if @current == target

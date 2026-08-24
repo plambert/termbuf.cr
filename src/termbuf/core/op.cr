@@ -23,6 +23,7 @@ module TermBuf
     # Write *text* at the cursor, covering *columns* cells.
     record PutText, text : String, columns : Int32
 
+    # How far an erase reaches from the cursor.
     enum EraseMode
       # From the cursor to the end of the line.
       ToEnd
@@ -64,10 +65,13 @@ module TermBuf
     # scrolling hazard rather than special-casing it.
     record SetAutowrap, enabled : Bool
 
+    # Show or hide the terminal's own cursor.
     record SetCursorVisible, visible : Bool
 
     # Bracket the paint so the terminal shows the whole frame or none of it.
     record BeginSync
+
+    # Close the frame, letting the terminal show it.
     record EndSync
 
     # Bytes to pass through untouched. Leaves the encoder's idea of the cursor
@@ -75,6 +79,7 @@ module TermBuf
     record Raw, bytes : Bytes
   end
 
+  # One instruction for the encoder, as the painter emits them.
   alias Op = Ops::MoveTo | Ops::SetStyle | Ops::PutText | Ops::EraseInLine |
              Ops::EraseChars | Ops::SetScrollRegion | Ops::ResetScrollRegion |
              Ops::ScrollUp | Ops::ScrollDown | Ops::InsertLines | Ops::DeleteLines |

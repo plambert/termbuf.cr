@@ -21,6 +21,7 @@ module TermBuf
     # not to be noticed when nothing answers.
     DEFAULT_TIMEOUT = 250.milliseconds
 
+    # What the terminal said, and what arrived while it was saying it.
     record Result,
       capabilities : Capabilities,
       # Keystrokes that arrived during the probe window.
@@ -32,6 +33,7 @@ module TermBuf
       # Where the cursor was, which the sentinel reports for free.
       cursor : {Int32, Int32}?
 
+    # How long to wait for the sentinel before giving up on the batch.
     getter timeout : Time::Span
 
     def initialize(@input : IO, @output : IO, @timeout : Time::Span = DEFAULT_TIMEOUT)

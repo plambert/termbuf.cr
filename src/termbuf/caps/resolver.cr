@@ -19,6 +19,7 @@ module TermBuf
   module CapabilityResolver
     extend self
 
+    # What the four stages settled on, plus what turned up along the way.
     record Result,
       capabilities : Capabilities,
       # Keystrokes that arrived while probing, to be handed to the decoder
@@ -30,8 +31,11 @@ module TermBuf
       warnings : Array(String),
       # What the terminal called itself, when it was asked and answered.
       name : String?,
+      # Whether the terminal answered anything at all.
       probed : Bool
 
+    # Runs the four stages. Probes only when both *input* and *output* are
+    # given.
     def resolve(env : Hash(String, String) = ENV.to_h,
                 input : IO? = nil,
                 output : IO? = nil,

@@ -34,11 +34,15 @@ module TermBuf
     # write spaces over.
     ERASE_THRESHOLD = 4
 
+    # What the terminal can do, which decides whether a scroll or an erase is
+    # available at all.
     getter capabilities : Capabilities
 
     def initialize(@capabilities : Capabilities)
     end
 
+    # Changes what the painter may use. The next paint should be forced, since
+    # what is on the terminal was drawn under the old mask.
     def capabilities=(capabilities : Capabilities) : Capabilities
       @capabilities = capabilities
     end

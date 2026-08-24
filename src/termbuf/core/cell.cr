@@ -19,6 +19,7 @@ module TermBuf
     # `ClusterPool::NONE` when `char` says everything.
     getter cluster : UInt32
 
+    # Id into the buffer's `StyleTable`.
     getter style : StyleId
 
     # Cells this character occupies: zero for a continuation, one for a narrow
@@ -42,10 +43,12 @@ module TermBuf
       new '\0', style, 0_u8
     end
 
+    # Whether this is the right half of a wide character.
     def continuation? : Bool
       @width.zero?
     end
 
+    # Whether this is the left half of a wide character.
     def wide? : Bool
       @width == 2
     end

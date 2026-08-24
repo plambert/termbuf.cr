@@ -54,6 +54,10 @@ module TermBuf::Unicode
       Linked    # a consonant followed by at least one linker
     end
 
+    # A fresh breaker, positioned before the first character of a string.
+    def initialize
+    end
+
     @started = false
     @previous = Tables::Gcb::Other
     @regional_run = 0

@@ -52,6 +52,7 @@ module TermBuf
       @styles.size
     end
 
+    # Yields every interned style with its id, in the order they were added.
     def each(& : StyleId, Style ->) : Nil
       @styles.each_with_index { |style, index| yield index.to_u32, style }
     end
@@ -88,10 +89,12 @@ module TermBuf
       @texts[id]
     end
 
+    # The cluster *id* refers to, or `nil` for `NONE`.
     def []?(id : UInt32) : String?
       @texts[id]?
     end
 
+    # How many clusters have been interned.
     def size : Int32
       @texts.size
     end

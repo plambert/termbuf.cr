@@ -18,6 +18,7 @@ module TermBuf
       raise ArgumentError.new "a response pattern needs a terminator" if @terminator.empty?
     end
 
+    # Whether *sequence* has this pattern's prefix and terminator.
     def matches?(sequence : String) : Bool
       return false if sequence.bytesize < @prefix.bytesize + @terminator.bytesize
 
@@ -45,6 +46,7 @@ module TermBuf
       @patterns = [] of ResponsePattern
     end
 
+    # Starts expecting *pattern*. Registering the same one twice is harmless.
     def register(pattern : ResponsePattern) : ResponsePattern
       @mutex.synchronize do
         @patterns = @patterns.dup << pattern unless @patterns.includes? pattern
@@ -53,14 +55,17 @@ module TermBuf
       pattern
     end
 
+    # :ditto:
     def register(prefix : String, terminator : String) : ResponsePattern
       register ResponsePattern.new(prefix, terminator)
     end
 
+    # Stops expecting *pattern*.
     def unregister(pattern : ResponsePattern) : Nil
       @mutex.synchronize { @patterns = @patterns.reject pattern }
     end
 
+    # Stops expecting anything.
     def clear : Nil
       @mutex.synchronize { @patterns = [] of ResponsePattern }
     end
@@ -76,10 +81,12 @@ module TermBuf
       patterns.any? &.matches?(sequence)
     end
 
+    # Whether nothing is expected, in which case every sequence is input.
     def empty? : Bool
       @patterns.empty?
     end
 
+    # How many patterns are registered.
     def size : Int32
       @patterns.size
     end

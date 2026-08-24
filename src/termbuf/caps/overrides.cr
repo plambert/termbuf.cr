@@ -22,12 +22,16 @@ module TermBuf
     # The variable itself, deliberately not application specific.
     VARIABLE = "TERMBUF_CAPS"
 
+    # What the variable asked for, and anything in it that made no sense.
     record Result, capabilities : Capabilities, warnings : Array(String)
 
+    # Applies `VARIABLE` from *env* to *base*.
     def apply(base : Capabilities, env : Hash(String, String)) : Result
       apply base, env[VARIABLE]?
     end
 
+    # Applies a `+name,-name` list to *base*. A `nil` or empty *spec* changes
+    # nothing.
     def apply(base : Capabilities, spec : String?) : Result
       warnings = [] of String
       return Result.new base, warnings if spec.nil? || spec.blank?

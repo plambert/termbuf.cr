@@ -44,6 +44,8 @@ module TermBuf
     # applies backpressure to the keyboard rather than memory growing here.
     EVENT_CAPACITY = 256
 
+    # What the terminal was found to be able to do. The encoder emits nothing
+    # that is not in here.
     getter capabilities : Capabilities
 
     # How big the terminal was when it was last looked at. Updated by the
@@ -53,6 +55,7 @@ module TermBuf
     # Everything the terminal has to say, in the order it happened.
     getter events : Channel(Event)
 
+    # The device underneath, for anything the driver does not wrap.
     getter tty : Tty
 
     # The replies the application is waiting for. Anything arriving from the
@@ -61,18 +64,22 @@ module TermBuf
     # key someone pressed.
     getter responses : ResponseRegistry
 
+    # Whether the terminal has been given back.
     getter? closed : Bool = false
+
+    # Whether the owning fibre is running.
     getter? started : Bool = false
 
     # See `ESCAPE_TIMEOUT`. Worth raising over a slow link, where a sequence
     # can take longer than that to arrive in full.
     property escape_timeout : Time::Span = ESCAPE_TIMEOUT
 
-    # How many bytes the last paint sent, and how many every paint has sent
-    # between them. The point of the buffer is that a frame costs a diff
-    # rather than a screenful, and this is how an application checks that it
-    # is getting one.
+    # How many bytes the last paint sent. The point of the buffer is that a
+    # frame costs a diff rather than a screenful, and this is how an
+    # application checks that it is getting one.
     getter last_paint_bytes : Int32 = 0
+
+    # How many bytes every paint has sent between them.
     getter total_paint_bytes : Int64 = 0
 
     @buffer : Buffer
@@ -134,6 +141,7 @@ module TermBuf
       terminal
     end
 
+    # Opens a terminal, yields it, and closes it however the block ends.
     def self.open(input : IO = STDIN, output : IO = STDOUT,
                   env : Hash(String, String) = ENV.to_h,
                   probe : Bool = true, & : Terminal ->) : Nil
@@ -215,6 +223,7 @@ module TermBuf
       @responses.register prefix, terminator
     end
 
+    # Stops expecting *pattern*, so sequences matching it are input again.
     def forget_response(pattern : ResponsePattern) : Nil
       @responses.unregister pattern
     end
@@ -244,11 +253,13 @@ module TermBuf
       end
     end
 
+    # Stops the scheduler. Explicit paints keep working.
     def stop_frame_scheduler : Nil
       @scheduling = false
       @scheduler = nil
     end
 
+    # Whether the frame scheduler is running.
     def scheduling? : Bool
       @scheduling
     end

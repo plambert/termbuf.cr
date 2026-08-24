@@ -37,14 +37,20 @@ module TermBuf
   # interns them, which is what lets a `Cell` carry a four byte id instead of
   # this whole struct.
   struct Style
+    # Text colour.
     getter foreground : Color
+
+    # Cell colour behind the text.
     getter background : Color
 
     # Colour of the underline, when the terminal supports colouring it
     # separately from the text.
     getter underline_color : Color
 
+    # Everything a cell can be at once.
     getter attributes : Attributes
+
+    # Which of the underline styles, if any.
     getter underline : Underline
 
     # OSC 8 hyperlink id, or zero for no link. Populated once link support
@@ -62,6 +68,7 @@ module TermBuf
     # The style a freshly cleared terminal is in.
     DEFAULT = new
 
+    # Whether this is the untouched style, which needs no escape sequence.
     def default? : Bool
       self == DEFAULT
     end
@@ -76,18 +83,24 @@ module TermBuf
       Style.new foreground, background, underline_color, attributes, underline, link
     end
 
+    # A copy with a different text colour.
     def fg(color : Color) : Style
       copy_with foreground: color
     end
 
+    # A copy with a different background.
     def bg(color : Color) : Style
       copy_with background: color
     end
 
+    # A copy carrying an underline. Terminals without `ExtendedUnderline`
+    # render every style as a plain one, and without `UnderlineColor` ignore
+    # *color*.
     def underlined(style : Underline = Underline::Single, color : Color = @underline_color) : Style
       copy_with underline: style, underline_color: color
     end
 
+    # A copy carrying OSC 8 link *id*. Zero means no link.
     def linked(id : UInt32) : Style
       copy_with link: id
     end
@@ -102,34 +115,42 @@ module TermBuf
       copy_with attributes: @attributes & ~flags
     end
 
+    # A copy with the bold attribute set.
     def bold : Style
       self.with Attributes::Bold
     end
 
+    # A copy with the faint attribute set.
     def faint : Style
       self.with Attributes::Faint
     end
 
+    # A copy with the italic attribute set.
     def italic : Style
       self.with Attributes::Italic
     end
 
+    # A copy with foreground and background swapped by the terminal.
     def reverse : Style
       self.with Attributes::Reverse
     end
 
+    # A copy with the strike-through attribute set.
     def strike : Style
       self.with Attributes::Strike
     end
 
+    # A copy the terminal renders as blanks.
     def conceal : Style
       self.with Attributes::Conceal
     end
 
+    # A copy that blinks, slowly unless *rapid*.
     def blink(rapid : Bool = false) : Style
       self.with rapid ? Attributes::RapidBlink : Attributes::SlowBlink
     end
 
+    # Whether every attribute in *flags* is set.
     def has?(flags : Attributes) : Bool
       @attributes.includes? flags
     end

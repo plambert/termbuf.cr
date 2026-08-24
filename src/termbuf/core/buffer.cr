@@ -9,6 +9,7 @@ module TermBuf
   # row hashes. The painter still verifies a hint against those hashes before
   # trusting it.
   struct ScrollHint
+    # The rows that moved.
     getter rect : Rect
 
     # Rows scrolled, positive meaning content moved up.
@@ -36,7 +37,10 @@ module TermBuf
   # Not fibre-safe, and deliberately so: one fibre owns the buffer and every
   # mutation reaches it as a command.
   class Buffer
+    # Columns across.
     getter width : Int32
+
+    # Rows down.
     getter height : Int32
 
     # What the application has drawn.
@@ -45,8 +49,13 @@ module TermBuf
     # What the terminal is believed to be showing.
     getter front : Grid
 
+    # The interned styles both grids refer to by id.
     getter styles : StyleTable
+
+    # The interned multi code point clusters, for cells a `Char` cannot hold.
     getter clusters : ClusterPool
+
+    # Regions declared with `#region`, in the order they were made.
     getter regions : Array(Region)
 
     # Scrolls performed since the last paint, oldest first.
@@ -61,6 +70,7 @@ module TermBuf
       @scroll_hints = [] of ScrollHint
     end
 
+    # The rectangle covering every cell.
     def bounds : Rect
       Rect.full @width, @height
     end
@@ -70,6 +80,7 @@ module TermBuf
       @back.damage
     end
 
+    # Whether anything has changed since the last paint.
     def dirty? : Bool
       @back.damage.dirty? || !@scroll_hints.empty?
     end
@@ -83,6 +94,8 @@ module TermBuf
       created
     end
 
+    # Declares a region over *bounds*, keeping up to *scrollback* rows of what
+    # scrolls off the top.
     def region(bounds : Rect, scrollback : Int32 = 0) : Region
       created = Region.new bounds, scrollback
       @regions << created
@@ -140,6 +153,7 @@ module TermBuf
 
     # ------------------------------------------------------------- clearing
 
+    # Sets every cell of *rect* to *char*.
     def fill(rect : Rect, char : Char = ' ', style : Style = Style::DEFAULT) : Nil
       columns = Unicode.char_width char
       raise ArgumentError.new "cannot fill with a zero width character" if columns.zero?
@@ -149,6 +163,7 @@ module TermBuf
       @back.fill rect, Cell.new(char, style_id, 1_u8)
     end
 
+    # Blanks every cell.
     def clear(style : Style = Style::DEFAULT) : Nil
       fill bounds, ' ', style
     end

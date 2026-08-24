@@ -78,6 +78,7 @@ module TermBuf
   # broader capability implies the narrower ones. The encoder relies on that,
   # and checks only the capability it is about to use.
   struct Capabilities
+    # The mask itself, already normalized.
     getter flags : Capability
 
     def initialize(flags : Capability = Capability::None)
@@ -94,10 +95,13 @@ module TermBuf
       flags
     end
 
+    # Whether every capability in *capability* is present.
     def includes?(capability : Capability) : Bool
       @flags.includes? capability
     end
 
+    # Adds a capability along with everything it implies, so that setting
+    # `TrueColor` also sets `Color256` and `Color16`.
     def with(capability : Capability) : Capabilities
       Capabilities.new @flags | capability
     end

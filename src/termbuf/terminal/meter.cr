@@ -11,15 +11,18 @@ module TermBuf
     def initialize(@io : IO)
     end
 
+    # Counts *slice* and passes it on.
     def write(slice : Bytes) : Nil
       @bytes += slice.size
       @io.write slice
     end
 
+    # Always raises. A meter sits on the way out only.
     def read(slice : Bytes) : Int32
       raise IO::Error.new "a paint meter is write only"
     end
 
+    # Flushes the stream underneath.
     def flush : Nil
       @io.flush
     end

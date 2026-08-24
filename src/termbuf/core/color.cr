@@ -7,6 +7,7 @@ module TermBuf
   # mask — so raising the mask and repainting yields better colour with no
   # information lost along the way.
   struct Color
+    # Which of the three things a colour can be.
     enum Kind : UInt8
       # The terminal's own default, which the application does not control.
       Default
@@ -65,18 +66,22 @@ module TermBuf
       rgb (value >> 16) & 0xFF, (value >> 8) & 0xFF, value & 0xFF
     end
 
+    # Which of `Kind` this colour is.
     def kind : Kind
       Kind.new (@packed >> 24).to_u8
     end
 
+    # Whether this is the terminal's own default colour.
     def default? : Bool
       kind.default?
     end
 
+    # Whether this is a palette index.
     def indexed? : Bool
       kind.indexed?
     end
 
+    # Whether this is a 24 bit colour.
     def rgb? : Bool
       kind.rgb?
     end
@@ -86,14 +91,18 @@ module TermBuf
       (@packed & 0xFF).to_i
     end
 
+    # Red channel, meaningful only for an `Rgb` colour. `channels` resolves a
+    # palette index instead.
     def red : Int32
       ((@packed >> 16) & 0xFF).to_i
     end
 
+    # :ditto:
     def green : Int32
       ((@packed >> 8) & 0xFF).to_i
     end
 
+    # :ditto:
     def blue : Int32
       (@packed & 0xFF).to_i
     end
@@ -220,6 +229,7 @@ module TermBuf
       end
     end
 
+    # The eight basic system colours, by palette index.
     BLACK   = indexed 0
     RED     = indexed 1
     GREEN   = indexed 2
@@ -229,6 +239,8 @@ module TermBuf
     CYAN    = indexed 6
     WHITE   = indexed 7
 
+    # Their bright counterparts, which need `Capability::BrightColors` to come
+    # out bright rather than dim.
     BRIGHT_BLACK   = indexed 8
     BRIGHT_RED     = indexed 9
     BRIGHT_GREEN   = indexed 10

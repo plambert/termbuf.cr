@@ -14,7 +14,10 @@ module TermBuf
   # spec — the mode changes are skipped and the escape sequences still go out,
   # which is what makes the whole driver testable without a device.
   class Tty
+    # Where keystrokes and replies come from.
     getter input : IO
+
+    # Where escape sequences go.
     getter output : IO
 
     # Whether this is a terminal whose modes are worth changing.
@@ -104,10 +107,12 @@ module TermBuf
       restore_modes
     end
 
+    # Writes straight to the device, bypassing the buffer.
     def write(text : String) : Nil
       @output << text
     end
 
+    # Pushes whatever is buffered out to the device.
     def flush : Nil
       @output.flush
     end
@@ -155,6 +160,8 @@ module TermBuf
       @raw = true
     end
 
+    # Puts the line discipline back the way it was found. Idempotent, and safe
+    # to call when raw mode was never entered.
     def restore_modes : Nil
       fd = @input_fd
       saved = @saved

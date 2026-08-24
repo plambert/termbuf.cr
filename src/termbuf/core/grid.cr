@@ -14,8 +14,13 @@ module TermBuf
   # and it never lets those two get out of step: writing to either half blanks
   # both first.
   class Grid
+    # Columns across.
     getter width : Int32
+
+    # Rows down.
     getter height : Int32
+
+    # Which rows have changed, and over what span.
     getter damage : Damage
 
     @cells : Slice(Cell)
@@ -32,10 +37,12 @@ module TermBuf
       @damage = Damage.new @height
     end
 
+    # The cell at (*x*, *y*). Raises if it is off the grid.
     def [](x : Int32, y : Int32) : Cell
       @cells[y * @width + x]
     end
 
+    # The cell at (*x*, *y*), or `nil` if it is off the grid.
     def []?(x : Int32, y : Int32) : Cell?
       return unless contains? x, y
 
@@ -56,10 +63,12 @@ module TermBuf
       @damage.touch x, y
     end
 
+    # Whether (*x*, *y*) is on the grid.
     def contains?(x : Int32, y : Int32) : Bool
       0 <= x < @width && 0 <= y < @height
     end
 
+    # The rectangle covering every cell.
     def bounds : Rect
       Rect.full @width, @height
     end
@@ -109,6 +118,7 @@ module TermBuf
       end
     end
 
+    # Sets every cell of *rect* to *cell*.
     def fill(rect : Rect, cell : Cell) : Nil
       area = rect.intersect bounds
       return if area.empty?
@@ -123,6 +133,7 @@ module TermBuf
       end
     end
 
+    # Sets every cell of the grid to *cell*.
     def clear(cell : Cell = Cell.blank) : Nil
       fill bounds, cell
     end
@@ -240,6 +251,8 @@ module TermBuf
       @damage.clear
     end
 
+    # Whether both grids hold the same cells. Damage is not compared: it says
+    # what has yet to be painted, not what is on the screen.
     def ==(other : Grid) : Bool
       return false unless other.width == @width && other.height == @height
 

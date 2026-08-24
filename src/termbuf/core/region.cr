@@ -10,6 +10,7 @@ module TermBuf
   # rows of history, so a log pane gets scrollback without the application
   # reimplementing it.
   class Region
+    # The rectangle the region covers.
     getter bounds : Rect
 
     # How many scrolled-off rows to keep. Zero discards them.
@@ -33,6 +34,7 @@ module TermBuf
     # top, and so on.
     getter view_offset : Int32
 
+    # Scrolls the view back by *value* rows, clamped to what scrollback holds.
     def view_offset=(value : Int32) : Int32
       @view_offset = value.clamp 0, @scrollback.size
     end
@@ -66,6 +68,7 @@ module TermBuf
       @scrollback[@scrollback.size - distance]
     end
 
+    # Throws away the history and returns the view to the live rows.
     def clear_scrollback : Nil
       @scrollback.clear
       @view_offset = 0

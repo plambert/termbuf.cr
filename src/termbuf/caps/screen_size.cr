@@ -1,4 +1,7 @@
 lib LibC
+  # What `TIOCGWINSZ` fills in. Named for the shard because Crystal's own
+  # `LibC` does not bind it on every platform, and a clashing definition would
+  # not compile.
   struct TermBufWinsize
     ws_row : UShort
     ws_col : UShort
@@ -12,7 +15,10 @@ end
 module TermBuf
   # How many cells the terminal is showing.
   struct ScreenSize
+    # Cells across.
     getter columns : Int32
+
+    # Cells down.
     getter rows : Int32
 
     def initialize(@columns : Int32, @rows : Int32)

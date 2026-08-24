@@ -80,6 +80,8 @@ module TermBuf
     THROUGH_MULTIPLEXER = KITTY_EXTRAS | Capability::KittyGraphicsTempFile |
                           Capability::SynchronizedOutput
 
+    # Guesses from `TERM`, `TERM_PROGRAM`, `COLORTERM`, `VTE_VERSION`, and the
+    # marker variables terminals set for themselves.
     def detect(env : Hash(String, String)) : Capabilities
       # A terminal that says it is dumb is taken at its word. Nothing else in
       # the environment gets a say, since anything that follows would only be

@@ -7,6 +7,7 @@ module TermBuf
   # three characters should not cost a full row of output. The row count lets
   # `#any?` answer without scanning, so a paint with nothing to do is free.
   class Damage
+    # How many rows are tracked.
     getter height : Int32
 
     # Number of rows carrying a span.
@@ -59,6 +60,7 @@ module TermBuf
       @min[y]..@max[y]
     end
 
+    # Whether row *y* has changed.
     def dirty?(y : Int32) : Bool
       0 <= y < @height && @min[y] <= @max[y]
     end
@@ -79,6 +81,7 @@ module TermBuf
       end
     end
 
+    # Marks every row clean.
     def clear : Nil
       return unless dirty?
 
