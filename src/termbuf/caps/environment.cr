@@ -17,11 +17,24 @@ module TermBuf
     KITTY_EXTRAS = Capability::KittyGraphics | Capability::KittyKeyboard |
                    Capability::KittyColorStack
 
+    # Blinking text, which some current terminals parse and then ignore.
+    #
+    # There is no query for this and terminfo is no help: ghostty's own entry
+    # declares `blink=\E[5m` and nothing on screen blinks. An attribute that
+    # is inert rather than harmful is exactly the kind nobody bothers to
+    # report accurately, so the only evidence is having looked.
+    BLINKING = Capability::Blink | Capability::RapidBlink
+
+    # A current terminal that does not blink. `Capabilities.normalize` drops
+    # the rapid variant along with the slow one, so taking both off here is
+    # belt and braces.
+    GHOSTTY = (Capabilities::MODERN.flags | KITTY_EXTRAS) & ~BLINKING
+
     # Matched against `TERM`, most specific first.
     TERM_PATTERNS = [
       {/\Adumb/, Capability::None},
       {/kitty/, Capabilities::MODERN.flags | KITTY_EXTRAS},
-      {/ghostty/, Capabilities::MODERN.flags | KITTY_EXTRAS},
+      {/ghostty/, GHOSTTY},
       {/wezterm/, Capabilities::MODERN.flags | Capability::KittyGraphics},
       {/alacritty/, Capabilities::MODERN.flags},
       {/\Afoot/, Capabilities::MODERN.flags},
@@ -38,7 +51,7 @@ module TermBuf
     # Matched against `TERM_PROGRAM`. These beat the `TERM` guess, since the
     # terminal names itself here rather than naming its terminfo entry.
     PROGRAM_PATTERNS = [
-      {"ghostty", Capabilities::MODERN.flags | KITTY_EXTRAS},
+      {"ghostty", GHOSTTY},
       {"WezTerm", Capabilities::MODERN.flags | Capability::KittyGraphics},
       {"iTerm.app", Capabilities::MODERN.flags},
       {"vscode", Capabilities::MODERN.flags},
@@ -52,7 +65,7 @@ module TermBuf
     # Set by a terminal that has no `TERM_PROGRAM` of its own.
     MARKER_VARIABLES = [
       {"KITTY_WINDOW_ID", Capabilities::MODERN.flags | KITTY_EXTRAS},
-      {"GHOSTTY_RESOURCES_DIR", Capabilities::MODERN.flags | KITTY_EXTRAS},
+      {"GHOSTTY_RESOURCES_DIR", GHOSTTY},
       {"WEZTERM_PANE", Capabilities::MODERN.flags | Capability::KittyGraphics},
       {"WEZTERM_EXECUTABLE", Capabilities::MODERN.flags | Capability::KittyGraphics},
       {"ALACRITTY_WINDOW_ID", Capabilities::MODERN.flags},
@@ -79,10 +92,31 @@ module TermBuf
       flags |= from_colorterm env
       flags |= from_vte env
 
+      flags &= ~denied(env)
       flags &= ~THROUGH_MULTIPLEXER if multiplexed? env
       flags = strip_color flags if no_color? env
 
       Capabilities.new flags
+    end
+
+    # Capabilities *name* is known not to have, whatever else in the
+    # environment implies one.
+    #
+    # This is separate from the pattern tables because composition is
+    # additive: under ghostty with a `TERM` of `xterm-256color`, the xterm
+    # entry would put blink back after the ghostty entry left it out. A name
+    # that identifies the terminal outranks one that only describes a family.
+    def denials(name : String?) : Capability
+      return Capability::None unless name
+
+      name.downcase.includes?("ghostty") ? BLINKING : Capability::None
+    end
+
+    private def denied(env : Hash(String, String)) : Capability
+      flags = denials(env["TERM"]?) | denials(env["TERM_PROGRAM"]?)
+      # The marker variable names the terminal as surely as `TERM` does.
+      flags |= BLINKING if present? env, "GHOSTTY_RESOURCES_DIR"
+      flags
     end
 
     private def dumb?(env : Hash(String, String)) : Bool

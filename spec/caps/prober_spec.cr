@@ -87,6 +87,14 @@ Spectator.describe TermBuf::Prober do
       expect(result.capabilities.includes?(Cap::SynchronizedOutput)).to be_true
     end
 
+    it "takes blinking back off when the terminal names itself" do
+      # The environment said xterm, which blinks; XTVERSION said ghostty,
+      # which does not, and the terminal naming itself is the better evidence.
+      result, _ = probe GHOSTTY, base: TermBuf::Capabilities::XTERM
+
+      expect(result.capabilities.includes?(Cap::Blink)).to be_false
+    end
+
     it "records which queries came back" do
       result, _ = probe GHOSTTY
 

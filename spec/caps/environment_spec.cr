@@ -69,6 +69,33 @@ Spectator.describe TermBuf::EnvironmentDetector do
       expect(caps.includes?(Cap::KittyGraphics)).to be_true
     end
 
+    it "leaves blinking off a terminal that does not blink" do
+      # Ghostty's own terminfo entry declares `blink`, and nothing on screen
+      # blinks. Nothing can be asked about this, so the name is all there is.
+      caps = detect({"TERM" => "xterm-ghostty"})
+
+      expect(caps.includes?(Cap::Blink)).to be_false
+      expect(caps.includes?(Cap::RapidBlink)).to be_false
+    end
+
+    it "keeps blinking off however vague TERM is" do
+      # Composition is additive, so the xterm entry would otherwise hand back
+      # what the ghostty entry left out.
+      caps = detect({"TERM" => "xterm-256color", "TERM_PROGRAM" => "ghostty"})
+
+      expect(caps.includes?(Cap::Blink)).to be_false
+    end
+
+    it "keeps blinking off when only the marker variable names the terminal" do
+      caps = detect({"TERM" => "xterm-256color", "GHOSTTY_RESOURCES_DIR" => "/opt"})
+
+      expect(caps.includes?(Cap::Blink)).to be_false
+    end
+
+    it "still blinks on a terminal that does" do
+      expect(detect({"TERM" => "xterm-256color"}).includes?(Cap::Blink)).to be_true
+    end
+
     it "stops Terminal.app at the 256 colour palette" do
       caps = detect({"TERM" => "xterm-256color", "TERM_PROGRAM" => "Apple_Terminal"})
 

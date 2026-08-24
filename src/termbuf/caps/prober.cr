@@ -187,7 +187,9 @@ module TermBuf
       end
 
       if match = response.match TERMINAL_NAME
-        return Reading.new flags | from_name(match[1]), :xtversion, name: match[1]
+        name = match[1]
+        told = (flags | from_name(name)) & ~EnvironmentDetector.denials(name)
+        return Reading.new told, :xtversion, name: name
       end
 
       return Reading.new flags, :secondary_attributes if response.starts_with? "\e[>"
