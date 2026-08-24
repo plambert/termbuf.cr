@@ -185,6 +185,13 @@ module TermBuf::Unicode
         # A cluster opening with a combining mark, which happens only at the
         # start of a string, still has to occupy a cell.
         @base_width = Unicode.char_width char
+      elsif Unicode.grapheme_class(char).spacing_mark?
+        # The one kind of mark that takes a cell of its own. The Tamil vowel
+        # sign of `நி` sits beside its consonant rather than over it, and a
+        # terminal advances the cursor for it; the same goes for the vowel
+        # sign in a Devanagari conjunct. Two cells is as far as this goes,
+        # since a lead and one continuation is all a pair of cells can hold.
+        @base_width = Math.min @base_width + Unicode.char_width(char), 2
       end
 
       @count += 1

@@ -42,8 +42,9 @@ module Validate
     {"👨‍👩‍👧‍👦", "family, four faces joined by ZWJ"},
     {"🇺🇸", "U+1F1FA U+1F1F8 regional indicator pair"},
     {"🏳️‍🌈", "rainbow flag, a ZWJ sequence"},
-    {"क्षि", "devanagari conjunct with a vowel sign"},
-    {"நி", "tamil ni"},
+    {"क्षि", "devanagari conjunct plus a spacing vowel sign"},
+    {"நி", "tamil na plus a spacing vowel sign"},
+    {"กำ", "thai ko kai plus sara am, also spacing"},
     {"ﷺ", "U+FDFA arabic ligature"},
   ]
 

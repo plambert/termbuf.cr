@@ -98,6 +98,25 @@ Spectator.describe TermBuf::Unicode do
       expect(Uni.string_width("á̂̃")).to eq 1
     end
 
+    it "gives a spacing mark a cell of its own" do
+      # A spacing mark sits beside its base rather than over it, so unlike a
+      # nonspacing mark it adds to the width of the cluster.
+      expect(Uni.string_width("\u{0BA8}\u{0BBF}")).to eq 2 # tamil na, vowel sign i
+      expect(Uni.string_width("\u{0915}\u{0940}")).to eq 2 # devanagari ka, vowel sign ii
+      expect(Uni.string_width("\u{0E01}\u{0E33}")).to eq 2 # thai ko kai, sara am
+    end
+
+    it "counts an indic conjunct as one cell until a spacing mark widens it" do
+      # The consonants of `\u{0915}\u{094D}\u{0937}` ligate into one glyph;
+      # the vowel sign that follows does not.
+      expect(Uni.string_width("\u{0915}\u{094D}\u{0937}")).to eq 1
+      expect(Uni.string_width("\u{0915}\u{094D}\u{0937}\u{093F}")).to eq 2
+    end
+
+    it "keeps a cluster to a pair of cells however many marks it carries" do
+      expect(Uni.string_width("\u{0915}\u{093F}\u{0940}")).to eq 2
+    end
+
     it "counts a zero width joiner sequence as one emoji" do
       expect(Uni.string_width("\u{1F468}‍\u{1F469}‍\u{1F467}")).to eq 2
     end
