@@ -56,7 +56,7 @@ module Validate
 
     def initialize(@terminal : Terminal)
       @page = 0
-      @repaint = true
+      @rebuild = true
       @filled = false
       @running = true
       @frame = 0
@@ -76,11 +76,15 @@ module Validate
     # ------------------------------------------------------------- the frame
 
     private def draw : Nil
+      # Whether the page has to be built from nothing, which is a different
+      # question from whether the terminal needs sending it again.
+      rebuild = @rebuild
+      @rebuild = false
+
       @terminal.batch do |screen|
         # Only the motion page carries anything over between frames; the rest
         # redraw the same thing, so clearing them costs nothing in bytes.
-        screen.clear if @repaint || !motion?
-        @repaint = false
+        screen.clear if rebuild || !motion?
 
         case PAGES[@page]
         when "edges" then draw_edges screen
@@ -485,10 +489,6 @@ module Validate
       box = Rect.new 0, 4, columns, Math.max(rows - 8, 1)
       return if box.height < 3
 
-      if @repaint || @log.zero?
-        screen.fill box, ' '
-      end
-
       screen.write 2, 2, "scrolling region", Style::DEFAULT.bold
       screen.write 20, 2,
         @terminal.capabilities.includes?(Capability::ScrollRegion) ? "DECSTBM available" : "no DECSTBM; expect a redraw",
@@ -528,7 +528,7 @@ module Validate
     private def handle(event) : Nil
       case event
       in Events::Input   then keys String.new(event.bytes)
-      in Events::Resize  then @repaint = true
+      in Events::Resize  then @rebuild = true
       in Events::Closed  then @running = false
       in Events::Failure then @running = false
       in Events::Response, Events::Warning
@@ -557,12 +557,14 @@ module Validate
       return if page == @page
 
       @page = page
-      @repaint = true
+      @rebuild = true
       @log = 0
     end
 
+    # Sends the screen again without touching what is on it. Whatever scribbled
+    # over the terminal, the buffer still knows what should be there, so the
+    # scrolling log survives a redraw rather than starting over.
     private def force_repaint : Nil
-      @repaint = true
       @terminal.paint!
     end
   end
