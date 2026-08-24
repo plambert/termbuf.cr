@@ -4,6 +4,7 @@ require "../core/encoder"
 require "../core/painter"
 require "./command"
 require "./event"
+require "./meter"
 require "./responses"
 require "./tty"
 
@@ -67,9 +68,17 @@ module TermBuf
     # can take longer than that to arrive in full.
     property escape_timeout : Time::Span = ESCAPE_TIMEOUT
 
+    # How many bytes the last paint sent, and how many every paint has sent
+    # between them. The point of the buffer is that a frame costs a diff
+    # rather than a screenful, and this is how an application checks that it
+    # is getting one.
+    getter last_paint_bytes : Int32 = 0
+    getter total_paint_bytes : Int64 = 0
+
     @buffer : Buffer
     @painter : Painter
     @encoder : Encoder
+    @meter : Meter
     @commands : Channel(Command)
     @reader : Fiber::ExecutionContext::Isolated?
     @scheduler : Fiber?
@@ -86,6 +95,7 @@ module TermBuf
       @buffer = Buffer.new @size.columns, @size.rows
       @painter = Painter.new @capabilities
       @encoder = Encoder.new @buffer.styles, @capabilities, @size.columns, @size.rows
+      @meter = Meter.new @tty.output
       @commands = Channel(Command).new COMMAND_CAPACITY
       @events = Channel(Event).new EVENT_CAPACITY
       @responses = ResponseRegistry.new
@@ -317,10 +327,15 @@ module TermBuf
 
       ops = @painter.paint @buffer
 
+      @meter.bytes = 0
+
       unless ops.empty?
-        @encoder.encode ops, @tty.output
+        @encoder.encode ops, @meter
         @tty.flush
       end
+
+      @last_paint_bytes = @meter.bytes
+      @total_paint_bytes += @meter.bytes
 
       @buffer.commit_paint
       command.reply.try &.send nil

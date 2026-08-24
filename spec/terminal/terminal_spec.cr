@@ -202,6 +202,49 @@ Spectator.describe TermBuf::Terminal do
     end
   end
 
+  describe "the paint meter" do
+    it "counts what the last paint sent" do
+      with_harness do |harness|
+        # The takeover sequence went out before any paint did, and the meter
+        # counts frames rather than everything the driver has ever written.
+        harness.drain
+
+        harness.terminal.write 0, 0, "hello"
+        harness.terminal.paint
+
+        expect(harness.terminal.last_paint_bytes).to eq harness.drain.bytesize
+        expect(harness.terminal.total_paint_bytes).to eq harness.terminal.last_paint_bytes
+      end
+    end
+
+    it "reports nothing for a frame that changed nothing" do
+      with_harness do |harness|
+        harness.terminal.write 0, 0, "hello"
+        harness.terminal.paint
+        first = harness.terminal.total_paint_bytes
+
+        harness.terminal.paint
+
+        expect(harness.terminal.last_paint_bytes).to eq 0
+        expect(harness.terminal.total_paint_bytes).to eq first
+      end
+    end
+
+    it "keeps a running total across frames" do
+      with_harness do |harness|
+        harness.terminal.write 0, 0, "hello"
+        harness.terminal.paint
+        first = harness.terminal.last_paint_bytes
+
+        harness.terminal.write 0, 1, "again"
+        harness.terminal.paint
+
+        expect(harness.terminal.total_paint_bytes)
+          .to eq first + harness.terminal.last_paint_bytes
+      end
+    end
+  end
+
   describe "#sync" do
     it "runs against the buffer on the fibre that owns it" do
       with_harness do |harness|
