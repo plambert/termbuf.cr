@@ -21,6 +21,7 @@ These were settled up front; the rest of the plan assumes them.
 | Scrollback | Opt-in per region, capacity defaults to zero |
 | Override env var | `TERMBUF_CAPS` with a `+name,-name` list |
 | Spec strategy | Model terminal for correctness **and** golden byte strings for optimizations |
+| Widgets | One: an editable input field. No layout manager, no focus tree, no toolkit |
 
 Assumptions made without asking, flagged here so they can be overridden:
 
@@ -33,10 +34,14 @@ Assumptions made without asking, flagged here so they can be overridden:
 
 ## Architecture
 
-Three layers, each usable without the one above it.
+Four layers, each usable without the one above it. The top one is optional: an application that
+wants only a screen buffer never touches it.
 
 ```text
 ┌───────────────────────────────────────────────────────────────┐
+│ Layer 4  Widgets — optional, drawn through Layer 3            │
+│   Border  Field (panel, prompt, growth)  Editor  LineBuffer   │
+├───────────────────────────────────────────────────────────────┤
 │ Layer 3  Application API                                      │
 │   TermBuf::Terminal (owner fiber)  Cursor / IO  Event channels│
 │   Link, Image, ColorStack, passthrough, response registry     │
@@ -91,6 +96,12 @@ src/termbuf/sgr_scanner.cr        interprets escapes in non-raw cursor writes
 src/termbuf/link.cr               OSC 8
 src/termbuf/image.cr              kitty graphics
 src/termbuf/color_stack.cr        kitty colour protocol
+src/termbuf/widgets/border.cr     box glyphs, style, optional title
+src/termbuf/widgets/line_buffer.cr  editable text in grapheme clusters
+src/termbuf/widgets/history.cr    bounded, with the in-progress edit kept
+src/termbuf/widgets/completion.cr the hook and what it returns
+src/termbuf/widgets/editor.cr     keymap, actions, history and completion
+src/termbuf/widgets/field.cr      the panel: border, prompt, growth, drawing
 scripts/gen_unicode.cr            regenerates unicode/tables.cr
 spec/support/model_terminal.cr    spec-only ANSI-consuming terminal model
 ```
@@ -357,7 +368,155 @@ spec suite includes `GraphemeBreakTest.txt` as a conformance fixture.
   configurable override, since it is genuinely terminal-dependent.
 * **Graphemes** — full UAX #29 extended grapheme cluster breaking, including regional indicator
   pairs, `Prepend`, `SpacingMark`, emoji ZWJ sequences, and `InCB` linkers. Cluster width is the
-  width of the base character, not the sum.
+  width of the base character plus any spacing marks, capped at a pair of cells — not the sum over
+  every code point, which would make a joined emoji eight cells wide.
+
+## Editable input
+
+An input field is the one widget nearly every terminal application needs and the one nobody should
+have to write twice. It sits above the three layers rather than inside them, and draws through the
+same `Drawing` API an application uses, so it composes with whatever else is on screen and costs the
+same diff.
+
+What this is not: a widget toolkit. No layout manager, no focus tree, no tables or menus. A field
+reports the height it wants; where it goes is the application's business.
+
+### Pieces
+
+Four types, each usable without the ones above it, which is the same rule the rest of the shard
+follows.
+
+```text
+Field         panel, border, prompt, growth, drawing, event handling
+  Editor      keymap → actions, driving history and completion
+    History     optional, bounded, keeps the line being typed
+    Completion  a hook and what it returns
+    LineBuffer  the text and the cursor, in grapheme clusters. No terminal.
+```
+
+`LineBuffer` is this layer's equivalent of Layer 1: pure, synchronous, no terminal, and exhaustively
+testable. The properties worth asserting are the ones that catch whole classes of bug — an insert
+followed by its delete leaves the text unchanged, the cursor never lands inside a cluster, and the
+display column always equals the summed widths to its left.
+
+### `LineBuffer`
+
+Text is held as grapheme clusters rather than bytes or characters, because a cluster is what a
+cursor moves over and what occupies a cell. Each carries its display width, so the column of any
+index is a prefix sum rather than a re-measure.
+
+```crystal
+buffer.insert "text"        # at the cursor
+buffer.delete_backward      # one cluster, not one byte
+buffer.move_word_left
+buffer.kill_to_end          # into the kill ring
+buffer.yank
+buffer.select_to index      # the anchor stays, the point moves
+buffer.text                 # => String
+buffer.column               # display column of the cursor
+```
+
+A selection is an anchor and a point. Shift-modified movement extends it, ordinary movement
+collapses it, and typing replaces it. It is designed in now so that mouse selection later is a
+matter of setting the anchor from a click rather than a redesign.
+
+Multi-line is the same structure with newlines among the clusters. Wrapping is a rendering question,
+not a storage one.
+
+### `Editor` and the keymap
+
+Bindings are data: `Hash(Key, Action)`, where `Action` is an enum naming the vocabulary. An
+application rebinds by replacing entries rather than by subclassing, and the enum is what documents
+what a field can be asked to do.
+
+The default map is the readline one, since that is what fingers in a terminal expect: `Ctrl+A`
+`Ctrl+E` `Ctrl+B` `Ctrl+F` `Ctrl+K` `Ctrl+U` `Ctrl+W` `Ctrl+Y` `Ctrl+T`, `Alt+B` `Alt+F` `Alt+D`,
+the arrows, `Home`, `End`, `Backspace`, `Delete`. `Enter` accepts, `Ctrl+C` cancels, and `Ctrl+D` on
+an empty line ends input — three outcomes an application has to be able to tell apart.
+
+Anything not in the map, carrying no modifier but shift, is text and gets inserted. That rule is
+what keeps the map small.
+
+### History
+
+Optional, capacity-bounded, off by default.
+
+Arrowing up from a line being typed stores that line and restores it on the way back down. Most
+implementations forget this and it is the first thing anyone notices. Consecutive duplicates are not
+recorded twice.
+
+Two search modes: chronological, where `Up` walks every entry, and prefix, where it walks only the
+entries beginning with what has been typed. `Ctrl+R` incremental search is a later addition, and the
+design leaves room for it.
+
+Persistence is a pair of hooks over an `IO`, not a file path. The shard does not decide where an
+application's history lives or what format it takes.
+
+### Completion
+
+A hook rather than a mechanism:
+
+```crystal
+field.completions do |request|
+  # request.text, request.cursor, request.word — the field's guess at the word
+  Completion::Result.new candidates, replacing: request.word
+end
+```
+
+The field applies what comes back: one candidate is inserted, several insert the longest common
+prefix, and a second `Tab` lists them. Listing needs room on screen, which is what an expandable
+panel is for.
+
+Where a word begins is configurable, since a shell, a search box, and an expression evaluator
+disagree about it.
+
+### The panel
+
+```crystal
+field = TermBuf::Field.new(
+  bounds: Rect.new(0, rows - 3, columns, 3),
+  prompt: TermBuf::Field::Prompt.new("› ", accent),
+  border: TermBuf::Border.rounded,
+  growth: TermBuf::Field::Growth::Grow,
+  max_rows: 8)
+```
+
+* **Border** — a value carrying the six glyphs, a style, and an optional title. It lives at the
+  widget layer root rather than inside `Field`, since anything else drawn in a box wants the same
+  thing.
+* **Prompt** — drawn on the first row with its width taken out of the text area. Continuation rows
+  get a prompt of their own, so a wrapped line stays aligned under the first.
+* **Growth** — `Fixed` keeps one text row and scrolls horizontally, with a marker where text runs
+  off either edge. `Grow` wraps and grows to `max_rows`, then scrolls vertically. A growing field
+  reports the height it wants and the application places it.
+* **Cursor** — `Field#cursor_position` says where the hardware cursor belongs, which is what the
+  cursor association of Phase 8 exists for.
+
+### Events
+
+```crystal
+case field.handle(key)
+in Field::Outcome::Continue  then nil
+in Field::Outcome::Accepted  then submit field.text
+in Field::Outcome::Cancelled then dismiss
+in Field::Outcome::Ended     then quit
+end
+```
+
+Pasted text is inserted rather than replayed as key presses, which is what the bracketed paste work
+in Phase 7 makes possible. A fixed field turns newlines into spaces; a growing one keeps them.
+
+For the simple case — a prompt and nothing else going on — `Field#run(terminal) : String?` owns the
+loop and hands back what was entered.
+
+### Mouse
+
+Deferred, but the seams are left. Clicking places the cursor, dragging selects, and the wheel
+scrolls the view: three `LineBuffer` operations that exist already, waiting on a `MouseEvent` the
+decoder does not yet produce. What is missing is the reporting itself — turning on SGR mouse mode
+1006, decoding `ESC [ < b ; x ; y M`, and the hit test from a screen cell back to a cluster index.
+The hit test is the part with teeth, since a wide cluster covers two cells and a zero-width one
+covers none.
 
 ## Testing
 
@@ -452,6 +611,27 @@ stack push/pop.
 README with worked examples, `examples/`, API docs, the versioned GitHub Pages docs workflow,
 `v0.1.0` tag.
 
+### Phase 11 — Editable input
+
+`LineBuffer` and its property specs first, since everything above it is only as correct as the text
+model underneath. Then `History`, `Completion`, and the `Editor` keymap, all testable without a
+terminal. `Border` and `Field` last, drawn through `Drawing` and checked against the model terminal
+the same way the painter is, plus a page in `examples/validate.cr` and a worked example of the
+`#run` form.
+
+See [Editable input](#editable-input) for the design.
+
+Worth considering ahead of Phase 9: an input field is wanted by more applications than kitty
+graphics is, and it depends only on Phase 8. The ordering here is the order the work was scoped in,
+not a judgement about what matters.
+
+### Phase 12 — Mouse
+
+SGR mouse reporting turned on and off with the rest of the takeover, `ESC [ < b ; x ; y M` decoded
+into a `MouseEvent`, and the hit test from a screen cell to a buffer position. `Field` then gets
+click-to-position, drag-to-select, and wheel scrolling for nothing, since the operations underneath
+were built in Phase 11.
+
 ## Risks
 
 * **Scroll detection correctness.** The highest-risk component: a wrong scroll corrupts the screen
@@ -477,3 +657,9 @@ Not blocking, decide when reached:
 * Sixel as an image fallback for terminals without kitty graphics — currently out of scope.
 * Whether `Region` should support overlap and z-ordering, or stay non-overlapping. Non-overlapping
   is assumed; widget layering would be built above this shard.
+* Whether `Field` belongs in this shard or a companion one. It is here because everyone needs it and
+  because it is the thing that exercises cursors, graphemes, and paste together. If a second widget
+  is ever wanted, that is the moment to split rather than to grow a toolkit.
+* Whether an `Editor` action should be an enum or a `Proc`. An enum keeps the vocabulary documented
+  and a keymap serializable; a proc lets an application add an action the shard never named. A
+  union of the two is the likely answer and costs nothing to defer.
