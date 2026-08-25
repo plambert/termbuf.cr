@@ -31,15 +31,6 @@ module TermBuf
     # shallow enough to be backpressure rather than an unbounded queue.
     COMMAND_CAPACITY = 256
 
-    # How long to wait for the rest of an escape sequence before deciding
-    # there is no rest.
-    #
-    # The escape key sends one byte, and so does the start of every arrow key,
-    # so the two are indistinguishable until either more bytes arrive or
-    # enough time passes that none will. Long enough to cover a sequence split
-    # across two reads, short enough that pressing escape feels immediate.
-    ESCAPE_TIMEOUT = 25.milliseconds
-
     # Events waiting for the application. Once this fills, the reader stops
     # reading, which is the right way round: the terminal's own buffer then
     # applies backpressure to the keyboard rather than memory growing here.
@@ -71,9 +62,52 @@ module TermBuf
     # Whether the owning fibre is running.
     getter? started : Bool = false
 
-    # See `ESCAPE_TIMEOUT`. Worth raising over a slow link, where a sequence
-    # can take longer than that to arrive in full.
-    property escape_timeout : Time::Span = ESCAPE_TIMEOUT
+    # Turns the bytes the terminal sends into events. Held here rather than
+    # made on the reader fibre so that its deadlines can be adjusted before
+    # anything starts reading.
+    getter decoder : Decoder
+
+    # See `Decoder::ESCAPE_TIMEOUT`. Worth raising over a slow link, where a
+    # sequence can take longer than that to arrive in full.
+    def escape_timeout : Time::Span
+      @decoder.escape_timeout
+    end
+
+    # :ditto:
+    def escape_timeout=(span : Time::Span) : Time::Span
+      @decoder.escape_timeout = span
+    end
+
+    # See `Decoder::PASTE_NOTICE`.
+    def paste_notice : Time::Span
+      @decoder.paste_notice
+    end
+
+    # :ditto:
+    def paste_notice=(span : Time::Span) : Time::Span
+      @decoder.paste_notice = span
+    end
+
+    # See `Decoder::PASTE_PROGRESS`.
+    def paste_progress : Time::Span
+      @decoder.paste_progress
+    end
+
+    # :ditto:
+    def paste_progress=(span : Time::Span) : Time::Span
+      @decoder.paste_progress = span
+    end
+
+    # See `Decoder::PASTE_STALL`. Worth raising for an application expecting
+    # very large pastes over a very slow link.
+    def paste_stall : Time::Span
+      @decoder.paste_stall
+    end
+
+    # :ditto:
+    def paste_stall=(span : Time::Span) : Time::Span
+      @decoder.paste_stall = span
+    end
 
     # How many bytes the last paint sent. The point of the buffer is that a
     # frame costs a diff rather than a screenful, and this is how an
@@ -111,6 +145,7 @@ module TermBuf
       @commands = Channel(Command).new COMMAND_CAPACITY
       @events = Channel(Event).new EVENT_CAPACITY
       @responses = ResponseRegistry.new
+      @decoder = Decoder.new @responses
       @pending_input = pending_input
       @initial_warnings = warnings
     end
@@ -461,7 +496,7 @@ module TermBuf
     end
 
     private def read_loop : Nil
-      decoder = Decoder.new @responses
+      decoder = @decoder
       decoder.feed(@pending_input) { |event| emit event } unless @pending_input.empty?
 
       buffer = Bytes.new 4096
@@ -481,22 +516,23 @@ module TermBuf
     end
 
     # Reads the next chunk. Returns the number of bytes, zero at end of input,
-    # or `nil` when the wait for the rest of a sequence ran out and what was
-    # held back has been delivered for what it turned out to be.
+    # or `nil` when a deadline expired and whatever it was waiting on has been
+    # dealt with.
     #
-    # The deadline is only applied while something is pending. The rest of the
-    # time the read blocks, which is what it should do: waking up every 25
+    # A deadline is only set when the decoder is holding something. The rest of
+    # the time the read blocks, which is what it should do: waking every 25
     # milliseconds to find nothing is work nobody asked for.
     private def read_next(input : IO, buffer : Bytes, decoder : Decoder) : Int32?
-      return input.read buffer unless decoder.pending?
+      deadline = decoder.read_deadline
+      return input.read buffer unless deadline
       return input.read buffer unless input.responds_to? :read_timeout=
 
-      input.read_timeout = @escape_timeout
+      input.read_timeout = deadline
 
       begin
         input.read buffer
       rescue IO::TimeoutError
-        decoder.flush { |event| emit event }
+        decoder.tick { |event| emit event }
         nil
       ensure
         input.read_timeout = nil

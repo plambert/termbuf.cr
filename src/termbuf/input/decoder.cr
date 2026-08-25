@@ -21,14 +21,64 @@ module TermBuf
     # Reached only by a terminal that sent an opening marker and no closing one.
     MAX_PASTE = 4 * 1024 * 1024
 
+    # How long to wait for the rest of an escape sequence before deciding there
+    # is no rest.
+    #
+    # The escape key sends one byte and so does the start of every arrow key,
+    # so the two are indistinguishable until either more bytes arrive or enough
+    # time passes that none will.
+    ESCAPE_TIMEOUT = 25.milliseconds
+
+    # How long a paste has to have been arriving before it is worth telling the
+    # application about. Measured from the opening marker whether or not
+    # anything followed it.
+    PASTE_NOTICE = 300.milliseconds
+
+    # How often the byte count is worth resending. A paste large enough to
+    # notice arrives in hundreds of reads, and an application draining the
+    # channel slowly should not be made to drain hundreds of notices.
+    PASTE_PROGRESS = 100.milliseconds
+
+    # How long a paste may go without a single byte before it is treated as
+    # abandoned.
+    #
+    # Reset by every byte rather than measured from the opening marker, because
+    # the question is whether the paste is slow or stopped and the only evidence
+    # either way is whether anything is still arriving. A paste over a link with
+    # seconds of latency stays alive as long as it makes progress; one whose
+    # closing marker will never come ends here rather than swallowing every
+    # keystroke after it.
+    PASTE_STALL = 3.seconds
+
+    # Never ask for a read deadline shorter than this. A deadline that has
+    # already passed would otherwise become a zero or negative timeout.
+    MINIMUM_DEADLINE = 1.millisecond
+
     PASTE_START = "\e[200~".to_slice
     PASTE_END   = "\e[201~".to_slice
+
+    # See `ESCAPE_TIMEOUT`. Worth raising over a slow link, where a sequence can
+    # take longer than that to arrive in full.
+    property escape_timeout : Time::Span = ESCAPE_TIMEOUT
+
+    # See `PASTE_NOTICE`.
+    property paste_notice : Time::Span = PASTE_NOTICE
+
+    # See `PASTE_PROGRESS`.
+    property paste_progress : Time::Span = PASTE_PROGRESS
+
+    # See `PASTE_STALL`.
+    property paste_stall : Time::Span = PASTE_STALL
 
     def initialize(@responses : ResponseRegistry = ResponseRegistry.new)
       @scanner = ResponseScanner.new
       @partial = IO::Memory.new
       @paste = IO::Memory.new
       @pasting = false
+      @pending_since = nil.as(Time::Instant?)
+      @paste_opened = nil.as(Time::Instant?)
+      @paste_touched = nil.as(Time::Instant?)
+      @notified = nil.as(Time::Instant?)
     end
 
     # Whether a paste is open, so that text is being collected rather than
@@ -38,6 +88,7 @@ module TermBuf
     # Feeds bytes in, yielding whatever they completed.
     def feed(bytes : Bytes, &emit : Event ->) : Nil
       @scanner.feed(bytes) { |kind, chunk| dispatch kind, chunk, emit }
+      mark_pending
     end
 
     # Whether anything is being held back for want of more bytes.
@@ -48,12 +99,77 @@ module TermBuf
       @scanner.pending? || @partial.bytesize > 0
     end
 
+    # How long the reader may wait before calling `#tick`, or `nil` when it may
+    # block until something arrives.
+    #
+    # Every piece of held state is a bet that more bytes are coming, and each
+    # one needs its losing case. With nothing held and no paste open there is
+    # nothing to time, so an idle application costs nothing.
+    def read_deadline : Time::Span?
+      now = Time.instant
+      soonest = nil.as(Time::Span?)
+
+      if since = @pending_since
+        soonest = @escape_timeout - (now - since)
+      end
+
+      if opened = @paste_opened
+        soonest = sooner soonest, @paste_stall - (now - (@paste_touched || opened))
+        soonest = sooner soonest, notice_due(opened) - now
+      end
+
+      return unless soonest
+
+      soonest > MINIMUM_DEADLINE ? soonest : MINIMUM_DEADLINE
+    end
+
+    # Called when a read deadline expires. Works out which one it was.
+    def tick(&emit : Event ->) : Nil
+      now = Time.instant
+
+      if since = @pending_since
+        flush { |event| emit.call event } if now - since >= @escape_timeout
+      end
+
+      return unless opened = @paste_opened
+      return finish_paste false, emit if now - (@paste_touched || opened) >= @paste_stall
+
+      notify now, opened, emit
+    end
+
     # Gives up waiting and delivers what is held back for what it is: an escape
     # that begins nothing is the escape key, and a truncated character is a
     # broken one.
     def flush(&emit : Event ->) : Nil
       @scanner.flush { |kind, chunk| dispatch kind, chunk, emit }
       flush_partial emit
+      mark_pending
+    end
+
+    # The escape deadline runs from the moment something was first held back,
+    # not from the last read: waking up for a paste notice must not shorten it.
+    private def mark_pending : Nil
+      if pending?
+        @pending_since ||= Time.instant
+      else
+        @pending_since = nil
+      end
+    end
+
+    private def sooner(current : Time::Span?, candidate : Time::Span) : Time::Span
+      current.nil? || candidate < current ? candidate : current
+    end
+
+    private def notice_due(opened : Time::Instant) : Time::Instant
+      last = @notified
+      last ? last + @paste_progress : opened + @paste_notice
+    end
+
+    private def notify(now : Time::Instant, opened : Time::Instant, emit : Event ->) : Nil
+      return if now < notice_due opened
+
+      @notified = now
+      emit.call Events::Pasting.new(@paste.bytesize, now - opened)
     end
 
     # ------------------------------------------------------------ dispatch
@@ -76,13 +192,36 @@ module TermBuf
         return
       end
 
-      if bytes == PASTE_START
-        @pasting = true
-        @paste.clear
-        return
-      end
+      return open_paste if bytes == PASTE_START
+
+      # The tail of a paste this decoder already gave up on. `ESC [ 201 ~` is
+      # never a keystroke, and reporting it as an unknown key would be an odd
+      # end to an odd episode.
+      return if bytes == PASTE_END
 
       emit.call Events::Key.new(decode(bytes), bytes)
+    end
+
+    private def open_paste : Nil
+      now = Time.instant
+
+      @pasting = true
+      @paste.clear
+      @paste_opened = now
+      @paste_touched = now
+      @notified = nil
+    end
+
+    private def finish_paste(complete : Bool, emit : Event ->) : Nil
+      text = @paste.to_s
+
+      @pasting = false
+      @paste.clear
+      @paste_opened = nil
+      @paste_touched = nil
+      @notified = nil
+
+      emit.call Events::Paste.new(text, complete)
     end
 
     # Inside a paste, only the closing marker is a sequence. Anything else is
@@ -90,9 +229,7 @@ module TermBuf
     private def paste_marker(bytes : Bytes, emit : Event ->) : Nil
       return collect bytes, emit unless bytes == PASTE_END
 
-      @pasting = false
-      emit.call Events::Paste.new(@paste.to_s)
-      @paste.clear
+      finish_paste true, emit
     end
 
     private def text(chunk : Bytes, emit : Event ->) : Nil
@@ -114,11 +251,12 @@ module TermBuf
 
     private def collect(bytes : Bytes, emit : Event ->) : Nil
       @paste.write bytes
+      # Progress, which is what keeps the stall deadline from running out.
+      @paste_touched = Time.instant
+
       return if @paste.bytesize <= MAX_PASTE
 
-      @pasting = false
-      emit.call Events::Paste.new(@paste.to_s)
-      @paste.clear
+      finish_paste false, emit
     end
 
     # What was held back last time, with the new bytes after it.

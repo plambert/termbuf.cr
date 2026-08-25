@@ -63,6 +63,7 @@ module Validate
       @log = 0
       @frozen = false
       @presses = [] of String
+      @arriving = nil.as(Int32?)
       @typed = ""
     end
 
@@ -94,6 +95,8 @@ module Validate
           draw_chrome screen
           draw_page screen
         end
+
+        draw_arriving screen
       end
     end
 
@@ -545,7 +548,7 @@ module Validate
       end
 
       screen.write 2, rows - 3,
-        "[tab] next page   [shift+tab] previous   [q] quit",
+        "[tab] next page   [shift+tab] previous   [q] quit   paste to see the notice",
         Style::DEFAULT.faint
     end
 
@@ -617,6 +620,25 @@ module Validate
       Cursor.new screen, Region.new(bounds), raw: raw, autowrap: false
     end
 
+    # A paste big enough to take a moment says so, or the application looks
+    # hung. The driver does not draw this: the buffer belongs to whoever is
+    # using it, and something writing into it uninvited would have to undraw
+    # itself and would fight whatever else is painting.
+    private def draw_arriving(screen) : Nil
+      bytes = @arriving
+      return unless bytes
+
+      label = " pasting… #{bytes} bytes "
+      width = Math.min label.size + 4, columns
+      x = (columns - width) // 2
+      y = (rows - 3) // 2
+      return if x < 0 || y < 0 || rows < 3
+
+      screen.fill Rect.new(x, y, width, 3), ' ', Style::DEFAULT.reverse
+      screen.write x + (width - label.size) // 2, y + 1, label,
+        Style::DEFAULT.reverse.bold
+    end
+
     # ---------------------------------------------------------------- input
 
     private def pump : Nil
@@ -634,7 +656,8 @@ module Validate
       in Events::Resize  then @rebuild = true
       in Events::Closed  then @running = false
       in Events::Failure then @running = false
-      in Events::Paste   then pasted event.text
+      in Events::Paste   then pasted event.text, event.complete
+      in Events::Pasting then arriving event.bytes
       in Events::Response, Events::Warning
         # Nothing here asks the terminal anything.
       in Nil
@@ -688,9 +711,19 @@ module Validate
       @presses.shift if @presses.size > 64
     end
 
-    private def pasted(text : String) : Nil
+    private def pasted(text : String, complete : Bool) : Nil
       preview = text.size > 40 ? "#{text[0, 40]}…" : text
-      @presses << "#{"paste".ljust(18)}#{preview.inspect} (#{text.bytesize} bytes)"
+      note = complete ? "" : ", never closed"
+      @presses << "#{"paste".ljust(18)}#{preview.inspect} (#{text.bytesize} bytes#{note})"
+
+      # The notice was drawn over whatever was underneath, and the motion page
+      # does not clear between frames.
+      @arriving = nil
+      @rebuild = true
+    end
+
+    private def arriving(bytes : Int32) : Nil
+      @arriving = bytes
     end
 
     private def go_to(page : Int32) : Nil

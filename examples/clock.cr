@@ -46,7 +46,9 @@ TermBuf::Terminal.open do |terminal|
         break if event.key.is? 'q'
         seen << "key       #{event.key}  #{String.new(event.bytes).inspect}"
       in TermBuf::Events::Paste
-        seen << "paste     #{event.text.inspect}"
+        seen << "paste     #{event.text.inspect}#{event.complete ? "" : "  (never closed)"}"
+      in TermBuf::Events::Pasting
+        seen << "pasting   #{event.bytes} bytes so far"
       in TermBuf::Events::Response
         seen << "response  #{String.new(event.bytes).inspect}"
       in TermBuf::Events::Resize

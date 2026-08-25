@@ -22,7 +22,19 @@ module TermBuf
     # the brackets: pasted text is not typing, and an application that treats
     # it as typing will run its key bindings over whatever was on the
     # clipboard.
-    record Paste, text : String
+    #
+    # *complete* is false when the terminal never sent the closing marker and
+    # the paste was ended on a stall or a size limit instead. What arrived is
+    # still delivered, since it beats nothing, but an application storing it
+    # somewhere permanent may want to know it might be half a clipboard.
+    record Paste, text : String, complete : Bool
+
+    # A paste has been arriving long enough to be worth saying so on screen,
+    # which is what stops a long one looking like a hung application.
+    #
+    # Repeated as it grows, no more often than the decoder's progress interval.
+    # The `Paste` that follows is the signal to take the notice down.
+    record Pasting, bytes : Int32, elapsed : Time::Span
 
     # A complete escape sequence the terminal sent, which is to say an answer
     # to something that was asked of it.
@@ -44,6 +56,6 @@ module TermBuf
 
   # Anything the terminal has to say, in the order it happened.
   alias Event = Events::Resize | Events::Key | Events::Paste |
-                Events::Response | Events::Warning | Events::Failure |
-                Events::Closed
+                Events::Pasting | Events::Response | Events::Warning |
+                Events::Failure | Events::Closed
 end

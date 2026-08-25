@@ -222,6 +222,96 @@ Spectator.describe TermBuf::Decoder do
       expect(events.first.as(TermBuf::Events::Paste).text).to eq "a\e[Ab"
     end
 
+    it "says whether the terminal closed the paste" do
+      events = decode "\e[200~hi\e[201~"
+
+      expect(events.first.as(TermBuf::Events::Paste).complete).to be_true
+    end
+
+    # A terminal that sends an opening marker and no closing one would
+    # otherwise take every keystroke after it, with nothing to notice.
+    it "ends a paste that has stopped arriving" do
+      decoder = TermBuf::Decoder.new
+      decoder.paste_stall = 20.milliseconds
+      decode "\e[200~half a clipboard", decoder
+
+      sleep 40.milliseconds
+      events = [] of TermBuf::Event
+      decoder.tick { |event| events << event }
+
+      paste = events.compact_map(&.as?(TermBuf::Events::Paste)).first
+      expect(paste.text).to eq "half a clipboard"
+      expect(paste.complete).to be_false
+      expect(decoder.pasting?).to be_false
+    end
+
+    # Slow and stopped are different, and the only evidence either way is
+    # whether anything is still arriving.
+    it "keeps a slow paste alive while bytes keep coming" do
+      decoder = TermBuf::Decoder.new
+      decoder.paste_stall = 60.milliseconds
+      decode "\e[200~one ", decoder
+
+      3.times do
+        sleep 30.milliseconds
+        decoder.tick { |_| nil }
+        decode "more ", decoder
+      end
+
+      expect(decoder.pasting?).to be_true
+    end
+
+    it "asks the reader to come back while a paste is open" do
+      decoder = TermBuf::Decoder.new
+      expect(decoder.read_deadline).to be_nil
+
+      decode "\e[200~x", decoder
+      deadline = decoder.read_deadline
+
+      fail "a paste with no deadline is a paste nothing can end" unless deadline
+      expect(deadline).to be <= decoder.paste_stall
+    end
+
+    it "reports progress once a paste has been going long enough" do
+      decoder = TermBuf::Decoder.new
+      decoder.paste_notice = 10.milliseconds
+      decode "\e[200~twelve bytes", decoder
+
+      sleep 20.milliseconds
+      events = [] of TermBuf::Event
+      decoder.tick { |event| events << event }
+
+      notice = events.compact_map(&.as?(TermBuf::Events::Pasting)).first
+      expect(notice.bytes).to eq 12
+      expect(notice.elapsed).to be > Time::Span.zero
+    end
+
+    it "says nothing about a paste that finishes before anyone would notice" do
+      decoder = TermBuf::Decoder.new
+      events = decode "\e[200~quick\e[201~", decoder
+
+      expect(events.map(&.class)).to eq [TermBuf::Events::Paste]
+    end
+
+    it "does not repeat progress faster than the interval asks for" do
+      decoder = TermBuf::Decoder.new
+      decoder.paste_notice = 5.milliseconds
+      decoder.paste_progress = 10.seconds
+      decode "\e[200~x", decoder
+      sleep 10.milliseconds
+
+      events = [] of TermBuf::Event
+      2.times { decoder.tick { |event| events << event } }
+
+      expect(events.size).to eq 1
+    end
+
+    # After a stall, the marker the terminal owed us is worth nothing and
+    # would otherwise be reported as a key nobody pressed.
+    it "discards a closing marker that arrives after the paste ended" do
+      expect(decode("\e[201~")).to be_empty
+    end
+
     it "goes back to delivering keys once the paste closes" do
       decoder = TermBuf::Decoder.new
       decode "\e[200~x\e[201~", decoder

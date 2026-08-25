@@ -148,6 +148,7 @@ order it happened.
 case event = terminal.events.receive
 in TermBuf::Events::Key      then handle event.key
 in TermBuf::Events::Paste    then insert event.text
+in TermBuf::Events::Pasting  then show_notice event.bytes
 in TermBuf::Events::Resize   then redraw event.size
 in TermBuf::Events::Response then handle_reply String.new(event.bytes)
 in TermBuf::Events::Warning  then log event.message
@@ -183,9 +184,30 @@ Modifiers are only as good as the terminal's encoding. `Ctrl` with a letter arri
 byte, so `Ctrl+I` and `Tab` are the same key press and nothing downstream can separate them. The
 decoder reports the name people press.
 
+### Paste
+
 Pasted text arrives as `Events::Paste` rather than as a burst of key presses, so a paste does not
-run every key binding over whatever was on the clipboard. Bracketed paste is enabled at startup
-when the terminal has it; `Events::Paste` simply never arrives when it does not.
+run every key binding over whatever was on the clipboard. Bracketed paste is enabled at startup when
+the terminal has it, and `Events::Paste` never arrives when it does not.
+
+While a paste is open, every byte the terminal sends is paste content by definition — including the
+one that would have quit the application. That makes a paste the terminal opens and never closes a
+lost session rather than a slow paste, so there are deadlines:
+
+| Property | Default | Reset by | Meaning |
+|---|---|---|---|
+| `escape_timeout` | 25 ms | — | A lone `ESC` is the escape key, not the start of an arrow |
+| `paste_notice` | 300 ms | the paste opening | A paste running this long is worth mentioning |
+| `paste_progress` | 100 ms | each notice sent | How often the byte count is worth resending |
+| `paste_stall` | 3 s | every byte of the paste | No more of it is coming |
+
+`paste_stall` is reset per byte rather than measured from the opening marker, since the question is
+whether the paste is slow or stopped and the only evidence either way is whether anything is still
+arriving. A paste ended that way is still delivered, with `Events::Paste#complete` false.
+
+`Events::Pasting` carries the byte count so an application can say something rather than look hung;
+`Events::Paste` is the signal to take that notice down. Drawing it is the application's job, because
+the buffer belongs to the application — see page 7 of `examples/validate.cr` for one.
 
 ### Styles and colour
 

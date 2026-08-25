@@ -587,6 +587,37 @@ Spectator.describe TermBuf::Terminal do
         paste = harness.event_of TermBuf::Events::Paste
         fail "no paste arrived" unless paste
         expect(paste.text).to eq "hello\nthere"
+        expect(paste.complete).to be_true
+      end
+    end
+
+    # An opening marker with no closing one used to take every keystroke after
+    # it, and nothing anywhere would wake up to notice.
+    it "gets out of a paste the terminal never closed" do
+      with_harness do |harness|
+        harness.terminal.paste_stall = 40.milliseconds
+        harness.type "\e[200~half a clipboard"
+
+        paste = harness.event_of TermBuf::Events::Paste
+        fail "the paste never ended" unless paste
+        expect(paste.text).to eq "half a clipboard"
+        expect(paste.complete).to be_false
+
+        harness.type "a"
+        event = harness.event_of TermBuf::Events::Key
+        fail "keys never came back" unless event
+        expect(event.key.char).to eq 'a'
+      end
+    end
+
+    it "says a long paste is arriving before it finishes" do
+      with_harness do |harness|
+        harness.terminal.paste_notice = 20.milliseconds
+        harness.type "\e[200~slowly"
+
+        notice = harness.event_of TermBuf::Events::Pasting
+        fail "no notice arrived" unless notice
+        expect(notice.bytes).to eq 6
       end
     end
 
