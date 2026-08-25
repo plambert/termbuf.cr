@@ -275,6 +275,144 @@ Spectator.describe TermBuf::Terminal do
     end
   end
 
+  describe "cursors" do
+    it "puts what was streamed through one on the screen" do
+      with_harness do |harness|
+        harness.drain
+        harness.terminal.cursor.io.puts "hello"
+        harness.terminal.paint
+
+        expect(harness.drain).to contain "hello"
+      end
+    end
+
+    it "gives the default cursor the whole screen" do
+      with_harness(columns: 8, rows: 3) do |harness|
+        cursor = harness.terminal.cursor
+        6.times { |index| cursor.puts "r#{index}" }
+        harness.terminal.paint
+
+        harness.terminal.sync do |buffer|
+          expect(buffer.to_text.lines.first).to start_with "r4"
+        end
+      end
+    end
+
+    it "grows the default cursor's region with the screen" do
+      with_harness(columns: 8, rows: 3) do |harness|
+        harness.terminal.issue TermBuf::Commands::Resize.new(TermBuf::ScreenSize.new(20, 6))
+        harness.event_of TermBuf::Events::Resize
+
+        cursor = harness.terminal.cursor
+        cursor.print "0123456789abcdefghij"
+
+        expect(cursor.y).to eq 0
+        expect(cursor.x).to eq 19
+      end
+    end
+
+    it "keeps a cursor over a region inside it" do
+      with_harness(columns: 12, rows: 5) do |harness|
+        cursor = harness.terminal.cursor TermBuf::Rect.new(2, 1, 4, 2)
+        cursor.print "abcdef"
+        harness.terminal.paint
+
+        harness.terminal.sync do |buffer|
+          lines = buffer.to_text.lines
+          expect(lines[1]).to eq "  abcd      "
+          expect(lines[2]).to eq "  ef        "
+        end
+      end
+    end
+  end
+
+  describe "the terminal's own cursor" do
+    it "stays hidden until a cursor is associated with it" do
+      with_harness do |harness|
+        harness.terminal.write 0, 0, "x"
+        harness.terminal.paint
+
+        expect(harness.drain).not_to contain "\e[?25h"
+      end
+    end
+
+    it "shows and follows the cursor it was given" do
+      with_harness do |harness|
+        cursor = harness.terminal.cursor
+        cursor.move_to 4, 2
+        harness.terminal.hardware_cursor = cursor
+        harness.drain
+
+        harness.terminal.paint
+        written = harness.drain
+
+        expect(written).to contain "\e[?25h"
+        expect(written).to contain "\e[3;5H"
+      end
+    end
+
+    # A frame that changes no cells is still worth sending when the cursor has
+    # moved: it is what tells someone where they are typing.
+    it "sends a frame for a move even when nothing else changed" do
+      with_harness do |harness|
+        cursor = harness.terminal.cursor
+        harness.terminal.hardware_cursor = cursor
+        harness.terminal.paint
+        harness.drain
+
+        cursor.move_to 7, 3
+        harness.terminal.paint
+
+        expect(harness.drain).to contain "\e[4;8H"
+      end
+    end
+
+    it "sends nothing when neither the screen nor the cursor moved" do
+      with_harness do |harness|
+        harness.terminal.hardware_cursor = harness.terminal.cursor
+        harness.terminal.paint
+        harness.drain
+
+        harness.terminal.paint
+
+        expect(harness.drain).to eq ""
+      end
+    end
+
+    # Painting cells leaves the terminal's cursor wherever the last run ended,
+    # so a frame that drew anything has to put it back.
+    it "puts it back after the cells have been painted" do
+      with_harness do |harness|
+        cursor = harness.terminal.cursor
+        cursor.move_to 1, 1
+        harness.terminal.hardware_cursor = cursor
+        harness.terminal.paint
+        harness.drain
+
+        harness.terminal.write 0, 4, "elsewhere"
+        harness.terminal.paint
+        written = harness.drain
+
+        expect(written).to contain "elsewhere"
+        # The move comes after the text, or it would be undone by it.
+        expect(written.rindex!("\e[2;2H")).to be > written.index!("elsewhere")
+      end
+    end
+
+    it "hides it again when asked" do
+      with_harness do |harness|
+        harness.terminal.hardware_cursor = harness.terminal.cursor
+        harness.terminal.paint
+        harness.drain
+
+        harness.terminal.hide_cursor
+        harness.terminal.paint
+
+        expect(harness.drain).to contain "\e[?25l"
+      end
+    end
+  end
+
   describe "resizing" do
     it "resizes the buffer and says so" do
       with_harness do |harness|

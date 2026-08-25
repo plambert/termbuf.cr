@@ -284,11 +284,10 @@ module TermBuf
 
       if @wrap_pending
         @wrap_pending = false
-
-        if @autowrap
-          flush style
-          newline
-        end
+        # Either way the gathered run ends here: it either continues on the row
+        # below, or the margin cell is about to be written over.
+        flush style
+        newline if @autowrap
       end
 
       if width > 0 && @x + width > bounds.right + 1
