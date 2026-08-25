@@ -58,6 +58,14 @@ module TermBuf
     # Regions declared with `#region`, in the order they were made.
     getter regions : Array(Region)
 
+    # How clusters are measured. Set by the driver from what the terminal said
+    # when it was asked, because how many cells an emoji takes is a question
+    # about the terminal rather than about Unicode. See `Unicode::WidthPolicy`.
+    #
+    # Changing it does not remeasure what is already written: cells carry the
+    # width they were placed with. Invalidate and redraw after changing it.
+    property policy : Unicode::WidthPolicy = Unicode::WidthPolicy::DEFAULT
+
     # Scrolls performed since the last paint, oldest first.
     getter scroll_hints : Array(ScrollHint)
 
@@ -108,7 +116,7 @@ module TermBuf
     # zero if it is zero width, if it is a control character, or if it is wide
     # and the right edge is one column away.
     def write_char(x : Int32, y : Int32, char : Char, style : Style = Style::DEFAULT) : Int32
-      columns = Unicode.char_width char
+      columns = Unicode.char_width char, @policy.ambiguous
       return 0 if columns.zero?
 
       style_id = @styles.id style
@@ -128,7 +136,7 @@ module TermBuf
       blank = Cell.blank style_id
       column = x
 
-      Unicode.each_grapheme text do |grapheme|
+      Unicode.each_grapheme text, @policy do |grapheme|
         next if grapheme.width.zero?
         break if column >= @width
 
@@ -155,7 +163,7 @@ module TermBuf
 
     # Sets every cell of *rect* to *char*.
     def fill(rect : Rect, char : Char = ' ', style : Style = Style::DEFAULT) : Nil
-      columns = Unicode.char_width char
+      columns = Unicode.char_width char, @policy.ambiguous
       raise ArgumentError.new "cannot fill with a zero width character" if columns.zero?
       raise ArgumentError.new "cannot fill with a wide character" if columns == 2
 

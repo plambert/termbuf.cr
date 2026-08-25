@@ -42,7 +42,11 @@ class ModelTerminal
 
   @cells : Array(ModelCell)
 
-  def initialize(@width : Int32, @height : Int32)
+  # *policy* has to match the buffer's, or the model measures a cluster
+  # differently from the thing it is checking and every later cell on the row
+  # disagrees for a reason that has nothing to do with the painter.
+  def initialize(@width : Int32, @height : Int32,
+                 @policy : TermBuf::Unicode::WidthPolicy = TermBuf::Unicode::WidthPolicy::DEFAULT)
     @cells = Array(ModelCell).new(@width * @height) { ModelCell.blank }
     @style = TermBuf::Style::DEFAULT
     @scroll_top = 0
@@ -161,7 +165,7 @@ class ModelTerminal
   # a combining mark joins the character before it rather than claiming a cell
   # of its own.
   private def write_text(text : String) : Nil
-    TermBuf::Unicode.each_grapheme(text) do |grapheme|
+    TermBuf::Unicode.each_grapheme(text, @policy) do |grapheme|
       put_cluster grapheme.text(text), grapheme.width
     end
   end
@@ -222,7 +226,10 @@ class ModelTerminal
     when 'L' then insert_lines param(values, 0, 1)
     when 'M' then delete_lines param(values, 0, 1)
     when 'r' then set_margins values
-    else          raise "model terminal: unsupported CSI #{parameters.inspect} #{final}"
+    when 'n'
+      # A cursor position report is a question, not an instruction. Nothing on
+      # screen changes; a real terminal would answer, and nothing here reads.
+    else raise "model terminal: unsupported CSI #{parameters.inspect} #{final}"
     end
   end
 

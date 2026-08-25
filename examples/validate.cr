@@ -16,7 +16,7 @@ module Validate
   alias Color = TermBuf::Color
   alias Rect = TermBuf::Rect
 
-  PAGES = %w[caps edges widths colours attrs motion keys cursors]
+  PAGES = %w[caps edges widths colours attrs motion keys cursors measured]
 
   # One line of the width page: something to draw, and what it is.
   #
@@ -102,13 +102,14 @@ module Validate
 
     private def draw_page(screen) : Nil
       case PAGES[@page]
-      when "caps"    then draw_caps screen
-      when "widths"  then draw_widths screen
-      when "colours" then draw_colours screen
-      when "attrs"   then draw_attrs screen
-      when "motion"  then draw_motion screen
-      when "keys"    then draw_keys screen
-      when "cursors" then draw_cursors screen
+      when "caps"     then draw_caps screen
+      when "widths"   then draw_widths screen
+      when "colours"  then draw_colours screen
+      when "attrs"    then draw_attrs screen
+      when "motion"   then draw_motion screen
+      when "keys"     then draw_keys screen
+      when "cursors"  then draw_cursors screen
+      when "measured" then draw_measured screen
       end
     end
 
@@ -310,11 +311,12 @@ module Validate
 
       row = 4
       shown = 0
+      policy = @terminal.widths
 
       SAMPLES.each do |(sample, description)|
         break if row >= rows - 3
 
-        width = Unicode.string_width sample
+        width = Unicode.string_width sample, policy
         dots = Math.max bar - 3 - width, 0
         screen.write 2, row, "#{width}  #{sample}#{"." * dots}|  #{description}"
 
@@ -323,9 +325,55 @@ module Validate
       end
 
       note = shown < SAMPLES.size ? "#{SAMPLES.size - shown} more need a taller window; " : ""
-      screen.write 2, rows - 2,
-        "#{note}terminals differ most on VS16 and ZWJ sequences",
+      # Without the wrapper, since the row is only so wide.
+      rules = policy.to_s.lchop("WidthPolicy(").rchop(')')
+      screen.write 2, rows - 2, "#{note}measured: #{rules}", Style::DEFAULT.faint
+    end
+
+    # ---------------------------------------------------------------- page 9
+
+    # What the terminal said when it was asked how wide a cluster is, beside
+    # what the width tables would have assumed. A row where the two differ is
+    # a rule this terminal has its own opinion about; one marked `unexplained`
+    # is an opinion no rule here reaches, and clusters like it will be drawn
+    # in the wrong place.
+    private def draw_measured(screen) : Nil
+      readings = @terminal.width_readings
+
+      if readings.empty?
+        screen.write 2, 2, "the terminal was not asked", Style::DEFAULT.bold
+        screen.write 2, 4, "either it is not a terminal, probing was turned off,",
+          Style::DEFAULT.faint
+        screen.write 2, 5, "or TERMBUF_WIDTHS=off said not to.", Style::DEFAULT.faint
+        return
+      end
+
+      screen.write 2, 2, "sample  said  ours  rule", Style::DEFAULT.bold
+      screen.write 2, 3, @terminal.widths.to_s.lchop("WidthPolicy(").rchop(')'),
         Style::DEFAULT.faint
+
+      policy = @terminal.widths
+      row = 5
+
+      readings.each do |reading|
+        break if row >= rows - 2
+
+        ours = Unicode.string_width reading.sample.text, policy
+        said = reading.measured
+        # A sample the terminal never answered is not a disagreement, it is a
+        # terminal that stopped talking.
+        odd = said && said != ours
+        style = odd ? Style::DEFAULT.fg(Color.indexed(1)) : Style::DEFAULT
+
+        screen.write 2, row, reading.sample.text
+        screen.write 10, row, (said || "-").to_s.rjust(4), style
+        screen.write 16, row, ours.to_s.rjust(4), style
+        screen.write 22, row,
+          "#{reading.sample.rule || "-"}#{odd ? "   no rule reaches this" : ""}",
+          Style::DEFAULT.faint
+
+        row += 1
+      end
     end
 
     # ---------------------------------------------------------------- page 4

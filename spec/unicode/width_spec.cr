@@ -5,7 +5,7 @@ private alias Incb = TermBuf::Unicode::Tables::Incb
 private alias Uni = TermBuf::Unicode
 
 Spectator.describe TermBuf::Unicode do
-  after_each { Uni.ambiguous_width = 1 }
+  after_each { Uni.policy = Uni::WidthPolicy::DEFAULT }
 
   describe ".char_width" do
     it "reports one cell for printable ASCII" do
@@ -61,27 +61,27 @@ Spectator.describe TermBuf::Unicode do
     end
   end
 
-  describe ".ambiguous_width" do
+  describe "the ambiguous width" do
     it "renders East Asian Ambiguous characters narrow by default" do
       expect(Uni.char_width('±')).to eq 1 # plus-minus sign
       expect(Uni.char_width('α')).to eq 1 # greek small alpha
     end
 
     it "renders them wide once the setting says so" do
-      Uni.ambiguous_width = 2
+      Uni.policy = Uni::WidthPolicy::DEFAULT.with "ambiguous_wide", true
 
       expect(Uni.char_width('±')).to eq 2
       expect(Uni.char_width('α')).to eq 2
     end
 
     it "does not widen ambiguous characters that are combining marks" do
-      Uni.ambiguous_width = 2
+      Uni.policy = Uni::WidthPolicy::DEFAULT.with "ambiguous_wide", true
 
       expect(Uni.char_width('\u0301')).to eq 0
     end
 
     it "does not narrow characters that are unconditionally wide" do
-      Uni.ambiguous_width = 2
+      Uni.policy = Uni::WidthPolicy::DEFAULT.with "ambiguous_wide", true
 
       expect(Uni.char_width('漢')).to eq 2
     end

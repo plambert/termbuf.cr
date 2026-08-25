@@ -1,4 +1,5 @@
 require "./tables"
+require "./policy"
 
 # Character property lookup for the terminal buffer: display width, grapheme
 # cluster break class, and the two auxiliary properties UAX #29 needs.
@@ -9,10 +10,17 @@ require "./tables"
 # covers Latin, Greek, Cyrillic, Hebrew, Arabic, the combining diacriticals,
 # and most of the Indic scripts.
 module TermBuf::Unicode
-  # East Asian Ambiguous characters render narrow on most terminals and wide on
-  # CJK-configured ones; the standard leaves it to the environment. Set this
-  # once at startup if the application knows better than the default.
-  class_property ambiguous_width : Int32 = 1
+  # How clusters are measured when no policy is given. `Buffer` carries its
+  # own, set from what the terminal said when asked; this is for casual callers
+  # and for `char_width`, which has no cluster to consult.
+  class_property policy : WidthPolicy = WidthPolicy::DEFAULT
+
+  # Cells an East Asian Ambiguous character takes. Reads through to `.policy`,
+  # which is where the answer lives now that it can be measured rather than
+  # assumed.
+  def self.ambiguous_width : Int32
+    policy.ambiguous
+  end
 
   # Code points below this are resolved by direct index rather than search.
   FAST_LIMIT = 0x1000
@@ -61,21 +69,21 @@ module TermBuf::Unicode
   # Number of terminal cells *char* occupies on its own, ignoring any grapheme
   # cluster it may belong to. Control characters report zero; they are never
   # stored in the buffer.
-  def self.char_width(char : Char) : Int32
+  def self.char_width(char : Char, ambiguous : Int32 = ambiguous_width) : Int32
     codepoint = char.ord
     return 1 if 0x20 <= codepoint < 0x7F
     return 0 if codepoint < 0x20 || codepoint == 0x7F
 
-    width_of properties(codepoint)
+    width_of properties(codepoint), ambiguous
   end
 
   # Only a stored width of one can be ambiguous: combining marks resolve to
   # zero and East Asian Wide to two regardless of the ambiguous setting.
-  private def self.width_of(props : UInt16) : Int32
+  private def self.width_of(props : UInt16, ambiguous : Int32) : Int32
     stored = ((props & Tables::WIDTH_MASK) >> Tables::WIDTH_SHIFT).to_i
     return stored unless stored == 1
 
-    props & Tables::AMBIGUOUS_BIT == 0 ? 1 : ambiguous_width
+    props & Tables::AMBIGUOUS_BIT == 0 ? 1 : ambiguous
   end
 
   # Grapheme cluster break class of *char* (UAX #29).

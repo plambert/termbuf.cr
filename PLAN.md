@@ -14,6 +14,7 @@ These were settled up front; the rest of the plan assumes them.
 | Links and images | Deferred to a late phase, after driver and cursors |
 | Concurrency | Single owner fiber; all mutation arrives as commands over channels |
 | Unicode | Full UAX #29 grapheme clusters + East Asian width, from a committed generator |
+| Cluster width | Measured from the terminal at startup, since no two of them agree |
 | Input | Response coalescing plus basic key decoding; mouse and kitty keyboard deferred |
 | Repaint trigger | Explicit `#paint`, plus an optional frame-scheduler fiber |
 | Capability detection | Active terminal queries with an env-heuristic fallback |
@@ -435,6 +436,73 @@ a byte count, drawn through `Drawing` like anything else, which an application s
 response to the two events. `examples/validate.cr` uses it, which is also how it gets exercised
 against a real terminal.
 
+## Measured widths
+
+How many cells a grapheme cluster occupies is a property of the terminal, not of Unicode. The
+standard says how to find cluster boundaries and how wide an East Asian character is; it says
+nothing about what a terminal does with a four-emoji ZWJ sequence, and terminals disagree. Measured
+on one machine:
+
+| cluster | UAX #29 reading | ghostty | tmux | Terminal.app |
+|---|---|---|---|---|
+| `漢` `ｱ` `⌚` `☺` `🇺🇸` `กำ` | — | agree | agree | agree |
+| `☺️` U+263A U+FE0F | 2 | 2 | 2 | 1 |
+| `👨‍👩‍👧‍👦` four faces, ZWJ | 2 | 2 | 2 | 11 |
+| `क्षि` conjunct plus vowel sign | 2 | 2 | 2 | 3 |
+| `நி` Tamil na plus vowel sign | 2 | 2 | 1 | 2 |
+
+Being right about UAX #29 does not help here. A terminal that advances eleven columns for an emoji
+the buffer thinks is two has every later cell on that row nine columns out of place, and the diff
+that repairs it is computed against a grid that never matched what is on screen. This is the same
+shape as the colour problem, which the shard already solves by asking rather than guessing.
+
+### The probe
+
+After the alternate screen is entered and before the application draws anything, a batch goes out:
+home the cursor, then for each sample the sample itself followed by `ESC [ 6 n`. The replies come
+back in order and each column is the terminal's own measurement. One round trip, invisible, and the
+screen is cleared afterwards as it would have been anyway.
+
+It cannot run with the capability probe, which happens before the alternate screen: writing samples
+to the screen the user was looking at would scribble on their shell.
+
+Samples are chosen to discriminate rather than to enumerate — one per rule a terminal might have a
+different opinion about:
+
+| Sample | What it settles |
+|---|---|
+| `→` U+2192 | East Asian Ambiguous: narrow or wide |
+| `☺` then `☺️` | Whether U+FE0F widens a text pictograph |
+| `👨‍👩‍👧‍👦` | Whether ZWJ sequences collapse to one emoji |
+| `🇺🇸` | Whether a regional indicator pair collapses |
+| `நி` | Whether a spacing mark takes a cell of its own |
+| `क्षि` | Whether a conjunct collapses before its vowel sign |
+
+### Applying it
+
+`WidthPolicy` carries what was learned: the ambiguous width, and a flag for each of the collapsing
+rules. `Unicode.each_grapheme` takes one, `Buffer` holds one, and the driver sets the buffer's from
+the probe. `Unicode.policy` is the default for casual callers, which is what `ambiguous_width` was
+and replaces it.
+
+Inference is deliberately modest. Each flag is set from the sample that discriminates it. Any
+sample the resulting policy still fails to explain — Terminal.app's eleven columns, which no flag
+in this design reaches — is reported as an `Events::Warning` naming the cluster, the measurement and
+the expectation, rather than being silently modelled wrong. Knowing where a terminal is beyond us
+beats pretending it is not.
+
+A terminal that answers nothing keeps the table values, which is what happens today.
+
+### Overriding
+
+`TERMBUF_WIDTHS`, alongside `TERMBUF_CAPS` and read the same way:
+
+```bash
+TERMBUF_WIDTHS=off                      # skip the probe, keep the tables
+TERMBUF_WIDTHS=+ambiguous_wide          # a CJK-configured terminal, said rather than measured
+TERMBUF_WIDTHS=-joined_emoji,-emoji_presentation
+```
+
 ## Editable input
 
 An input field is the one widget nearly every terminal application needs and the one nobody should
@@ -665,7 +733,17 @@ Cursor state, region binding, autowrap and scroll behaviour, `IO` implementation
 work, the escape-scanning path for non-raw cursors and the fast path for raw ones, hardware cursor
 association and post-paint positioning.
 
-### Phase 9 — Editable input
+### Phase 9 — Measured widths
+
+`WidthPolicy` threaded through `Unicode.each_grapheme` and `Buffer`, replacing the
+`ambiguous_width` class property. Then the probe itself, run after the alternate screen is entered,
+and the inference that turns measurements into a policy. Disagreements no flag explains become
+warnings. `TERMBUF_WIDTHS` to override or skip it. Page 3 of `examples/validate.cr` gains a measured
+column beside the table column, which is what turned the problem up in the first place.
+
+See [Measured widths](#measured-widths) for the design.
+
+### Phase 10 — Editable input
 
 `LineBuffer` and its property specs first, since everything above it is only as correct as the text
 model underneath. Then `History`, `Completion`, and the `Editor` keymap, all testable without a
@@ -676,25 +754,26 @@ the same way the painter is, plus a page in `examples/validate.cr` and a worked 
 See [Editable input](#editable-input) for the design.
 
 Ahead of links and images because an input field is wanted by more applications than kitty graphics
-is, and it depends only on Phase 8.
+is. It follows the width probe because a field measuring its own text against widths the terminal
+disagrees with is a field with a misplaced cursor.
 
-### Phase 10 — Links, images, colour stack
+### Phase 11 — Links, images, colour stack
 
 OSC 8 link ids threaded through `Style` and emitted as ranges; kitty graphics with transport chosen
 by the Phase 5 probe, image placement, deletion, and re-emission on forced repaint; kitty colour
 stack push/pop.
 
-### Phase 11 — Documentation and release
+### Phase 12 — Documentation and release
 
 README with worked examples, `examples/`, API docs, the versioned GitHub Pages docs workflow,
 `v0.1.0` tag.
 
-### Phase 12 — Mouse
+### Phase 13 — Mouse
 
 SGR mouse reporting turned on and off with the rest of the takeover, `ESC [ < b ; x ; y M` decoded
 into a `MouseEvent`, and the hit test from a screen cell to a buffer position. `Field` then gets
 click-to-position, drag-to-select, and wheel scrolling for nothing, since the operations underneath
-were built in Phase 9.
+were built in Phase 10.
 
 ## Risks
 
@@ -706,11 +785,14 @@ were built in Phase 9.
   them, and probing before the application's input loop starts.
 * **Multiplexers.** `tmux` and `screen` intercept or mangle DCS, APC, and OSC. Passthrough wrapping
   is possible but fiddly; the initial position is to detect the multiplexer and downgrade, and
-  revisit at Phase 10.
+  revisit at Phase 11.
 * **`Cell` size.** Sixteen bytes per cell means a 300×100 terminal is ~480 KB per grid, ~1 MB for
   both. Acceptable, but worth measuring before adding fields.
 * **Grapheme clustering cost.** Cluster segmentation on every write could dominate the write path.
   Mitigation is an ASCII fast path that skips segmentation entirely for the common case.
+* **Terminals that measure clusters in ways no flag reaches.** Terminal.app advances eleven columns
+  for a four-face ZWJ emoji. The width probe narrows the gap and names what is left rather than
+  closing it; an application drawing such clusters on such a terminal will still see them misplaced.
 * **A paste with no closing marker.** Silently swallows every keystroke that follows it, which
   presents as a hung application. Mitigation is `paste_stall`, reset per byte so that slow and
   stopped are told apart, and delivering what arrived rather than discarding it.

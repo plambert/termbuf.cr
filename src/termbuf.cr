@@ -1,5 +1,6 @@
 require "./termbuf/version"
 require "./termbuf/unicode/grapheme"
+require "./termbuf/unicode/overrides"
 require "./termbuf/core"
 require "./termbuf/sgr_scanner"
 require "./termbuf/cursor"

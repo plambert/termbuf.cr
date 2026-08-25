@@ -11,6 +11,17 @@ private class Harness
   getter output : IO::Memory
   getter keyboard : IO::FileDescriptor
 
+  # Wraps a terminal built elsewhere, for the cases that have to construct one
+  # with different arguments.
+  def self.wrapping(terminal : TermBuf::Terminal, output : IO::Memory,
+                    keyboard : IO::FileDescriptor) : Harness
+    new terminal, output, keyboard
+  end
+
+  private def initialize(@terminal : TermBuf::Terminal, @output : IO::Memory,
+                         @keyboard : IO::FileDescriptor)
+  end
+
   def initialize(columns = 20, rows = 6,
                  capabilities = TermBuf::Capabilities::XTERM,
                  pending : Bytes = Bytes.empty)
@@ -71,6 +82,29 @@ private def with_harness(**options, &)
     yield harness
   ensure
     harness.close
+  end
+end
+
+# A harness whose terminal measures its widths on the way up, with *answers*
+# already waiting to be read.
+private def with_probing_harness(answers : String, spec : String? = nil, &)
+  reader, keyboard = IO.pipe
+  output = IO::Memory.new
+  tty = TermBuf::Tty.new reader, output, managed: false
+
+  keyboard.print answers
+  keyboard.flush
+
+  terminal = TermBuf::Terminal.new tty, TermBuf::Capabilities::XTERM,
+    TermBuf::ScreenSize.new(20, 6),
+    width_spec: spec, probe_widths: true
+  terminal.start
+
+  begin
+    yield Harness.wrapping(terminal, output, keyboard)
+  ensure
+    terminal.close
+    keyboard.close rescue nil
   end
 end
 
@@ -654,6 +688,71 @@ Spectator.describe TermBuf::Terminal do
         # An absolute move, not a relative one: the passthrough could have put
         # the cursor anywhere.
         expect(harness.drain).to contain "\e[2;1H"
+      end
+    end
+  end
+
+  describe "measured widths" do
+    # A terminal that answers is believed over the tables, since how many cells
+    # an emoji takes is a question about the terminal.
+    it "takes the terminal's answers over the tables" do
+      answers = String.build do |io|
+        TermBuf::WidthProbe::SAMPLES.each_with_index do |sample, index|
+          measured = sample.rule == "spacing_marks" ? 1 : TermBuf::Unicode.string_width(sample.text)
+          io << "\e[" << index + 1 << ';' << measured + 1 << 'R'
+        end
+      end
+
+      with_probing_harness(answers) do |harness|
+        expect(harness.terminal.widths.spacing_marks?).to be_false
+        expect(harness.terminal.widths.joined_emoji?).to be_true
+      end
+    end
+
+    it "keeps the tables when the terminal says nothing" do
+      with_probing_harness("") do |harness|
+        expect(harness.terminal.widths).to eq TermBuf::Unicode::WidthPolicy::DEFAULT
+        expect(harness.terminal.width_readings.size).to eq TermBuf::WidthProbe::SAMPLES.size
+      end
+    end
+
+    # Terminal.app advances eleven columns for a four-face emoji, which no rule
+    # in the policy reaches. An application drawing one will see it misplaced,
+    # and this is how it finds out why.
+    it "warns about a measurement no rule explains" do
+      answers = String.build do |io|
+        TermBuf::WidthProbe::SAMPLES.each_with_index do |sample, index|
+          measured = sample.rule == "joined_emoji" ? 11 : TermBuf::Unicode.string_width(sample.text)
+          io << "\e[" << index + 1 << ';' << measured + 1 << 'R'
+        end
+      end
+
+      with_probing_harness(answers) do |harness|
+        warning = harness.event_of TermBuf::Events::Warning
+
+        fail "no warning arrived" unless warning
+        expect(warning.message).to contain "11 columns"
+      end
+    end
+
+    it "lets TERMBUF_WIDTHS have the last word over what was measured" do
+      with_probing_harness("", spec: "-joined_emoji") do |harness|
+        expect(harness.terminal.widths.joined_emoji?).to be_false
+      end
+    end
+
+    it "skips the measurement when told to" do
+      with_probing_harness("", spec: "off") do |harness|
+        expect(harness.terminal.width_readings).to be_empty
+      end
+    end
+
+    it "reports a rule name it does not know" do
+      with_probing_harness("", spec: "+nonsense") do |harness|
+        warning = harness.event_of TermBuf::Events::Warning
+
+        fail "no warning arrived" unless warning
+        expect(warning.message).to contain "TERMBUF_WIDTHS"
       end
     end
   end

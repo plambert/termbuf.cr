@@ -60,6 +60,11 @@ module TermBuf
     # Columns between tab stops, measured from the region's left edge.
     property tab_width : Int32
 
+    # How clusters are measured, which has to match what the buffer being
+    # written to uses or the cursor and the cells disagree about where the next
+    # character goes. `Terminal#cursor` sets it from the buffer's.
+    property policy : Unicode::WidthPolicy = Unicode::WidthPolicy::DEFAULT
+
     # The terminal's own cursor sits at the right margin after a character
     # lands in the last column, and only wraps when the next one arrives. That
     # delay is what stops a line of text exactly as wide as the region from
@@ -237,7 +242,7 @@ module TermBuf
     private def emit(text : String, style : Style) : Nil
       return if @region.bounds.empty?
 
-      Unicode.each_grapheme text do |grapheme|
+      Unicode.each_grapheme text, @policy do |grapheme|
         char = grapheme.char
 
         if char && control? char

@@ -62,6 +62,15 @@ module TermBuf
     # Whether the owning fibre is running.
     getter? started : Bool = false
 
+    # How this terminal measures a grapheme cluster, which is what the buffer
+    # writes with. Measured at startup unless `TERMBUF_WIDTHS=off` or the
+    # terminal declined to answer.
+    getter widths : Unicode::WidthPolicy = Unicode::WidthPolicy::DEFAULT
+
+    # What the width probe asked and what came back, for diagnostics. Empty
+    # when it did not run.
+    getter width_readings = [] of WidthProbe::Reading
+
     # Turns the bytes the terminal sends into events. Held here rather than
     # made on the reader fibre so that its deadlines can be adjusted before
     # anything starts reading.
@@ -135,7 +144,9 @@ module TermBuf
                    @capabilities : Capabilities = Capabilities::NONE,
                    size : ScreenSize? = nil,
                    pending_input : Bytes = Bytes.empty,
-                   warnings : Array(String) = [] of String)
+                   warnings : Array(String) = [] of String,
+                   @width_spec : String? = nil,
+                   @probe_widths : Bool = false)
       @size = size || @tty.size
       @buffer = Buffer.new @size.columns, @size.rows
       @screen = Region.new Rect.full(@size.columns, @size.rows)
@@ -147,7 +158,7 @@ module TermBuf
       @responses = ResponseRegistry.new
       @decoder = Decoder.new @responses
       @pending_input = pending_input
-      @initial_warnings = warnings
+      @initial_warnings = warnings.dup
     end
 
     # Detects what the terminal can do, takes it over, and starts running.
@@ -176,7 +187,9 @@ module TermBuf
         raise error
       end
 
-      terminal = new tty, resolved.capabilities, tty.size, resolved.input, resolved.warnings
+      terminal = new tty, resolved.capabilities, tty.size, resolved.input, resolved.warnings,
+        width_spec: env[Unicode::WidthOverrides::VARIABLE]?,
+        probe_widths: probe && tty.managed?
       terminal.start
       terminal
     end
@@ -200,6 +213,7 @@ module TermBuf
       @started = true
 
       @tty.enter @capabilities
+      measure_widths
       install_signal_handlers
       install_exit_handler
 
@@ -207,6 +221,54 @@ module TermBuf
       start_reader
 
       @initial_warnings.each { |message| emit Events::Warning.new(message) }
+    end
+
+    # Works out how this terminal measures a cluster.
+    #
+    # After the alternate screen is entered and before anything is drawn on it,
+    # because the samples have to go somewhere and the screen the person was
+    # looking at is not it. Before the reader starts, because the replies would
+    # otherwise arrive as keystrokes.
+    private def measure_widths : Nil
+      measured = Unicode::WidthPolicy::DEFAULT
+
+      if @probe_widths && Unicode::WidthOverrides.probe?(@width_spec)
+        result = WidthProbe.run @tty.input, @tty.output, measured
+        measured = result.policy
+        @width_readings = result.readings
+        @pending_input = keep @pending_input, result.input
+        note_width_disagreements result
+      end
+
+      overrides = Unicode::WidthOverrides.apply measured, @width_spec
+      @initial_warnings.concat overrides.warnings
+
+      @widths = overrides.policy
+      @buffer.policy = @widths
+    end
+
+    # Terminals reach conclusions this design has no rule for. Naming what is
+    # left over beats modelling it wrong and beats saying nothing: an
+    # application drawing such a cluster will see it misplaced, and this is how
+    # it finds out why.
+    private def note_width_disagreements(result : WidthProbe::Result) : Nil
+      result.disagreements.each do |reading|
+        expected = Unicode.string_width reading.sample.text, result.policy
+
+        @initial_warnings << "this terminal advances #{reading.measured} columns for " \
+                             "#{reading.sample.description} (#{reading.sample.text.inspect}); " \
+                             "the buffer will use #{expected}"
+      end
+    end
+
+    private def keep(first : Bytes, second : Bytes) : Bytes
+      return first if second.empty?
+      return second if first.empty?
+
+      joined = Bytes.new first.size + second.size
+      first.copy_to joined
+      second.copy_to joined + first.size
+      joined
     end
 
     # ------------------------------------------------------------- drawing
@@ -278,12 +340,16 @@ module TermBuf
     # Made on first use rather than in the constructor, which would hand a
     # half-built terminal to something that keeps hold of it.
     def cursor : Cursor
-      @cursor ||= Cursor.new self, @screen
+      @cursor ||= cursor @screen
     end
 
     # A cursor over *region*, which scrolls and wraps within it.
     def cursor(region : Region) : Cursor
-      Cursor.new self, region
+      made = Cursor.new self, region
+      # A cursor measuring text differently from the buffer it writes into
+      # would put the next character somewhere the cells disagree with.
+      made.policy = @widths
+      made
     end
 
     # A cursor over *rect*, keeping *scrollback* rows of what scrolls off it.

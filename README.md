@@ -12,7 +12,8 @@ to be able to do. Drawing the same frame twice sends nothing.
   `TERMBUF_CAPS` as the last word
 * Colour capped rather than limited: a 24-bit colour degrades to the 256 palette, then to the
   sixteen, then to nothing, depending on what is there
-* UAX #29 grapheme clusters and UAX #11 widths, from generated tables
+* UAX #29 grapheme clusters and UAX #11 widths, from generated tables, with cluster widths
+  measured from the terminal rather than assumed
 * Keys with modifiers, bracketed paste, resizes, and terminal replies delivered as events on a
   channel
 * Cursors that wrap and scroll inside a region, with an `IO` for each
@@ -270,13 +271,48 @@ With nothing registered, every escape sequence arriving from the terminal is tre
 ### Unicode
 
 ```crystal
-TermBuf::Unicode.string_width "漢字"       # => 4
-TermBuf::Unicode.graphemes "🇺🇸!"           # => ["🇺🇸", "!"]
-TermBuf::Unicode.ambiguous_width = 2       # for a CJK-configured terminal
+TermBuf::Unicode.string_width "漢字"   # => 4
+TermBuf::Unicode.graphemes "🇺🇸!"       # => ["🇺🇸", "!"]
 ```
 
 Width tables are generated from the UCD by `scripts/gen_unicode.cr` and committed, so building the
 shard needs no network access.
+
+### Measured widths
+
+How many cells a cluster occupies is a property of the terminal, not of Unicode. UAX #29 says where
+a cluster ends; it says nothing about what a terminal does with four emoji joined by zero width
+joiners, and terminals disagree. Measured on one machine:
+
+| cluster | ghostty | tmux | Terminal.app |
+|---|---|---|---|
+| `☺️` U+263A U+FE0F | 2 | 2 | 1 |
+| `👨‍👩‍👧‍👦` four faces, ZWJ | 2 | 2 | 11 |
+| `क्षि` conjunct plus vowel sign | 2 | 2 | 3 |
+| `நி` Tamil na plus vowel sign | 2 | 1 | 2 |
+
+Being right about the standard does not help: a terminal advancing eleven columns for a cluster the
+buffer thinks is two has every later cell on that row nine columns out of place. So the shard asks.
+After the alternate screen is entered and before anything is drawn on it, a batch of discriminating
+samples goes out, each followed by `ESC [ 6 n`, and the columns that come back are the terminal's
+own measurements. One round trip, invisible.
+
+```crystal
+terminal.widths           # => WidthPolicy(ambiguous=1 -emoji_presentation … )
+terminal.width_readings   # what was asked and what came back
+```
+
+`Buffer#policy` is what writes use, and `Terminal#cursor` hands the same one to every cursor it
+makes. A measurement no rule explains — Terminal.app's eleven — becomes an `Events::Warning` naming
+the cluster rather than being modelled wrong.
+
+`TERMBUF_WIDTHS` has the last word:
+
+```bash
+TERMBUF_WIDTHS=off                    # skip the measurement, keep the tables
+TERMBUF_WIDTHS=+ambiguous_wide        # a CJK terminal, said rather than measured
+TERMBUF_WIDTHS=-joined_emoji,-emoji_presentation
+```
 
 ### The core layer
 

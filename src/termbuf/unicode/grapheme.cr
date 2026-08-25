@@ -1,6 +1,10 @@
 require "./width"
+require "./policy"
 
 module TermBuf::Unicode
+  # Joins emoji into one cluster, and on most terminals into one glyph.
+  ZERO_WIDTH_JOINER = '\u200D'
+
   # Variation selector 15, forcing text presentation and so a width of one.
   TEXT_PRESENTATION = '\uFE0E'
 
@@ -165,7 +169,15 @@ module TermBuf::Unicode
     @count = 0
     @first = ' '
     @base_width = 0
+    @spacing = 0
+    @laid_out = 0
+    @joined = false
+    @regional = 0
     @presentation : Char? = nil
+    @policy : WidthPolicy
+
+    def initialize(@policy : WidthPolicy)
+    end
 
     # Whether any code point has been added since the cluster was opened.
     def pending? : Bool
@@ -176,29 +188,43 @@ module TermBuf::Unicode
     def open(position : Int32) : Nil
       @start = position
       @count = 0
+      @spacing = 0
+      @laid_out = 0
+      @joined = false
+      @regional = 0
       @presentation = nil
     end
 
     def add(char : Char) : Nil
+      @joined = true if char == ZERO_WIDTH_JOINER
+      @regional += 1 if Unicode.grapheme_class(char).regional_indicator?
+      # What the cluster would take if the terminal laid its pieces end to end
+      # rather than collapsing them, which some do.
+      @laid_out += measure char
+
       if @count.zero?
         @first = char
-        @base_width = Unicode.char_width char
+        @base_width = measure char
       elsif char == EMOJI_PRESENTATION || char == TEXT_PRESENTATION
         @presentation = char
       elsif @base_width.zero?
         # A cluster opening with a combining mark, which happens only at the
         # start of a string, still has to occupy a cell.
-        @base_width = Unicode.char_width char
+        @base_width = measure char
       elsif Unicode.grapheme_class(char).spacing_mark?
         # The one kind of mark that takes a cell of its own. The Tamil vowel
         # sign of `நி` sits beside its consonant rather than over it, and a
         # terminal advances the cursor for it; the same goes for the vowel
         # sign in a Devanagari conjunct. Two cells is as far as this goes,
         # since a lead and one continuation is all a pair of cells can hold.
-        @base_width = Math.min @base_width + Unicode.char_width(char), 2
+        @spacing += measure char
       end
 
       @count += 1
+    end
+
+    private def measure(char : Char) : Int32
+      Unicode.char_width char, @policy.ambiguous
     end
 
     # Closes the cluster at byte offset *finish*, exclusive.
@@ -206,27 +232,39 @@ module TermBuf::Unicode
       Grapheme.new @start, finish - @start, width, @count == 1 ? @first : nil
     end
 
-    # A variation selector overrides the base character's own width: emoji
-    # presentation takes two cells, text presentation one.
+    # What the terminal will advance for this cluster, which is a question
+    # about the terminal and not about Unicode. See `WidthPolicy`.
     private def width : Int32
+      return @laid_out if @joined && !@policy.joined_emoji?
+      return @laid_out if @regional > 1 && !@policy.regional_indicators?
+
+      collapsed
+    end
+
+    private def collapsed : Int32
+      base = @base_width
+      base = Math.min base + @spacing, 2 if @policy.spacing_marks? && !base.zero?
+
       case @presentation
-      when EMOJI_PRESENTATION then Unicode.pictographic?(@first) ? 2 : @base_width
-      when TEXT_PRESENTATION  then @base_width.zero? ? 0 : 1
-      else                         @base_width
+      when EMOJI_PRESENTATION
+        @policy.emoji_presentation? && Unicode.pictographic?(@first) ? 2 : base
+      when TEXT_PRESENTATION then base.zero? ? 0 : 1
+      else                        base
       end
     end
   end
 
   # Yields each extended grapheme cluster of *string* in order, without
   # allocating: a `Grapheme` locates its cluster by byte offset.
-  def self.each_grapheme(string : String, & : Grapheme ->) : Nil
+  def self.each_grapheme(string : String, policy : WidthPolicy = Unicode.policy,
+                         & : Grapheme ->) : Nil
     return if string.empty?
 
     bytes = string.to_unsafe
     bytesize = string.bytesize
     reader = Char::Reader.new string
     breaker = Breaker.new
-    cluster = ClusterState.new
+    cluster = ClusterState.new policy
 
     while (position = reader.pos) < bytesize
       char = reader.current_char
@@ -286,10 +324,10 @@ module TermBuf::Unicode
     result
   end
 
-  # Total number of terminal cells *string* occupies.
-  def self.string_width(string : String) : Int32
+  # Total number of terminal cells *string* occupies, under *policy*.
+  def self.string_width(string : String, policy : WidthPolicy = Unicode.policy) : Int32
     total = 0
-    each_grapheme(string) { |grapheme| total += grapheme.width }
+    each_grapheme(string, policy) { |grapheme| total += grapheme.width }
     total
   end
 end
