@@ -2,7 +2,8 @@
 #
 #     crystal run examples/clock.cr
 #
-# Type to see what arrives; arrow keys included. Press q to leave.
+# Type to see what arrives; arrow keys, modifiers, and pasted text included.
+# Press q to leave.
 require "../src/termbuf"
 
 TermBuf::Terminal.open do |terminal|
@@ -41,10 +42,11 @@ TermBuf::Terminal.open do |terminal|
     select
     when event = terminal.events.receive?
       case event
-      in TermBuf::Events::Input
-        text = String.new event.bytes
-        break if text.includes? 'q'
-        seen << "input     #{text.inspect}"
+      in TermBuf::Events::Key
+        break if event.key.is? 'q'
+        seen << "key       #{event.key}  #{String.new(event.bytes).inspect}"
+      in TermBuf::Events::Paste
+        seen << "paste     #{event.text.inspect}"
       in TermBuf::Events::Response
         seen << "response  #{String.new(event.bytes).inspect}"
       in TermBuf::Events::Resize

@@ -16,7 +16,7 @@ module Validate
   alias Color = TermBuf::Color
   alias Rect = TermBuf::Rect
 
-  PAGES = %w[caps edges widths colours attrs motion]
+  PAGES = %w[caps edges widths colours attrs motion keys]
 
   # One line of the width page: something to draw, and what it is.
   #
@@ -62,6 +62,7 @@ module Validate
       @frame = 0
       @log = 0
       @frozen = false
+      @presses = [] of String
     end
 
     def run : Nil
@@ -102,11 +103,16 @@ module Validate
       when "colours" then draw_colours screen
       when "attrs"   then draw_attrs screen
       when "motion"  then draw_motion screen
+      when "keys"    then draw_keys screen
       end
     end
 
     private def motion? : Bool
       PAGES[@page] == "motion"
+    end
+
+    private def keys? : Bool
+      PAGES[@page] == "keys"
     end
 
     private def columns : Int32
@@ -514,6 +520,29 @@ module Validate
         Style::DEFAULT.faint
     end
 
+    # ---------------------------------------------------------------- page 7
+
+    # What the decoder makes of a real keyboard, which is the only place to
+    # find out: no two terminals agree on how to report a modified key, and a
+    # spec can only check the sequences somebody thought to write down.
+    private def draw_keys(screen) : Nil
+      caps = @terminal.capabilities
+      screen.write 2, 2, "press keys", Style::DEFAULT.bold
+      screen.write 20, 2,
+        caps.includes?(Capability::BracketedPaste) ? "paste something too" : "no bracketed paste here",
+        Style::DEFAULT.faint
+
+      room = Math.max rows - 8, 1
+
+      @presses.last(room).each_with_index do |line, offset|
+        screen.write 2, 4 + offset, line
+      end
+
+      screen.write 2, rows - 3,
+        "[tab] next page   [shift+tab] previous   [q] quit",
+        Style::DEFAULT.faint
+    end
+
     # ---------------------------------------------------------------- input
 
     private def pump : Nil
@@ -527,29 +556,55 @@ module Validate
 
     private def handle(event) : Nil
       case event
-      in Events::Input   then keys String.new(event.bytes)
+      in Events::Key     then press event.key, event.bytes
       in Events::Resize  then @rebuild = true
       in Events::Closed  then @running = false
       in Events::Failure then @running = false
+      in Events::Paste   then pasted event.text
       in Events::Response, Events::Warning
-        # Nothing here asks the terminal anything, so neither should happen.
+        # Nothing here asks the terminal anything.
       in Nil
         @running = false
       end
     end
 
-    private def keys(text : String) : Nil
-      text.each_char do |key|
-        case key
-        when 'q'      then @running = false
-        when 'r'      then force_repaint
-        when 'f'      then @filled = !@filled
-        when ' '      then @frozen = !@frozen
-        when '1'..'9' then go_to key.to_i - 1
-        when 'C'      then go_to @page + 1 # the tail of the right arrow
-        when 'D'      then go_to @page - 1 # and of the left
-        end
+    private def press(key : Key, bytes : Bytes) : Nil
+      remember key, bytes
+      return @running = false if key.is? 'q'
+
+      # Tab moves between pages everywhere, which is what leaves the keys page
+      # free to show the arrows and the digits instead of acting on them.
+      if key.is? Key::Name::Tab
+        return go_to(key.shift? ? @page - 1 : @page + 1)
       end
+
+      return if keys?
+
+      case key.name
+      when .right? then return go_to @page + 1
+      when .left?  then return go_to @page - 1
+      end
+
+      return unless key.character?
+
+      case key.char
+      when 'r'      then force_repaint
+      when 'f'      then @filled = !@filled
+      when ' '      then @frozen = !@frozen
+      when '1'..'9' then go_to key.char.to_i - 1
+      end
+    end
+
+    # Kept whichever page is showing, so a key pressed on another one is still
+    # there to look at afterwards.
+    private def remember(key : Key, bytes : Bytes) : Nil
+      @presses << "#{key.to_s.ljust(18)}#{String.new(bytes).inspect}"
+      @presses.shift if @presses.size > 64
+    end
+
+    private def pasted(text : String) : Nil
+      preview = text.size > 40 ? "#{text[0, 40]}…" : text
+      @presses << "#{"paste".ljust(18)}#{preview.inspect} (#{text.bytesize} bytes)"
     end
 
     private def go_to(page : Int32) : Nil

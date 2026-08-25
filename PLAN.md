@@ -433,7 +433,7 @@ scheduler.
 ### Phase 7 — Input
 
 Byte reader in an isolated context, UTF-8 and escape-sequence decoder, basic key model with
-modifiers, response-pattern registry with coalescing, passthrough API.
+modifiers, response-pattern registry with coalescing, passthrough API, bracketed paste.
 
 ### Phase 8 — Cursors and IO
 

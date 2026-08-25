@@ -316,13 +316,17 @@ Spectator.describe TermBuf::Terminal do
   end
 
   describe "input" do
-    it "delivers keystrokes" do
+    it "delivers a key per character typed" do
       with_harness do |harness|
         harness.type "abc"
-        input = harness.event_of TermBuf::Events::Input
 
-        fail "no input arrived" unless input
-        expect(String.new(input.bytes)).to eq "abc"
+        %w[a b c].each do |letter|
+          event = harness.event_of TermBuf::Events::Key
+          fail "no key arrived for #{letter}" unless event
+
+          expect(event.key.char).to eq letter[0]
+          expect(String.new(event.bytes)).to eq letter
+        end
       end
     end
 
@@ -343,10 +347,11 @@ Spectator.describe TermBuf::Terminal do
     it "delivers an escape sequence nobody asked for as a keystroke" do
       with_harness do |harness|
         harness.type "\e[A"
-        input = harness.event_of TermBuf::Events::Input
+        event = harness.event_of TermBuf::Events::Key
 
-        fail "no input arrived" unless input
-        expect(String.new(input.bytes)).to eq "\e[A"
+        fail "no key arrived" unless event
+        expect(event.key.name).to eq TermBuf::Key::Name::Up
+        expect(String.new(event.bytes)).to eq "\e[A"
       end
     end
 
@@ -354,10 +359,10 @@ Spectator.describe TermBuf::Terminal do
       with_harness do |harness|
         harness.terminal.expect_response "\e[?", "$y"
         harness.type "\e[A"
-        input = harness.event_of TermBuf::Events::Input
+        event = harness.event_of TermBuf::Events::Key
 
-        fail "no input arrived" unless input
-        expect(String.new(input.bytes)).to eq "\e[A"
+        fail "no key arrived" unless event
+        expect(event.key.name).to eq TermBuf::Key::Name::Up
       end
     end
 
@@ -367,19 +372,19 @@ Spectator.describe TermBuf::Terminal do
         harness.terminal.forget_response pattern
 
         harness.type "\e[3;4R"
-        input = harness.event_of TermBuf::Events::Input
+        event = harness.event_of TermBuf::Events::Key
 
-        fail "no input arrived" unless input
-        expect(String.new(input.bytes)).to eq "\e[3;4R"
+        fail "no key arrived" unless event
+        expect(String.new(event.bytes)).to eq "\e[3;4R"
       end
     end
 
     it "delivers keystrokes left over from probing before anything else" do
       with_harness(pending: "q".to_slice) do |harness|
-        input = harness.event_of TermBuf::Events::Input
+        event = harness.event_of TermBuf::Events::Key
 
-        fail "no input arrived" unless input
-        expect(String.new(input.bytes)).to eq "q"
+        fail "no key arrived" unless event
+        expect(event.key.char).to eq 'q'
       end
     end
 
@@ -390,10 +395,10 @@ Spectator.describe TermBuf::Terminal do
       with_harness do |harness|
         harness.terminal.escape_timeout = 30.milliseconds
         harness.type "\e"
-        input = harness.event_of TermBuf::Events::Input
+        event = harness.event_of TermBuf::Events::Key
 
-        fail "the escape key never arrived" unless input
-        expect(String.new(input.bytes)).to eq "\e"
+        fail "the escape key never arrived" unless event
+        expect(event.key.name).to eq TermBuf::Key::Name::Escape
       end
     end
 
@@ -402,12 +407,12 @@ Spectator.describe TermBuf::Terminal do
         harness.terminal.escape_timeout = 30.milliseconds
         harness.type "\e\e"
 
-        first = harness.event_of TermBuf::Events::Input
-        second = harness.event_of TermBuf::Events::Input
+        first = harness.event_of TermBuf::Events::Key
+        second = harness.event_of TermBuf::Events::Key
 
         fail "expected two keys" unless first && second
-        expect(String.new(first.bytes)).to eq "\e"
-        expect(String.new(second.bytes)).to eq "\e"
+        expect(first.key.name).to eq TermBuf::Key::Name::Escape
+        expect(second.key.name).to eq TermBuf::Key::Name::Escape
       end
     end
 
@@ -418,9 +423,10 @@ Spectator.describe TermBuf::Terminal do
         sleep 20.milliseconds
         harness.type "[A"
 
-        input = harness.event_of TermBuf::Events::Input
-        fail "no key arrived" unless input
-        expect(String.new(input.bytes)).to eq "\e[A"
+        event = harness.event_of TermBuf::Events::Key
+        fail "no key arrived" unless event
+        expect(event.key.name).to eq TermBuf::Key::Name::Up
+        expect(String.new(event.bytes)).to eq "\e[A"
       end
     end
 
@@ -429,9 +435,20 @@ Spectator.describe TermBuf::Terminal do
         harness.terminal.escape_timeout = 500.milliseconds
         harness.type "\ea"
 
-        input = harness.event_of TermBuf::Events::Input
-        fail "no key arrived" unless input
-        expect(String.new(input.bytes)).to eq "\ea"
+        event = harness.event_of TermBuf::Events::Key
+        fail "no key arrived" unless event
+        expect(event.key).to eq TermBuf::Key.character('a', TermBuf::Modifiers::Alt)
+        expect(String.new(event.bytes)).to eq "\ea"
+      end
+    end
+
+    it "delivers pasted text as one event rather than as typing" do
+      with_harness do |harness|
+        harness.type "\e[200~hello\nthere\e[201~"
+
+        paste = harness.event_of TermBuf::Events::Paste
+        fail "no paste arrived" unless paste
+        expect(paste.text).to eq "hello\nthere"
       end
     end
 

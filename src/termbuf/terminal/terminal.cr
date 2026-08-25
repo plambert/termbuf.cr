@@ -60,8 +60,8 @@ module TermBuf
 
     # The replies the application is waiting for. Anything arriving from the
     # terminal that matches one becomes an `Events::Response`; everything else
-    # is an `Events::Input`, because an escape sequence nobody asked for is a
-    # key someone pressed.
+    # goes to the decoder, because an escape sequence nobody asked for is a key
+    # someone pressed.
     getter responses : ResponseRegistry
 
     # Whether the terminal has been given back.
@@ -404,18 +404,18 @@ module TermBuf
     end
 
     private def read_loop : Nil
-      scanner = ResponseScanner.new
-      deliver scanner, @pending_input unless @pending_input.empty?
+      decoder = Decoder.new @responses
+      decoder.feed(@pending_input) { |event| emit event } unless @pending_input.empty?
 
       buffer = Bytes.new 4096
       input = @tty.input
 
       loop do
-        count = read_next input, buffer, scanner
+        count = read_next input, buffer, decoder
         next if count.nil?
         break if count.zero?
 
-        deliver scanner, buffer[0, count]
+        decoder.feed(buffer[0, count]) { |event| emit event }
       end
     rescue IO::Error
       # The terminal went away.
@@ -425,13 +425,13 @@ module TermBuf
 
     # Reads the next chunk. Returns the number of bytes, zero at end of input,
     # or `nil` when the wait for the rest of a sequence ran out and what was
-    # held back has been handed over as ordinary keys.
+    # held back has been delivered for what it turned out to be.
     #
-    # The deadline is only applied while a partial sequence is pending. The
-    # rest of the time the read blocks, which is what it should do: waking up
-    # every 25 milliseconds to find nothing is work nobody asked for.
-    private def read_next(input : IO, buffer : Bytes, scanner : ResponseScanner) : Int32?
-      return input.read buffer unless scanner.pending?
+    # The deadline is only applied while something is pending. The rest of the
+    # time the read blocks, which is what it should do: waking up every 25
+    # milliseconds to find nothing is work nobody asked for.
+    private def read_next(input : IO, buffer : Bytes, decoder : Decoder) : Int32?
+      return input.read buffer unless decoder.pending?
       return input.read buffer unless input.responds_to? :read_timeout=
 
       input.read_timeout = @escape_timeout
@@ -439,38 +439,11 @@ module TermBuf
       begin
         input.read buffer
       rescue IO::TimeoutError
-        flush scanner
+        decoder.flush { |event| emit event }
         nil
       ensure
         input.read_timeout = nil
       end
-    end
-
-    private def deliver(scanner : ResponseScanner, bytes : Bytes) : Nil
-      scanner.feed(bytes) { |kind, chunk| emit_chunk kind, chunk }
-    end
-
-    # Hands over whatever was being held back, which after a timeout is the
-    # escape key rather than the start of something longer.
-    private def flush(scanner : ResponseScanner) : Nil
-      scanner.flush { |kind, chunk| emit_chunk kind, chunk }
-    end
-
-    private def emit_chunk(kind : ResponseScanner::Kind, chunk : Bytes) : Nil
-      # The scanner's slices point into its own buffer, which it reuses.
-      copy = chunk.dup
-      emit(reply?(kind, copy) ? Events::Response.new(copy) : Events::Input.new(copy))
-    end
-
-    # An escape sequence is a reply only if the application said it was
-    # expecting one shaped like that. Otherwise it is a key: an arrow sends
-    # `ESC [ A`, and nothing about those bytes says whether the terminal or a
-    # finger produced them.
-    private def reply?(kind : ResponseScanner::Kind, bytes : Bytes) : Bool
-      return false unless kind.sequence?
-      return false if @responses.empty?
-
-      @responses.matches? String.new(bytes)
     end
 
     private def emit(event : Event) : Nil

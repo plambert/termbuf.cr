@@ -82,6 +82,9 @@ module TermBuf
 
       raw!
       @output << "\e[?1049h" if capabilities.includes? Capability::AltScreen
+      # Bracketed paste, so that pasted text arrives marked as pasted rather
+      # than as a very fast typist triggering every key binding on the way past.
+      @output << "\e[?2004h" if capabilities.includes? Capability::BracketedPaste
       @output << "\e[?25l"
       @output << "\e[2J\e[H"
       @output.flush
@@ -96,6 +99,7 @@ module TermBuf
         @entered = false
 
         @output << "\e[?25h"
+        @output << "\e[?2004l" if capabilities.includes? Capability::BracketedPaste
         @output << "\e[?1049l" if capabilities.includes? Capability::AltScreen
         @output << "\e[0m"
         @output.flush

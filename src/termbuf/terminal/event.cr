@@ -1,4 +1,5 @@
 require "../caps/screen_size"
+require "../input/key"
 
 module TermBuf
   # What the terminal tells the application about, delivered over one channel.
@@ -10,9 +11,18 @@ module TermBuf
     # and everything marked for redraw by the time this arrives.
     record Resize, size : ScreenSize
 
-    # Bytes from the keyboard that are not a reply to anything. Until the
-    # decoder lands these arrive raw; afterwards they arrive as keys.
-    record Input, bytes : Bytes
+    # A key press. *bytes* is what the terminal sent to say so, which matters
+    # for the sequences the decoder could not name and for anything an
+    # application would rather interpret itself.
+    record Key, key : ::TermBuf::Key, bytes : Bytes
+
+    # Text that arrived between bracketed paste markers.
+    #
+    # It is delivered whole rather than as key presses, which is the point of
+    # the brackets: pasted text is not typing, and an application that treats
+    # it as typing will run its key bindings over whatever was on the
+    # clipboard.
+    record Paste, text : String
 
     # A complete escape sequence the terminal sent, which is to say an answer
     # to something that was asked of it.
@@ -33,6 +43,7 @@ module TermBuf
   end
 
   # Anything the terminal has to say, in the order it happened.
-  alias Event = Events::Resize | Events::Input | Events::Response |
-                Events::Warning | Events::Failure | Events::Closed
+  alias Event = Events::Resize | Events::Key | Events::Paste |
+                Events::Response | Events::Warning | Events::Failure |
+                Events::Closed
 end

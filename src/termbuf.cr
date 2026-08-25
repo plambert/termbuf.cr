@@ -43,5 +43,13 @@ require "./termbuf/terminal"
 #
 # `Terminal#batch` collects a frame's drawing and sends it to the owning fibre
 # as one channel operation, which is what a full redraw should use.
+#
+# ### Input
+#
+# `Terminal#events` carries everything the terminal has to say. Keystrokes
+# arrive as `Events::Key` with a decoded `Key`; text arrives as `Events::Paste`
+# when it was pasted rather than typed; replies to queries the application
+# registered with `Terminal#expect_response` arrive as `Events::Response`.
+# See `Decoder` for what separates the three.
 module TermBuf
 end

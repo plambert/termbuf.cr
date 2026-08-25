@@ -234,7 +234,10 @@ class ModelTerminal
     when "7"    then @autowrap = enabled
     when "25"   then @cursor_visible = enabled
     when "2026" then @synchronized = enabled
-    else             raise "model terminal: unsupported private mode #{parameters.inspect}"
+    when "1049", "2004"
+      # The alternate screen and bracketed paste change nothing about what a
+      # cell holds, which is all this model is for.
+    else raise "model terminal: unsupported private mode #{parameters.inspect}"
     end
   end
 

@@ -1,0 +1,249 @@
+require "../spec_helper"
+
+private alias Name = TermBuf::Key::Name
+private alias Mods = TermBuf::Modifiers
+
+# Everything one feed produced, in order.
+private def decode(text : String, decoder : TermBuf::Decoder? = nil) : Array(TermBuf::Event)
+  events = [] of TermBuf::Event
+  (decoder || TermBuf::Decoder.new).feed(text.to_slice) { |event| events << event }
+  events
+end
+
+private def keys(text : String) : Array(TermBuf::Key)
+  decode(text).compact_map { |event| event.as?(TermBuf::Events::Key).try &.key }
+end
+
+private def key(text : String) : TermBuf::Key
+  found = keys text
+  raise "expected one key from #{text.inspect}, got #{found.size}" unless found.size == 1
+
+  found.first
+end
+
+Spectator.describe TermBuf::Decoder do
+  describe "characters" do
+    it "delivers one key per character" do
+      expect(keys("abc").map &.char).to eq ['a', 'b', 'c']
+    end
+
+    it "carries the bytes the terminal sent" do
+      event = decode("a").first.as TermBuf::Events::Key
+
+      expect(String.new(event.bytes)).to eq "a"
+    end
+
+    it "decodes multi byte characters" do
+      expect(key("\u{E9}").char).to eq '\u{E9}'
+      expect(key("\u{6F22}").char).to eq '\u{6F22}'
+      expect(key("\u{1F642}").char).to eq '\u{1F642}'
+    end
+
+    # A read can end anywhere, including the middle of a character.
+    it "waits for the rest of a character split across two reads" do
+      decoder = TermBuf::Decoder.new
+      bytes = "\u{6F22}".to_slice
+
+      expect(decode(String.new(bytes[0, 2]), decoder)).to be_empty
+      expect(decoder.pending?).to be_true
+
+      events = decode String.new(bytes[2..]), decoder
+      expect(events.size).to eq 1
+      expect(events.first.as(TermBuf::Events::Key).key.char).to eq '\u{6F22}'
+    end
+
+    it "gives up on a character that never finishes" do
+      decoder = TermBuf::Decoder.new
+      decode String.new("\u{6F22}".to_slice[0, 2]), decoder
+
+      events = [] of TermBuf::Event
+      decoder.flush { |event| events << event }
+
+      expect(events.size).to eq 1
+      expect(events.first.as(TermBuf::Events::Key).key.char).to eq Char::REPLACEMENT
+    end
+  end
+
+  describe "control bytes" do
+    it "names the keys that predate escape sequences" do
+      expect(key("\r").name).to eq Name::Enter
+      expect(key("\n").name).to eq Name::Enter
+      expect(key("\t").name).to eq Name::Tab
+      expect(key("\u{7F}").name).to eq Name::Backspace
+    end
+
+    # An escape on its own is held back, because it is also the first byte of
+    # every arrow key. Only the timeout, which arrives as a flush, settles it.
+    it "delivers a lone escape as the escape key once nothing follows" do
+      decoder = TermBuf::Decoder.new
+
+      expect(decode("\e", decoder)).to be_empty
+      expect(decoder.pending?).to be_true
+
+      events = [] of TermBuf::Event
+      decoder.flush { |event| events << event }
+
+      expect(events.size).to eq 1
+      expect(events.first.as(TermBuf::Events::Key).key.name).to eq Name::Escape
+    end
+
+    it "reads a control byte as its letter with ctrl held" do
+      expect(key("\u{3}")).to eq TermBuf::Key.character('c', Mods::Ctrl)
+      expect(key("\u{1}")).to eq TermBuf::Key.character('a', Mods::Ctrl)
+      expect(key("\u{1A}")).to eq TermBuf::Key.character('z', Mods::Ctrl)
+      expect(key("\u{1C}")).to eq TermBuf::Key.character('\\', Mods::Ctrl)
+      expect(key("\u{0}")).to eq TermBuf::Key.character(' ', Mods::Ctrl)
+    end
+
+    # Tab is Ctrl+I on the wire and there is nothing to be done about it; the
+    # name that gets used is the one people press.
+    it "prefers the named key where a byte stands for two" do
+      expect(key("\t").name).to eq Name::Tab
+      expect(key("\r").name).to eq Name::Enter
+    end
+  end
+
+  describe "escape sequences" do
+    it "decodes the arrows in both forms" do
+      expect(key("\e[A").name).to eq Name::Up
+      expect(key("\e[D").name).to eq Name::Left
+      expect(key("\eOA").name).to eq Name::Up
+      expect(key("\eOC").name).to eq Name::Right
+    end
+
+    it "decodes the keys around the arrows" do
+      expect(key("\e[H").name).to eq Name::Home
+      expect(key("\e[F").name).to eq Name::End
+      expect(key("\e[2~").name).to eq Name::Insert
+      expect(key("\e[3~").name).to eq Name::Delete
+      expect(key("\e[5~").name).to eq Name::PageUp
+      expect(key("\e[6~").name).to eq Name::PageDown
+    end
+
+    it "decodes the function keys" do
+      expect(key("\eOP").name).to eq Name::F1
+      expect(key("\e[15~").name).to eq Name::F5
+      expect(key("\e[24~").name).to eq Name::F12
+      expect(key("\e[34~").name).to eq Name::F20
+    end
+
+    it "reads the modifier parameter" do
+      expect(key("\e[1;2A")).to eq TermBuf::Key.named(Name::Up, Mods::Shift)
+      expect(key("\e[1;5C")).to eq TermBuf::Key.named(Name::Right, Mods::Ctrl)
+      expect(key("\e[1;3D")).to eq TermBuf::Key.named(Name::Left, Mods::Alt)
+      expect(key("\e[1;7B")).to eq TermBuf::Key.named(Name::Down, Mods::Ctrl | Mods::Alt)
+      expect(key("\e[3;5~")).to eq TermBuf::Key.named(Name::Delete, Mods::Ctrl)
+    end
+
+    it "decodes the modified function keys" do
+      expect(key("\e[1;2P")).to eq TermBuf::Key.named(Name::F1, Mods::Shift)
+      expect(key("\e[15;5~")).to eq TermBuf::Key.named(Name::F5, Mods::Ctrl)
+    end
+
+    it "reads backtab as shift and tab" do
+      expect(key("\e[Z")).to eq TermBuf::Key.named(Name::Tab, Mods::Shift)
+    end
+
+    it "reads escape then a character as that character with alt" do
+      expect(key("\ea")).to eq TermBuf::Key.character('a', Mods::Alt)
+      expect(key("\e\u{3}")).to eq TermBuf::Key.character('c', Mods::Alt | Mods::Ctrl)
+    end
+
+    # A cursor position report nobody registered is not F3, however much
+    # `ESC [ 3 ; 4 R` looks like one.
+    it "refuses to read an unregistered report as a function key" do
+      expect(key("\e[3;4R").name).to eq Name::Unknown
+    end
+
+    it "hands over a sequence it cannot name with the bytes intact" do
+      event = decode("\e[?1;2c").first.as TermBuf::Events::Key
+
+      expect(event.key.name).to eq Name::Unknown
+      expect(String.new(event.bytes)).to eq "\e[?1;2c"
+    end
+
+    it "decodes the kitty and modifyOtherKeys forms of a modified character" do
+      expect(key("\e[99;5u")).to eq TermBuf::Key.character('c', Mods::Ctrl)
+      expect(key("\e[27;5;99~")).to eq TermBuf::Key.character('c', Mods::Ctrl)
+    end
+  end
+
+  describe "responses" do
+    it "delivers a registered reply as a response rather than a key" do
+      registry = TermBuf::ResponseRegistry.new
+      registry.register "\e[", "R"
+      decoder = TermBuf::Decoder.new registry
+
+      events = decode "\e[3;4R", decoder
+      expect(events.size).to eq 1
+      expect(events.first).to be_a TermBuf::Events::Response
+    end
+
+    it "delivers an unregistered sequence as a key" do
+      expect(decode("\e[3;4R").first).to be_a TermBuf::Events::Key
+    end
+  end
+
+  describe "bracketed paste" do
+    it "delivers what was pasted as one event" do
+      events = decode "\e[200~hello\e[201~"
+
+      expect(events.size).to eq 1
+      expect(events.first.as(TermBuf::Events::Paste).text).to eq "hello"
+    end
+
+    it "does not decode pasted text as key presses" do
+      events = decode "\e[200~q\r\e[201~"
+
+      expect(events.size).to eq 1
+      expect(events.first.as(TermBuf::Events::Paste).text).to eq "q\r"
+    end
+
+    # A paste can be split across as many reads as the kernel likes, and the
+    # markers can land anywhere.
+    it "collects a paste that arrives in pieces" do
+      decoder = TermBuf::Decoder.new
+
+      expect(decode("\e[200~one ", decoder)).to be_empty
+      expect(decoder.pasting?).to be_true
+      expect(decode("two ", decoder)).to be_empty
+
+      events = decode "three\e[201~", decoder
+      expect(events.size).to eq 1
+      expect(events.first.as(TermBuf::Events::Paste).text).to eq "one two three"
+    end
+
+    # Terminals filter the closing marker out of pasted content and nothing
+    # else, so an escape sequence on the clipboard reaches us intact.
+    it "keeps an escape sequence that was itself pasted" do
+      events = decode "\e[200~a\e[Ab\e[201~"
+
+      expect(events.size).to eq 1
+      expect(events.first.as(TermBuf::Events::Paste).text).to eq "a\e[Ab"
+    end
+
+    it "goes back to delivering keys once the paste closes" do
+      decoder = TermBuf::Decoder.new
+      decode "\e[200~x\e[201~", decoder
+
+      events = decode "y", decoder
+      expect(events.first.as(TermBuf::Events::Key).key.char).to eq 'y'
+    end
+  end
+
+  describe TermBuf::Key do
+    it "prints in a form a binding table would use" do
+      expect(TermBuf::Key.character('c', Mods::Ctrl).to_s).to eq "Ctrl+C"
+      expect(TermBuf::Key.named(Name::Up, Mods::Alt).to_s).to eq "Alt+Up"
+      expect(TermBuf::Key.named(Name::F5, Mods::Shift).to_s).to eq "Shift+F5"
+      expect(TermBuf::Key.character('a').to_s).to eq "a"
+      expect(TermBuf::Key.character(' ').to_s).to eq "Space"
+    end
+
+    it "answers what was pressed without unpacking it" do
+      expect(TermBuf::Key.character('q').is?('q')).to be_true
+      expect(TermBuf::Key.character('q', Mods::Ctrl).is?('q')).to be_false
+      expect(TermBuf::Key.named(Name::Up, Mods::Ctrl).is?(Name::Up)).to be_true
+    end
+  end
+end

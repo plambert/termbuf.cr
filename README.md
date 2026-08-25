@@ -13,7 +13,8 @@ to be able to do. Drawing the same frame twice sends nothing.
 * Colour capped rather than limited: a 24-bit colour degrades to the 256 palette, then to the
   sixteen, then to nothing, depending on what is there
 * UAX #29 grapheme clusters and UAX #11 widths, from generated tables
-* Input, resizes, and terminal replies delivered as events on a channel
+* Keys with modifiers, bracketed paste, resizes, and terminal replies delivered as events on a
+  channel
 
 Requires Crystal 1.21 or later.
 
@@ -100,7 +101,8 @@ order it happened.
 
 ```crystal
 case event = terminal.events.receive
-in TermBuf::Events::Input    then handle_key String.new(event.bytes)
+in TermBuf::Events::Key      then handle event.key
+in TermBuf::Events::Paste    then insert event.text
 in TermBuf::Events::Resize   then redraw event.size
 in TermBuf::Events::Response then handle_reply String.new(event.bytes)
 in TermBuf::Events::Warning  then log event.message
@@ -111,6 +113,34 @@ end
 
 `Warning` carries anything detection wanted to report — these never go to stderr, since the screen
 is taken over by then.
+
+### Keys
+
+`Key` is a value: which key, which modifiers, and for an ordinary character which character.
+
+```crystal
+ctrl_c = TermBuf::Key.character('c', TermBuf::Modifiers::Ctrl)
+
+case
+when key.is?('q')                          then quit          # q, nothing held
+when key.is?(TermBuf::Key::Name::PageDown) then scroll 1      # whatever is held
+when key == ctrl_c                         then interrupt     # exactly Ctrl+C
+when key.character?                        then insert key.char
+end
+
+key.to_s   # => "Ctrl+C", "Alt+Up", "Shift+F5", "a", "Space"
+```
+
+`Events::Key#bytes` carries what the terminal actually sent, for the sequences the decoder could
+not name — those arrive as `Key::Name::Unknown` rather than being dropped.
+
+Modifiers are only as good as the terminal's encoding. `Ctrl` with a letter arrives as one control
+byte, so `Ctrl+I` and `Tab` are the same key press and nothing downstream can separate them. The
+decoder reports the name people press.
+
+Pasted text arrives as `Events::Paste` rather than as a burst of key presses, so a paste does not
+run every key binding over whatever was on the clipboard. Bracketed paste is enabled at startup
+when the terminal has it; `Events::Paste` simply never arrives when it does not.
 
 ### Styles and colour
 
@@ -164,7 +194,7 @@ Register the shape of the answer before sending the query:
 ```crystal
 pattern = terminal.expect_response "\e[?", "$y"
 terminal.passthrough "\e[?2026$p"
-# the reply arrives as Events::Response; everything else is Events::Input
+# the reply arrives as Events::Response; everything else is a key
 terminal.forget_response pattern
 ```
 
@@ -205,7 +235,8 @@ crystal run examples/validate.cr  # six pages checking a real terminal against t
 
 `validate.cr` is worth running in any terminal you intend to support: it reports what detection
 concluded, writes every cell of the screen including the bottom-right corner, checks the terminal's
-idea of grapheme widths against the tables, and shows what a frame costs in bytes.
+idea of grapheme widths against the tables, shows what a frame costs in bytes, and decodes whatever
+you type on its last page.
 
 ## Development
 

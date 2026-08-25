@@ -1,4 +1,5 @@
 require "./terminal/tty"
+require "./input/decoder"
 require "./terminal/event"
 require "./terminal/responses"
 require "./terminal/command"
