@@ -16,7 +16,7 @@ module Validate
   alias Color = TermBuf::Color
   alias Rect = TermBuf::Rect
 
-  PAGES = %w[caps edges widths colours attrs motion keys]
+  PAGES = %w[caps edges widths colours attrs motion keys cursors]
 
   # One line of the width page: something to draw, and what it is.
   #
@@ -63,6 +63,7 @@ module Validate
       @log = 0
       @frozen = false
       @presses = [] of String
+      @typed = ""
     end
 
     def run : Nil
@@ -104,6 +105,7 @@ module Validate
       when "attrs"   then draw_attrs screen
       when "motion"  then draw_motion screen
       when "keys"    then draw_keys screen
+      when "cursors" then draw_cursors screen
       end
     end
 
@@ -113,6 +115,10 @@ module Validate
 
     private def keys? : Bool
       PAGES[@page] == "keys"
+    end
+
+    private def cursors? : Bool
+      PAGES[@page] == "cursors"
     end
 
     private def columns : Int32
@@ -543,6 +549,74 @@ module Validate
         Style::DEFAULT.faint
     end
 
+    # ---------------------------------------------------------------- page 8
+
+    # A cursor streaming into a pane, and the terminal's own cursor following
+    # it. What a spec cannot check is whether the block ends up where the next
+    # character is going to appear, which needs eyes on a real terminal.
+    #
+    # The pane is redrawn from the text typed so far every frame, so wrapping
+    # and scrolling happen afresh each time and only the tail of a long enough
+    # paragraph survives — which is what a pane with no scrollback does.
+    private def draw_cursors(screen) : Nil
+      screen.write 2, 2, "type into the pane", Style::DEFAULT.bold
+      screen.write 22, 2, "the block is the terminal's cursor", Style::DEFAULT.faint
+
+      pane = Rect.new 3, 5, Math.max(columns - 6, 4), Math.max(rows - 12, 2)
+      return if pane.height < 2
+
+      draw_pane_border screen, pane
+      stream screen, pane
+      draw_escape_samples screen, pane.bottom + 3
+
+      screen.write 2, rows - 3,
+        "everything but tab and q is typed   [tab] next page   [q] quit",
+        Style::DEFAULT.faint
+    end
+
+    private def draw_pane_border(screen, pane : Rect) : Nil
+      faint = Style::DEFAULT.faint
+      width = pane.width
+
+      screen.write pane.x - 1, pane.y - 1, "┌#{"─" * width}┐", faint
+      screen.write pane.x - 1, pane.bottom + 1, "└#{"─" * width}┘", faint
+
+      pane.each_row do |row|
+        screen.write_char pane.x - 1, row, '│', faint
+        screen.write_char pane.right + 1, row, '│', faint
+      end
+    end
+
+    # The cursor writes into the batch this frame is being built in, so the
+    # whole pane reaches the owning fibre as one channel operation like
+    # everything else on the page.
+    private def stream(screen, pane : Rect) : Nil
+      cursor = Cursor.new screen, Region.new(pane)
+      cursor.print @typed
+      @terminal.hardware_cursor = cursor
+    end
+
+    SAMPLE = "plain \e[1mbold\e[0m \e[3;38;5;208mitalic\e[0m \e[4:3mcurly\e[0m"
+
+    private def draw_escape_samples(screen, row : Int32) : Nil
+      return if row >= rows - 1
+
+      screen.write 2, row, "scanned", Style::DEFAULT.faint
+      sample(screen, row, raw: false).print SAMPLE
+
+      return if row + 1 >= rows - 1
+
+      screen.write 2, row + 1, "raw", Style::DEFAULT.faint
+      sample(screen, row + 1, raw: true).print SAMPLE
+    end
+
+    # One row, so autowrap comes off: a single row region has nowhere to wrap
+    # to and would scroll away what it was showing.
+    private def sample(screen, row : Int32, raw : Bool) : Cursor
+      bounds = Rect.new 12, row, Math.max(columns - 14, 4), 1
+      Cursor.new screen, Region.new(bounds), raw: raw, autowrap: false
+    end
+
     # ---------------------------------------------------------------- input
 
     private def pump : Nil
@@ -578,13 +652,17 @@ module Validate
         return go_to(key.shift? ? @page - 1 : @page + 1)
       end
 
+      return type(key) if cursors?
       return if keys?
 
       case key.name
-      when .right? then return go_to @page + 1
-      when .left?  then return go_to @page - 1
+      when .right? then go_to @page + 1
+      when .left?  then go_to @page - 1
+      else              command key
       end
+    end
 
+    private def command(key : Key) : Nil
       return unless key.character?
 
       case key.char
@@ -592,6 +670,14 @@ module Validate
       when 'f'      then @filled = !@filled
       when ' '      then @frozen = !@frozen
       when '1'..'9' then go_to key.char.to_i - 1
+      end
+    end
+
+    private def type(key : Key) : Nil
+      case key.name
+      when .enter?     then @typed += "\n"
+      when .backspace? then @typed = @typed[0, Math.max(@typed.size - 1, 0)]
+      when .character? then @typed += key.char
       end
     end
 
@@ -614,6 +700,9 @@ module Validate
       @page = page
       @rebuild = true
       @log = 0
+      # Only one page has anywhere for someone to type, so the terminal's own
+      # cursor has no business blinking on the others.
+      @terminal.hide_cursor unless cursors?
     end
 
     # Sends the screen again without touching what is on it. Whatever scribbled
