@@ -1,4 +1,5 @@
 require "../caps/response_scanner"
+require "../unicode/utf8"
 require "../terminal/event"
 require "../terminal/responses"
 require "./key"
@@ -147,7 +148,7 @@ module TermBuf
       lead = data[offset]
       return control lead, emit if lead < 0x80
 
-      length = utf8_length lead
+      length = Unicode.utf8_length lead
       return replacement(data, offset, 1, emit) if length.zero?
       return 0 if offset + length > data.size
 
@@ -160,16 +161,6 @@ module TermBuf
     private def replacement(data : Bytes, offset : Int32, length : Int32, emit : Event ->) : Int32
       emit.call Events::Key.new(Key.character(Char::REPLACEMENT), data[offset, length].dup)
       length
-    end
-
-    # How many bytes the character starting with *lead* takes, or zero if it is
-    # not a lead byte at all.
-    private def utf8_length(lead : UInt8) : Int32
-      return 2 if 0xC2 <= lead <= 0xDF
-      return 3 if 0xE0 <= lead <= 0xEF
-      return 4 if 0xF0 <= lead <= 0xF4
-
-      0
     end
 
     private def control(byte : UInt8, emit : Event ->) : Int32

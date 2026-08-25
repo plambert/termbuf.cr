@@ -38,7 +38,25 @@ module TermBuf
     # available at all.
     getter capabilities : Capabilities
 
+    # Where to leave the terminal's own cursor when the frame ends, or `nil` to
+    # leave it hidden.
+    #
+    # A frame that changes no cells is still worth sending when this has moved:
+    # the cursor is what tells someone where they are typing.
+    property hardware_cursor : {Int32, Int32}? = nil
+
+    @cursor_shown = false
+    @cursor_placed : {Int32, Int32}? = nil
+
     def initialize(@capabilities : Capabilities)
+    end
+
+    # Forgets what the terminal was last told about its own cursor, so the next
+    # frame says it again. For a forced repaint, where nothing on the screen can
+    # be taken on trust.
+    def reset_state : Nil
+      @cursor_shown = false
+      @cursor_placed = nil
     end
 
     # Changes what the painter may use. The next paint should be forced, since
@@ -51,12 +69,18 @@ module TermBuf
     # nothing to do. The caller writes them out and then calls
     # `Buffer#commit_paint`.
     def paint(buffer : Buffer) : Array(Op)
-      return [] of Op unless buffer.dirty?
-
       body = [] of Op
-      extract_scrolls buffer, body
-      paint_rows buffer, body
-      return body if body.empty?
+
+      if buffer.dirty?
+        extract_scrolls buffer, body
+        paint_rows buffer, body
+      end
+
+      tail = place_cursor body.empty?
+
+      # A frame that only moves the terminal's cursor needs no bracketing: it
+      # cannot be caught half drawn, and there is no text to wrap.
+      return tail if body.empty?
 
       framed = [] of Op
       synchronized = @capabilities.includes? Capability::SynchronizedOutput
@@ -65,8 +89,34 @@ module TermBuf
       framed << Ops::SetAutowrap.new false
       framed.concat body
       framed << Ops::SetAutowrap.new true
+      framed.concat tail
       framed << Ops::EndSync.new if synchronized
       framed
+    end
+
+    # What the frame has to say about the terminal's own cursor, which is
+    # nothing at all when it is hidden and stays hidden.
+    #
+    # Painting cells moves the terminal's cursor wherever the last run ended,
+    # so a frame that drew anything has to put it back. The encoder drops the
+    # move if it happens to be where it already is.
+    private def place_cursor(unchanged : Bool) : Array(Op)
+      ops = [] of Op
+      target = @hardware_cursor
+
+      if target.nil?
+        ops << Ops::SetCursorVisible.new(false) if @cursor_shown
+        @cursor_shown = false
+        return ops
+      end
+
+      return ops if unchanged && @cursor_shown && @cursor_placed == target
+
+      ops << Ops::MoveTo.new target[0], target[1]
+      ops << Ops::SetCursorVisible.new(true) unless @cursor_shown
+      @cursor_shown = true
+      @cursor_placed = target
+      ops
     end
 
     # ------------------------------------------------------------ scrolling

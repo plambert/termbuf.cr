@@ -13,6 +13,15 @@ module TermBuf
     # The rectangle the region covers.
     getter bounds : Rect
 
+    # Moves or resizes the region.
+    #
+    # What the screen-wide region a default cursor lives in needs when the
+    # window changes size. A region an application placed itself keeps the
+    # rectangle it was given; the buffer does not move regions about.
+    def bounds=(bounds : Rect) : Rect
+      @bounds = bounds
+    end
+
     # How many scrolled-off rows to keep. Zero discards them.
     getter scrollback_capacity : Int32
 

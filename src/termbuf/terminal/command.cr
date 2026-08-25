@@ -113,6 +113,53 @@ module TermBuf
     end
   end
 
+  # A drawing surface that writes into a buffer as commands arrive.
+  #
+  # The core layer's answer to `Terminal`: everything built on `Drawing` works
+  # against it, with no device, no fibres, and nothing to tear down afterwards.
+  class BufferSurface
+    include Drawing
+
+    # What is being drawn on.
+    getter buffer : Buffer
+
+    def initialize(@buffer : Buffer)
+    end
+
+    # Applies *command*, ignoring the ones that need a terminal to mean
+    # anything.
+    def issue(command : Command) : Nil
+      if command.is_a? Commands::Batch
+        command.commands.each { |inner| issue inner }
+        return
+      end
+
+      BufferSurface.apply command, @buffer
+    end
+
+    # Applies the commands that need nothing but a buffer, and reports whether
+    # *command* was one of them.
+    #
+    # A class method because the owning fibre needs the same lines and has its
+    # own reasons to keep hold of the ones this leaves alone.
+    def self.apply(command : Command, buffer : Buffer) : Bool
+      case command
+      in Commands::Write        then buffer.write command.x, command.y, command.text, command.style
+      in Commands::WriteChar    then buffer.write_char command.x, command.y, command.char, command.style
+      in Commands::Fill         then buffer.fill command.rect, command.char, command.style
+      in Commands::Clear        then buffer.clear command.style
+      in Commands::Scroll       then buffer.scroll command.rect, command.lines, command.style
+      in Commands::ScrollRegion then buffer.scroll_region command.region, command.lines, command.style
+      in Commands::Invalidate   then buffer.invalidate
+      in Commands::Passthrough, Commands::Paint, Commands::Resize,
+         Commands::Apply, Commands::Batch, Commands::Stop
+        return false
+      end
+
+      true
+    end
+  end
+
   # Collects drawing commands so a whole frame reaches the owning fibre as one
   # channel operation.
   class Batcher

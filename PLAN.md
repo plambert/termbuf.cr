@@ -21,7 +21,7 @@ These were settled up front; the rest of the plan assumes them.
 | Scrollback | Opt-in per region, capacity defaults to zero |
 | Override env var | `TERMBUF_CAPS` with a `+name,-name` list |
 | Spec strategy | Model terminal for correctness **and** golden byte strings for optimizations |
-| Widgets | One: an editable input field. No layout manager, no focus tree, no toolkit |
+| Widgets | An editable input field and a paste notice. Past two, they move to a companion shard |
 
 Assumptions made without asking, flagged here so they can be overridden:
 
@@ -379,7 +379,8 @@ same `Drawing` API an application uses, so it composes with whatever else is on 
 same diff.
 
 What this is not: a widget toolkit. No layout manager, no focus tree, no tables or menus. A field
-reports the height it wants; where it goes is the application's business.
+reports the height it wants; where it goes is the application's business. The count is the boundary:
+past two widgets they move to a companion shard rather than growing a toolkit inside this one.
 
 ### Pieces
 
@@ -600,37 +601,36 @@ Cursor state, region binding, autowrap and scroll behaviour, `IO` implementation
 work, the escape-scanning path for non-raw cursors and the fast path for raw ones, hardware cursor
 association and post-paint positioning.
 
-### Phase 9 — Links, images, colour stack
-
-OSC 8 link ids threaded through `Style` and emitted as ranges; kitty graphics with transport chosen
-by the Phase 5 probe, image placement, deletion, and re-emission on forced repaint; kitty colour
-stack push/pop.
-
-### Phase 10 — Documentation and release
-
-README with worked examples, `examples/`, API docs, the versioned GitHub Pages docs workflow,
-`v0.1.0` tag.
-
-### Phase 11 — Editable input
+### Phase 9 — Editable input
 
 `LineBuffer` and its property specs first, since everything above it is only as correct as the text
 model underneath. Then `History`, `Completion`, and the `Editor` keymap, all testable without a
 terminal. `Border` and `Field` last, drawn through `Drawing` and checked against the model terminal
 the same way the painter is, plus a page in `examples/validate.cr` and a worked example of the
-`#run` form.
+`#run` form. `PasteNotice` belongs here too, since it is the first thing wanting a centred panel.
 
 See [Editable input](#editable-input) for the design.
 
-Worth considering ahead of Phase 9: an input field is wanted by more applications than kitty
-graphics is, and it depends only on Phase 8. The ordering here is the order the work was scoped in,
-not a judgement about what matters.
+Ahead of links and images because an input field is wanted by more applications than kitty graphics
+is, and it depends only on Phase 8.
+
+### Phase 10 — Links, images, colour stack
+
+OSC 8 link ids threaded through `Style` and emitted as ranges; kitty graphics with transport chosen
+by the Phase 5 probe, image placement, deletion, and re-emission on forced repaint; kitty colour
+stack push/pop.
+
+### Phase 11 — Documentation and release
+
+README with worked examples, `examples/`, API docs, the versioned GitHub Pages docs workflow,
+`v0.1.0` tag.
 
 ### Phase 12 — Mouse
 
 SGR mouse reporting turned on and off with the rest of the takeover, `ESC [ < b ; x ; y M` decoded
 into a `MouseEvent`, and the hit test from a screen cell to a buffer position. `Field` then gets
 click-to-position, drag-to-select, and wheel scrolling for nothing, since the operations underneath
-were built in Phase 11.
+were built in Phase 9.
 
 ## Risks
 
@@ -642,7 +642,7 @@ were built in Phase 11.
   them, and probing before the application's input loop starts.
 * **Multiplexers.** `tmux` and `screen` intercept or mangle DCS, APC, and OSC. Passthrough wrapping
   is possible but fiddly; the initial position is to detect the multiplexer and downgrade, and
-  revisit in Phase 9.
+  revisit at Phase 10.
 * **`Cell` size.** Sixteen bytes per cell means a 300×100 terminal is ~480 KB per grid, ~1 MB for
   both. Acceptable, but worth measuring before adding fields.
 * **Grapheme clustering cost.** Cluster segmentation on every write could dominate the write path.
@@ -657,9 +657,9 @@ Not blocking, decide when reached:
 * Sixel as an image fallback for terminals without kitty graphics — currently out of scope.
 * Whether `Region` should support overlap and z-ordering, or stay non-overlapping. Non-overlapping
   is assumed; widget layering would be built above this shard.
-* Whether `Field` belongs in this shard or a companion one. It is here because everyone needs it and
-  because it is the thing that exercises cursors, graphemes, and paste together. If a second widget
-  is ever wanted, that is the moment to split rather than to grow a toolkit.
+* ~~Whether `Field` belongs in this shard or a companion one.~~ Settled: it stays, because everyone
+  needs it and because it is the thing that exercises cursors, graphemes, and paste together. Past
+  two widgets they move to a companion shard rather than growing a toolkit here.
 * Whether an `Editor` action should be an enum or a `Proc`. An enum keeps the vocabulary documented
   and a keymap serializable; a proc lets an application add an action the shard never named. A
   union of the two is the likely answer and costs nothing to defer.

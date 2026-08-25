@@ -1,4 +1,5 @@
 require "../caps/resolver"
+require "../cursor"
 require "../core/buffer"
 require "../core/encoder"
 require "../core/painter"
@@ -83,6 +84,9 @@ module TermBuf
     getter total_paint_bytes : Int64 = 0
 
     @buffer : Buffer
+    @screen : Region
+    @cursor : Cursor?
+    @hardware_cursor : Cursor?
     @painter : Painter
     @encoder : Encoder
     @meter : Meter
@@ -100,6 +104,7 @@ module TermBuf
                    warnings : Array(String) = [] of String)
       @size = size || @tty.size
       @buffer = Buffer.new @size.columns, @size.rows
+      @screen = Region.new Rect.full(@size.columns, @size.rows)
       @painter = Painter.new @capabilities
       @encoder = Encoder.new @buffer.styles, @capabilities, @size.columns, @size.rows
       @meter = Meter.new @tty.output
@@ -228,6 +233,49 @@ module TermBuf
       @responses.unregister pattern
     end
 
+    # -------------------------------------------------------------- cursors
+
+    # The cursor streamed output goes to, covering the whole screen.
+    #
+    # `cursor.io` is an `IO`, so `puts`, `print`, `printf`, and anything else
+    # that writes to one can be pointed at the screen.
+    #
+    # Made on first use rather than in the constructor, which would hand a
+    # half-built terminal to something that keeps hold of it.
+    def cursor : Cursor
+      @cursor ||= Cursor.new self, @screen
+    end
+
+    # A cursor over *region*, which scrolls and wraps within it.
+    def cursor(region : Region) : Cursor
+      Cursor.new self, region
+    end
+
+    # A cursor over *rect*, keeping *scrollback* rows of what scrolls off it.
+    def cursor(rect : Rect, scrollback : Int32 = 0) : Cursor
+      cursor Region.new(rect, scrollback)
+    end
+
+    # Which cursor the terminal's own cursor follows, or `nil` while it is
+    # hidden.
+    #
+    # Hidden is the default, which is what a full screen application wants:
+    # a cursor blinking wherever the last run of text ended is a distraction.
+    # An application with somewhere for someone to type points this at the
+    # cursor they are typing into, and every paint puts the terminal's cursor
+    # back there afterwards.
+    getter hardware_cursor : Cursor?
+
+    # :ditto:
+    def hardware_cursor=(cursor : Cursor?) : Cursor?
+      @hardware_cursor = cursor
+    end
+
+    # Hides the terminal's own cursor.
+    def hide_cursor : Nil
+      @hardware_cursor = nil
+    end
+
     # ------------------------------------------------------------ scheduling
 
     # Starts painting automatically at up to *fps* frames a second, coalescing
@@ -309,22 +357,19 @@ module TermBuf
 
     # Returns true when the owning fibre should stop.
     private def dispatch(command : Command) : Bool
+      return false if BufferSurface.apply command, @buffer
+
       case command
-      in Commands::Write        then @buffer.write command.x, command.y, command.text, command.style
-      in Commands::WriteChar    then @buffer.write_char command.x, command.y, command.char, command.style
-      in Commands::Fill         then @buffer.fill command.rect, command.char, command.style
-      in Commands::Clear        then @buffer.clear command.style
-      in Commands::Scroll       then @buffer.scroll command.rect, command.lines, command.style
-      in Commands::ScrollRegion then @buffer.scroll_region command.region, command.lines, command.style
-      in Commands::Invalidate   then @buffer.invalidate
-      in Commands::Passthrough  then write_through command.bytes
-      in Commands::Paint        then perform_paint command
-      in Commands::Resize       then perform_resize command.size
-      in Commands::Apply        then perform_apply command
-      in Commands::Batch        then command.commands.each { |inner| dispatch inner }
+      in Commands::Passthrough then write_through command.bytes
+      in Commands::Paint       then perform_paint command
+      in Commands::Resize      then perform_resize command.size
+      in Commands::Apply       then perform_apply command
+      in Commands::Batch       then command.commands.each { |inner| dispatch inner }
       in Commands::Stop
         perform_stop command
         return true
+      in Command
+        # Handled by the buffer above.
       end
 
       false
@@ -334,7 +379,13 @@ module TermBuf
       if command.forced
         @buffer.invalidate
         @encoder.reset_state
+        @painter.reset_state
       end
+
+      # Read here rather than on whichever fibre moved the cursor, so a frame
+      # carries one position rather than half of two.
+      following = @hardware_cursor
+      @painter.hardware_cursor = following && {following.x, following.y}
 
       ops = @painter.paint @buffer
 
@@ -361,6 +412,12 @@ module TermBuf
       @size = size
       @buffer.resize size.columns, size.rows
       @encoder.resize size.columns, size.rows
+      @painter.reset_state
+
+      # The screen-wide region has to follow the screen. A region an
+      # application made covers a pane it chose, and moving that is its
+      # business rather than the driver's.
+      @screen.bounds = Rect.full size.columns, size.rows
       @buffer.invalidate
 
       emit Events::Resize.new(size)
