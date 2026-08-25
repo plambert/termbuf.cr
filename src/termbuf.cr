@@ -5,6 +5,7 @@ require "./termbuf/core"
 require "./termbuf/sgr_scanner"
 require "./termbuf/cursor"
 require "./termbuf/terminal"
+require "./termbuf/widgets"
 
 # A terminal screen held in memory, repainted with a diff.
 #
