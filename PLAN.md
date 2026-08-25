@@ -40,7 +40,7 @@ wants only a screen buffer never touches it.
 ```text
 ┌───────────────────────────────────────────────────────────────┐
 │ Layer 4  Widgets — optional, drawn through Layer 3            │
-│   Border  Field (panel, prompt, growth)  Editor  LineBuffer   │
+│   Border  Field (prompt, growth)  Editor  LineBuffer  Notice  │
 ├───────────────────────────────────────────────────────────────┤
 │ Layer 3  Application API                                      │
 │   TermBuf::Terminal (owner fiber)  Cursor / IO  Event channels│
@@ -102,6 +102,7 @@ src/termbuf/widgets/history.cr    bounded, with the in-progress edit kept
 src/termbuf/widgets/completion.cr the hook and what it returns
 src/termbuf/widgets/editor.cr     keymap, actions, history and completion
 src/termbuf/widgets/field.cr      the panel: border, prompt, growth, drawing
+src/termbuf/widgets/paste_notice.cr  centred panel while a paste is arriving
 scripts/gen_unicode.cr            regenerates unicode/tables.cr
 spec/support/model_terminal.cr    spec-only ANSI-consuming terminal model
 ```
@@ -370,6 +371,69 @@ spec suite includes `GraphemeBreakTest.txt` as a conformance fixture.
   pairs, `Prepend`, `SpacingMark`, emoji ZWJ sequences, and `InCB` linkers. Cluster width is the
   width of the base character plus any spacing marks, capped at a pair of cells — not the sum over
   every code point, which would make a joined emoji eight cells wide.
+
+## Input
+
+Three things arrive on one stream and have to be told apart. Nothing about the bytes settles it, so
+each is settled by its own evidence:
+
+* a **reply**, because the application registered the shape of one with `#expect_response`;
+* a **paste**, because the terminal bracketed it;
+* a **key**, because it is what is left.
+
+`Decoder` also carries the state that a read boundary does not respect: a half-arrived escape
+sequence, a UTF-8 character split down the middle, and a paste delivered in pieces.
+
+### Deadlines
+
+Every one of those states is a bet that more bytes are coming, and every bet needs a losing case.
+The reader blocks by default and only sets a read deadline when something is pending, so an idle
+application costs nothing.
+
+| Deadline | Default | Reset by | Meaning |
+|---|---|---|---|
+| `escape_timeout` | 25 ms | — | A lone `ESC` is the escape key, not the start of an arrow |
+| `paste_notice` | 300 ms | the paste opening | A paste running this long is worth mentioning |
+| `paste_progress` | 100 ms | each notice sent | How often the byte count is worth resending |
+| `paste_stall` | 3 s | every byte of the paste | No more of it is coming |
+
+`Decoder#read_deadline` returns the soonest of whichever are live, or `nil` when the read may block.
+`Decoder#tick` is what the reader calls when one expires, and it decides which: flush a held escape,
+send a progress notice, or end a stalled paste. Putting both the deadline and the decision in the
+decoder keeps the reader a loop that reads bytes, which is all it should be.
+
+### A paste that never closes
+
+The failure this guards against is a terminal that sends `ESC [ 200 ~` and then, for whatever
+reason, never sends `ESC [ 201 ~`. Every byte after that is paste content by definition, so the
+application stops receiving keys and there is no way out — not a slow paste but a lost session.
+
+The distinction is between slow and stopped, and the only evidence available is whether bytes are
+still arriving. `paste_stall` is therefore reset on every byte, not measured from the opening
+marker: a paste over a slow link keeps itself alive as long as it is making progress, and one that
+has stopped ends after a few seconds of silence.
+
+A stalled paste is delivered rather than discarded, as `Events::Paste` with `complete: false`.
+Whatever was on the clipboard is more useful to the application than nothing, and the flag lets it
+decide whether to trust it. `MAX_PASTE` delivers the same way for the same reason.
+
+After a stall, a closing marker that finally turns up is discarded rather than decoded.
+`ESC [ 201 ~` is never a keystroke, and reporting it as an unknown key would be an odd end to an odd
+episode.
+
+### Saying so on screen
+
+A paste that takes long enough to notice should be visible, or the application looks hung.
+`Events::Pasting` carries the byte count and how long it has been going, repeated no more often than
+`paste_progress` so that a fast paste does not flood a channel the application may be draining
+slowly. `Events::Paste` is the signal to take the notice down.
+
+The driver does not draw it. The buffer belongs to the application, and a driver that writes into it
+uninvited would have to undraw itself and would fight anything painting at the same time. What the
+shard provides instead is `PasteNotice`, a widget in Phase 9: a centred panel showing `pasting` and
+a byte count, drawn through `Drawing` like anything else, which an application shows and hides in
+response to the two events. `examples/validate.cr` uses it, which is also how it gets exercised
+against a real terminal.
 
 ## Editable input
 
@@ -647,6 +711,9 @@ were built in Phase 9.
   both. Acceptable, but worth measuring before adding fields.
 * **Grapheme clustering cost.** Cluster segmentation on every write could dominate the write path.
   Mitigation is an ASCII fast path that skips segmentation entirely for the common case.
+* **A paste with no closing marker.** Silently swallows every keystroke that follows it, which
+  presents as a hung application. Mitigation is `paste_stall`, reset per byte so that slow and
+  stopped are told apart, and delivering what arrived rather than discarding it.
 
 ## Open items
 
