@@ -46,6 +46,13 @@ require "./termbuf/terminal"
 # `Terminal#batch` collects a frame's drawing and sends it to the owning fibre
 # as one channel operation, which is what a full redraw should use.
 #
+# ### Cursors
+#
+# A `Cursor` is somewhere to stream text to: a position, a `Style`, and the
+# `Region` it wraps and scrolls inside. `Cursor#io` is an `IO`, so anything that
+# writes to one can be pointed at a pane. `Terminal#hardware_cursor=` puts the
+# terminal's own cursor wherever a chosen cursor is, after every paint.
+#
 # ### Input
 #
 # `Terminal#events` carries everything the terminal has to say. Keystrokes

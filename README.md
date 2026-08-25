@@ -15,6 +15,7 @@ to be able to do. Drawing the same frame twice sends nothing.
 * UAX #29 grapheme clusters and UAX #11 widths, from generated tables
 * Keys with modifiers, bracketed paste, resizes, and terminal replies delivered as events on a
   channel
+* Cursors that wrap and scroll inside a region, with an `IO` for each
 
 Requires Crystal 1.21 or later.
 
@@ -78,6 +79,50 @@ owning fibre and waits:
 ```crystal
 terminal.sync { |buffer| puts buffer.to_text }
 ```
+
+### Cursors
+
+Drawing addresses cells. A `Cursor` streams instead: it holds a position, a `Style`, and the
+`Region` it wraps and scrolls inside, and works out which cell each grapheme cluster lands in.
+
+```crystal
+cursor = terminal.cursor                                  # the whole screen
+log = terminal.cursor TermBuf::Rect.new(0, 10, 80, 8), scrollback: 500
+
+log.style = TermBuf::Style::DEFAULT.faint
+log.puts "started"
+log.io.printf "%-12s %s\n", name, status
+```
+
+`Cursor#io` is an `IO`, so `printf`, `Colorize`, `inspect`, and anything else that writes to one can
+be pointed at a pane. It is unbuffered by default; set `sync = false` to gather writes until a
+newline or a `#flush`.
+
+Text written to a cursor is scanned for escape sequences, so `\e[1m` sets the bold attribute on the
+cells that follow rather than landing in them. Sequences that address the terminal rather than the
+text — cursor movement, screen clearing — are dropped, since the buffer already has its own idea of
+where the cursor is. An application that changes appearance by assigning to `#style` and never
+writes a sequence of its own can skip the scan:
+
+```crystal
+cursor.raw = true
+```
+
+Wrapping is deferred the way a terminal defers it: a character landing in the last column leaves the
+cursor at the margin, and only the next character takes it to the row below. Turn `autowrap` off and
+the cursor stops at the margin; turn `scrolls` off and the bottom row stops scrolling.
+
+### The terminal's own cursor
+
+Hidden by default, which is what a full-screen application wants. Point it at a cursor and every
+paint puts it back there once the cells have been drawn:
+
+```crystal
+terminal.hardware_cursor = input_cursor   # shows it, and follows it
+terminal.hide_cursor
+```
+
+A frame that changes no cells is still sent when this has moved.
 
 ### Painting
 
@@ -235,8 +280,8 @@ crystal run examples/validate.cr  # six pages checking a real terminal against t
 
 `validate.cr` is worth running in any terminal you intend to support: it reports what detection
 concluded, writes every cell of the screen including the bottom-right corner, checks the terminal's
-idea of grapheme widths against the tables, shows what a frame costs in bytes, and decodes whatever
-you type on its last page.
+idea of grapheme widths against the tables, shows what a frame costs in bytes, decodes whatever you
+type, and gives you a pane to type into with the terminal's own cursor following along.
 
 ## Development
 
