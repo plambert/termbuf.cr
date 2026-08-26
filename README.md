@@ -1,5 +1,8 @@
 # termbuf
 
+[![docs](https://img.shields.io/badge/docs-latest-blue)](https://plambert.github.io/termbuf.cr/latest/)
+[![ci](https://github.com/plambert/termbuf.cr/actions/workflows/ci.yml/badge.svg)](https://github.com/plambert/termbuf.cr/actions/workflows/ci.yml)
+
 An in-memory terminal screen for Crystal, repainted with a diff.
 
 Draw into a buffer, ask for a paint, and what reaches the terminal is the difference between what
@@ -439,6 +442,13 @@ To regenerate the Unicode tables against a newer UCD:
 ```bash
 crystal run scripts/gen_unicode.cr
 ```
+
+## Status
+
+`0.1.0`. The core, the driver, input, cursors, and an input field are in and specified. Links,
+images, and the kitty colour stack are detected but not emitted yet; mouse reporting is neither
+enabled nor decoded. See [CHANGELOG.md](CHANGELOG.md) for what is in this release and
+[PLAN.md](PLAN.md) for what is coming.
 
 ## Contributing
 

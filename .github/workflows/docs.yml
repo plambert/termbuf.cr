@@ -1,0 +1,70 @@
+name: docs
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: crystal-lang/install-crystal@v1
+
+      - name: Build docs for every tag
+        run: |
+          mkdir -p site
+          built=()
+          for tag in $(git tag --list 'v*' --sort=-v:refname); do
+            version="${tag#v}"
+            git -c advice.detachedHead=false checkout --quiet "$tag"
+            if crystal docs \
+                --output="site/$version" \
+                --project-version="$version" \
+                --source-refname="$tag" \
+                --json-config-url=/termbuf.cr/versions.json \
+                --canonical-base-url=https://plambert.github.io/termbuf.cr/latest/; then
+              built+=("$version")
+            else
+              echo "::warning::docs failed for $tag; omitting it from the site"
+            fi
+          done
+
+          if [ "${#built[@]}" -eq 0 ]; then
+            echo "::error::no tag produced docs"
+            exit 1
+          fi
+
+          printf '%s\n' "${built[@]}" |
+            jq --raw-input . |
+            jq --slurp '{versions: map({name: ., url: ("/termbuf.cr/" + . + "/")})}' > site/versions.json
+
+          cp -R "site/${built[0]}" site/latest
+          printf '<!DOCTYPE html><html><head><meta http-equiv="refresh" content="0; url=latest/"><title>termbuf.cr</title></head><body><a href="latest/">termbuf.cr documentation</a></body></html>\n' > site/index.html
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5

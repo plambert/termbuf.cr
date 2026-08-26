@@ -761,6 +761,8 @@ disagrees with is a field with a misplaced cursor.
 
 ### Phase 11 — Links, images, colour stack
 
+Deferred past `0.1.0`: a consumer was waiting and did not need any of it.
+
 OSC 8 link ids threaded through `Style` and emitted as ranges; kitty graphics with transport chosen
 by the Phase 5 probe, image placement, deletion, and re-emission on forced repaint; kitty colour
 stack push/pop.
@@ -769,6 +771,9 @@ stack push/pop.
 
 README with worked examples, `examples/`, API docs, the versioned GitHub Pages docs workflow,
 `v0.1.0` tag.
+
+Done, with Phase 11 deferred: links and images are detected and not emitted, which the changelog
+and the README say plainly rather than leaving a caller to find out.
 
 ### Phase 13 — Mouse
 

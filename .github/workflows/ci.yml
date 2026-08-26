@@ -1,0 +1,41 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: crystal-lang/install-crystal@v1
+
+      - name: Install dependencies
+        run: shards install --skip-postinstall --skip-executables
+
+      - name: Check formatting
+        run: crystal tool format --check
+
+      - name: Run specs
+        run: crystal spec --error-trace
+
+      # The specs drive the whole driver over a pipe rather than a device, so
+      # they run without a terminal. This is the check that the parts needing
+      # one still compile.
+      - name: Build the examples
+        run: |
+          for example in examples/*.cr; do
+            crystal build --no-codegen --error-trace "$example"
+          done
+
+      - name: Build the documentation
+        run: crystal docs --output=/tmp/docs
