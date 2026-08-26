@@ -8,11 +8,19 @@ crystal: '>= 1.21'
 
 license: MIT
 
-dependencies:
-  guard:
-    github: plambert/guard.cr
+description: |
+  A terminal screen held in memory, repainted with a diff. Decouples a terminal
+  application's UI from the terminal itself: draw into a buffer, ask for a
+  paint, and only the difference goes out, encoded against what that particular
+  terminal turned out to be able to do.
+
+# None. Everything outside the standard library is a development dependency, so
+# depending on this shard pulls in nothing else.
+dependencies: {}
 
 development_dependencies:
   spectator:
     gitlab: arctic-fox/spectator
     version: "~> 0.11"
+  guard:
+    github: plambert/guard.cr
