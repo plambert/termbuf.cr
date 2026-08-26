@@ -329,7 +329,15 @@ module TermBuf
       return unless last && last.to == buffer.width - 1
 
       back = buffer.back
-      style = back[buffer.width - 1, row].style
+      # The run being erased has to reach the right edge, which means the cell
+      # at the right edge has to be part of it. Taking only its style and
+      # walking left from there would erase it along with the blanks behind it,
+      # and a border down the right of the screen is exactly the case where
+      # that shows.
+      edge = back[buffer.width - 1, row]
+      return unless edge.blank?
+
+      style = edge.style
       return unless erasable? buffer, style
 
       start = buffer.width - 1

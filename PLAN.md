@@ -751,6 +751,8 @@ terminal. `Border` and `Field` last, drawn through `Drawing` and checked against
 the same way the painter is, plus a page in `examples/validate.cr` and a worked example of the
 `#run` form. `PasteNotice` belongs here too, since it is the first thing wanting a centred panel.
 
+Done.
+
 See [Editable input](#editable-input) for the design.
 
 Ahead of links and images because an input field is wanted by more applications than kitty graphics

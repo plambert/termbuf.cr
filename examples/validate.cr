@@ -16,7 +16,7 @@ module Validate
   alias Color = TermBuf::Color
   alias Rect = TermBuf::Rect
 
-  PAGES = %w[caps edges widths colours attrs motion keys cursors measured]
+  PAGES = %w[caps edges widths colours attrs motion keys cursors measured field]
 
   # One line of the width page: something to draw, and what it is.
   #
@@ -53,6 +53,7 @@ module Validate
     include TermBuf
 
     getter terminal : Terminal
+    @field : Field
 
     def initialize(@terminal : Terminal)
       @page = 0
@@ -64,6 +65,8 @@ module Validate
       @frozen = false
       @presses = [] of String
       @arriving = nil.as(Int32?)
+      @entered = [] of String
+      @field = self.class.build_field
       @typed = ""
     end
 
@@ -110,6 +113,7 @@ module Validate
       when "keys"     then draw_keys screen
       when "cursors"  then draw_cursors screen
       when "measured" then draw_measured screen
+      when "field"    then draw_field screen
       end
     end
 
@@ -119,6 +123,10 @@ module Validate
 
     private def keys? : Bool
       PAGES[@page] == "keys"
+    end
+
+    private def field? : Bool
+      PAGES[@page] == "field"
     end
 
     private def cursors? : Bool
@@ -687,6 +695,50 @@ module Validate
         Style::DEFAULT.reverse.bold
     end
 
+    # --------------------------------------------------------------- page 10
+
+    WORDS = %w[amber azure carmine cerulean chartreuse cobalt crimson indigo
+      magenta ochre saffron scarlet sienna teal ultramarine vermilion]
+
+    def self.build_field : Field
+      editor = Editor.new(
+        history: History.new(search: History::Search::Prefix),
+        completions: ->(request : Completion::Request) do
+          Completion::Result.new WORDS.select(&.starts_with? request.word)
+        end)
+
+      Field.new(
+        bounds: Rect.new(2, 4, 40, 3),
+        editor: editor,
+        border: Border.rounded(title: " type here "),
+        prompt: Field::Prompt.new("› ", Style::DEFAULT.fg(Color.indexed(4))),
+        growth: Field::Growth::Grow,
+        max_rows: 8,
+        placeholder: "tab completes a colour, up walks back")
+    end
+
+    # An input field driven from an application's own loop rather than by
+    # `Field#run`, which is what most applications with anything else on screen
+    # will do.
+    private def draw_field(screen) : Nil
+      field = @field
+      width = Math.min columns - 4, 44
+      field.bounds = Rect.new 2, 4, Math.max(width, 8), field.desired_height
+      field.draw screen
+
+      x, y = field.cursor_position
+      @terminal.cursor.move_to x, y
+
+      screen.write 2, 2, "an input field", Style::DEFAULT.bold
+      screen.write 20, 2, "enter accepts, escape clears", Style::DEFAULT.faint
+
+      row = field.bounds.bottom + 2
+
+      @entered.last(Math.max(rows - row - 2, 0)).each_with_index do |line, offset|
+        screen.write 4, row + offset, line.inspect, Style::DEFAULT.faint
+      end
+    end
+
     # ---------------------------------------------------------------- input
 
     private def pump : Nil
@@ -715,6 +767,7 @@ module Validate
 
     private def press(key : Key, bytes : Bytes) : Nil
       remember key, bytes
+      return field_key key if field?
       return @running = false if key.is? 'q'
 
       # Tab moves between pages everywhere, which is what leaves the keys page
@@ -759,9 +812,32 @@ module Validate
       @presses.shift if @presses.size > 64
     end
 
+    # On the field page the field gets almost everything, since q and the
+    # digits are things people type.
+    private def field_key(key : Key) : Nil
+      if key.is? Key::Name::Tab
+        return go_to(key.shift? ? @page - 1 : @page + 1) unless completing?
+      end
+
+      case @field.handle key
+      in Editor::Outcome::Continue  then nil
+      in Editor::Outcome::Accepted  then @entered << @field.editor.accepted
+      in Editor::Outcome::Cancelled then @field.text = ""
+      in Editor::Outcome::Ended     then @running = false
+      end
+    end
+
+    # Tab belongs to completion while there is a hook with something to say,
+    # and to page switching otherwise.
+    private def completing? : Bool
+      !@field.buffer.empty?
+    end
+
     private def pasted(text : String, complete : Bool) : Nil
       preview = text.size > 40 ? "#{text[0, 40]}…" : text
       note = complete ? "" : ", never closed"
+      return @field.paste text if field?
+
       @presses << "#{"paste".ljust(18)}#{preview.inspect} (#{text.bytesize} bytes#{note})"
 
       # The notice was drawn over whatever was underneath, and the motion page
@@ -781,6 +857,7 @@ module Validate
       @page = page
       @rebuild = true
       @log = 0
+      field? ? @terminal.hardware_cursor = @terminal.cursor : @terminal.hide_cursor
       # Only one page has anywhere for someone to type, so the terminal's own
       # cursor has no business blinking on the others.
       @terminal.hide_cursor unless cursors?

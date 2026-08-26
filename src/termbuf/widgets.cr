@@ -1,4 +1,7 @@
+require "./widgets/border"
 require "./widgets/line_buffer"
 require "./widgets/history"
 require "./widgets/completion"
 require "./widgets/editor"
+require "./widgets/paste_notice"
+require "./widgets/field"

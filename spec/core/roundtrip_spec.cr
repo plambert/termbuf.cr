@@ -174,6 +174,23 @@ Spectator.describe "paint round trip" do
     end
   {% end %}
 
+  # A panel with a border down the right of the screen leaves blanks in the
+  # middle of a row and a glyph in the last column. Erasing to the end of the
+  # line takes the glyph with the blanks, and only a terminal shows it: the
+  # buffer was right the whole time.
+  it "keeps the last cell of a row an erase would have reached" do
+    harness = Harness.new 20, 6, TermBuf::Capabilities::MODERN
+    harness.buffer.fill TermBuf::Rect.new(0, 1, 20, 1), '-'
+    harness.cycle
+
+    harness.buffer.fill TermBuf::Rect.new(0, 1, 20, 1), ' '
+    harness.buffer.write_char 0, 1, '|'
+    harness.buffer.write 1, 1, "text"
+    harness.buffer.write_char 19, 1, '|'
+
+    expect(harness.cycle).to be_nil
+  end
+
   it "emits nothing when a paint would change nothing" do
     harness = Harness.new 20, 6, TermBuf::Capabilities::MODERN
     harness.buffer.write 0, 0, "settled"

@@ -182,6 +182,22 @@ Spectator.describe TermBuf::Painter do
       expect(texts(ops)).to eq [" " * 17]
     end
 
+    # A border down the right of the screen leaves blanks in the middle of the
+    # row and a glyph in the last column. Erasing to the end of the line would
+    # take the glyph with the blanks.
+    it "does not erase a tail whose last cell is not blank" do
+      session = Session.new
+      session.buffer.write 0, 1, "a" * 20
+      session.settle
+
+      session.buffer.fill TermBuf::Rect.new(3, 1, 16, 1), ' '
+      session.buffer.write_char 19, 1, '|'
+      ops = session.paint
+
+      expect(ops.any?(TermBuf::Ops::EraseInLine)).to be_false
+      expect(texts(ops).join).to contain "|"
+    end
+
     it "writes the cells out when the tail is underlined" do
       session = Session.new
       session.buffer.write 0, 1, "a" * 20

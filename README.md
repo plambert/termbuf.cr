@@ -16,6 +16,7 @@ to be able to do. Drawing the same frame twice sends nothing.
   measured from the terminal rather than assumed
 * Keys with modifiers, bracketed paste, resizes, and terminal replies delivered as events on a
   channel
+* An editable input field with history, completion, and a border, drawn through the same API
 * Cursors that wrap and scroll inside a region, with an `IO` for each
 
 Requires Crystal 1.21 or later.
@@ -329,11 +330,89 @@ encoder.encode painter.paint(buffer)  # => "\e[?7l\e[1;1H\e[0;1mhello\e[?7h"
 buffer.commit_paint
 ```
 
+## An input field
+
+The one widget in the shard, because every terminal application needs one and nobody should write
+it twice. It draws through the same `Drawing` API an application uses, so it composes with whatever
+else is on screen and costs the same diff.
+
+```crystal
+field = TermBuf::Field.new(
+  bounds: TermBuf::Rect.new(0, terminal.size.rows - 3, terminal.size.columns, 3),
+  editor: TermBuf::Editor.new(
+    history: TermBuf::History.new,
+    completions: ->(request : TermBuf::Completion::Request) do
+      TermBuf::Completion::Result.new COLOURS.select(&.starts_with? request.word)
+    end),
+  border: TermBuf::Border.rounded(title: " a colour "),
+  prompt: TermBuf::Field::Prompt.new("› "),
+  growth: TermBuf::Field::Growth::Grow,
+  max_rows: 8)
+
+answer = field.run terminal   # => the line, or nil if it was given up on
+```
+
+`#run` owns the event loop, which is what a prompt with nothing else on screen wants. An application
+with a loop of its own calls `#handle`, `#draw`, and `#cursor_position` from that instead:
+
+```crystal
+case field.handle key
+in TermBuf::Editor::Outcome::Continue  then nil
+in TermBuf::Editor::Outcome::Accepted  then submit field.editor.accepted
+in TermBuf::Editor::Outcome::Cancelled then dismiss
+in TermBuf::Editor::Outcome::Ended     then quit
+end
+```
+
+Four outcomes rather than two: `Enter`, `Ctrl+C`, and `Ctrl+D` on an empty line mean different
+things.
+
+### Layout
+
+`Growth::Fixed` keeps one row and scrolls sideways, marking what has run off either edge.
+`Growth::Grow` wraps and grows to `max_rows`, then scrolls. A growing field reports
+`#desired_height` and the application decides where to put it — this shard has no layout manager.
+
+`#cursor_position` says where the terminal's own cursor belongs; point `Terminal#hardware_cursor` at
+a cursor moved there and every paint puts it back.
+
+### Editing
+
+`Editor` maps `Key` to `Action` in a plain `Hash`, so rebinding is replacing an entry:
+
+```crystal
+field.editor.keymap[TermBuf::Key.character 'k', TermBuf::Modifiers::Ctrl] =
+  TermBuf::Editor::Action::KillToStart
+```
+
+The default is the readline set. Anything unbound that carries a character and no modifier but shift
+is text, which is what keeps the map small.
+
+`LineBuffer` underneath counts grapheme clusters, carries the measured `WidthPolicy`, and holds a
+selection as an anchor and a point. It has no idea a terminal exists, which is what makes it
+testable on its own.
+
+History keeps the line being typed when a walk starts and gives it back on the way down, and
+`History::Search::Prefix` walks only the entries beginning with what was typed. Completion is a
+hook: one candidate is inserted, several insert what they agree on, and a second `Tab` lists them.
+
+### Saying a paste is arriving
+
+`PasteNotice` draws the panel the paste deadlines exist for:
+
+```crystal
+in TermBuf::Events::Pasting then notice.arriving event.bytes
+in TermBuf::Events::Paste   then notice.finished
+```
+
+`#draw` does nothing at all while nothing is arriving.
+
 ## Examples
 
 ```bash
 crystal run examples/clock.cr     # drawing, input, and resize in one small program
-crystal run examples/validate.cr  # six pages checking a real terminal against the shard
+crystal run examples/prompt.cr    # an input field, and nothing else
+crystal run examples/validate.cr  # ten pages checking a real terminal against the shard
 ```
 
 `validate.cr` is worth running in any terminal you intend to support: it reports what detection
