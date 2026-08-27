@@ -117,6 +117,50 @@ Wrapping is deferred the way a terminal defers it: a character landing in the la
 cursor at the margin, and only the next character takes it to the row below. Turn `autowrap` off and
 the cursor stops at the margin; turn `scrolls` off and the bottom row stops scrolling.
 
+### Clipped panels
+
+`Drawing#view` gives back a rectangle of a surface addressed from its own top left and cut at its
+own edges. A panel drawn over other content stays inside its border without every widget doing the
+arithmetic:
+
+```crystal
+terminal.batch do |screen|
+  draw_table screen
+
+  panel = screen.view TermBuf::Rect.new(10, 4, 30, 8)
+  panel.fill panel.bounds, ' ', TermBuf::Style::DEFAULT.reverse
+  panel.write 0, 0, "a line far longer than thirty cells"   # cut at the border
+end
+```
+
+A cluster crossing an edge is dropped whole rather than split, measured with the policy of the
+surface the view came from. Views nest, so a border can hand what it surrounds a surface of exactly
+the space left inside it. `#passthrough` and `#scroll_region` pass through untouched, since neither
+is addressed in the view's cells.
+
+This is clipping, not layering: nothing says a view is on top of anything. Dismissing a panel means
+the next frame does not draw it, and the paint diff then sends the cells it covered and nothing
+else — a batched full frame is the cheap way to do this, not a workaround for the lack of layers.
+
+### Off-screen buffers
+
+A `Buffer` needs no terminal, and `BufferSurface` is a full drawing surface over one — so a shard
+that wants to composite panels itself can draw each into a buffer of its own and blit them into
+place:
+
+```crystal
+panel = TermBuf::Buffer.new 30, 8
+TermBuf::BufferSurface.new(panel).view(inner).write 0, 0, "drawn off screen"
+
+terminal.batch { |screen| screen.blit panel, 10, 4 }
+```
+
+Styles and clusters are interned per buffer, so the ids a source cell carries mean nothing in the
+destination; `#blit` translates them. Stored widths are copied rather than remeasured, so a panel
+keeps the layout it was drawn with. A wide character with only one half inside the copied rectangle
+arrives as a blank. The source is read when the command is serviced, so do not draw into a panel
+again between blitting it and painting.
+
 ### Panes and resizing
 
 A `Region` an application makes covers a pane it chose, and the driver does not move it: only the

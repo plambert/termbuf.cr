@@ -6,6 +6,21 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `Drawing#view`: a rectangle of a drawing surface addressed from its own top left and cut at its
+  own edges, so a panel drawn over other content stays inside its border. Clusters crossing an edge
+  are dropped whole, measured with the policy of the surface the view came from. Views nest.
+  ([#3])
+- `Buffer#blit` and `Drawing#blit`: copies cells out of another buffer, translating the styles and
+  clusters it interned and keeping the widths it stored — what a shard compositing its own
+  off-screen panels needs. ([#3])
+
+### Changed
+
+- Layering and z-order are settled against rather than deferred; see `PLAN.md`. Restore needs no
+  layers, since the paint diff already sends only what a dismissed panel covered.
+
 ## [0.1.2] - 2026-08-27
 
 ### Added
@@ -89,3 +104,4 @@ First release. Everything below is new.
 [0.1.0]: https://github.com/plambert/termbuf.cr/releases/tag/v0.1.0
 [#1]: https://github.com/plambert/termbuf.cr/issues/1
 [#2]: https://github.com/plambert/termbuf.cr/issues/2
+[#3]: https://github.com/plambert/termbuf.cr/issues/3

@@ -209,6 +209,77 @@ module TermBuf
       @scroll_hints << ScrollHint.new area, lines
     end
 
+    # Copies cells out of *source*, its top left landing at (*x*, *y*), taking
+    # *from* of it or all of it. Whatever falls outside this buffer is cut.
+    #
+    # For compositing an off-screen panel: draw into a `Buffer` of its own
+    # through a `BufferSurface`, then blit it into place. Styles and clusters
+    # are interned per buffer, so the ids a source cell carries mean nothing
+    # here and are translated on the way in. Stored widths are copied rather
+    # than remeasured, so a panel keeps the layout it was drawn with even if
+    # the two buffers measure clusters differently.
+    #
+    # A wide character with only one half inside the copied rectangle arrives
+    # as a blank, since half of one cannot be drawn.
+    def blit(source : Buffer, x : Int32, y : Int32, from : Rect? = nil) : Nil
+      taken = (from || source.bounds).intersect source.bounds
+      return if taken.empty?
+
+      placed = Rect.new(x, y, taken.width, taken.height).intersect bounds
+      return if placed.empty?
+
+      # What the destination clipped off the left or top comes off the source
+      # rectangle too, so the two stay aligned.
+      taken = Rect.new taken.x + (placed.x - x), taken.y + (placed.y - y),
+        placed.width, placed.height
+
+      copy source, taken, placed
+    end
+
+    private def copy(source : Buffer, taken : Rect, placed : Rect) : Nil
+      blank = Cell.blank @styles.id(Style::DEFAULT)
+      @back.clip_wide placed, blank
+
+      styles = {} of StyleId => StyleId
+      clusters = {} of UInt32 => UInt32
+      last = placed.width - 1
+
+      placed.height.times do |row|
+        placed.width.times do |column|
+          cell = source.back[taken.x + column, taken.y + row]
+          cell = if orphan? cell, column, last
+                   blank
+                 else
+                   adopt cell, source, styles, clusters
+                 end
+
+          @back[placed.x + column, placed.y + row] = cell
+        end
+      end
+    end
+
+    # Whether only one half of a wide character was taken: a continuation at
+    # the left edge lost its lead, and a lead at the right edge loses its
+    # continuation.
+    private def orphan?(cell : Cell, column : Int32, last : Int32) : Bool
+      (column.zero? && cell.continuation?) || (column == last && cell.wide?)
+    end
+
+    # The same cell, with its style and cluster interned here instead. Both
+    # maps are per-blit, so a panel of one style costs one lookup.
+    private def adopt(cell : Cell, source : Buffer,
+                      styles : Hash(StyleId, StyleId),
+                      clusters : Hash(UInt32, UInt32)) : Cell
+      style = styles[cell.style] ||= @styles.id source.styles[cell.style]
+
+      cluster = cell.cluster
+      unless cluster == ClusterPool::NONE
+        cluster = clusters[cell.cluster] ||= @clusters.id source.clusters[cell.cluster]
+      end
+
+      Cell.new cell.char, style, cell.width, cluster
+    end
+
     # ------------------------------------------------------------- lifecycle
 
     # Resizes both grids, keeping whatever content still fits anchored at the

@@ -27,6 +27,8 @@ module TermBuf
     record ScrollRegion, region : Region, lines : Int32, style : Style
 
     # Forget what the terminal is showing, so the next paint rewrites it all.
+    record Blit, source : Buffer, x : Int32, y : Int32, from : Rect?
+
     record Invalidate
 
     # Bytes to send to the terminal untouched, once the current frame is out.
@@ -57,7 +59,7 @@ module TermBuf
   # Anything that can be sent to the owning fibre.
   alias Command = Commands::Write | Commands::WriteChar | Commands::Fill |
                   Commands::Clear | Commands::Scroll | Commands::ScrollRegion |
-                  Commands::Invalidate | Commands::Passthrough | Commands::Paint |
+                  Commands::Blit | Commands::Invalidate | Commands::Passthrough | Commands::Paint |
                   Commands::Resize | Commands::Apply | Commands::Batch |
                   Commands::Stop
 
@@ -102,6 +104,30 @@ module TermBuf
       issue Commands::ScrollRegion.new(region, lines, style)
     end
 
+    # Copies cells out of *source*, its top left landing at (*x*, *y*), taking
+    # *from* of it or all of it. See `Buffer#blit`.
+    #
+    # The source is read when the command is serviced rather than when it is
+    # issued, so a batched blit must not be followed by drawing into the same
+    # source before the frame is painted.
+    def blit(source : Buffer, x : Int32, y : Int32, from : Rect? = nil) : Nil
+      issue Commands::Blit.new(source, x, y, from)
+    end
+
+    # A rectangle of this surface, addressed from its own top left and cut at
+    # its own edges. See `View`.
+    def view(rect : Rect) : View
+      made = View.new self, rect
+      made.policy = policy
+      made
+    end
+
+    # How clusters are measured on this surface, which is what a `View` cuts
+    # writes by. Surfaces that know which buffer they draw into say so.
+    def policy : Unicode::WidthPolicy
+      Unicode.policy
+    end
+
     # Sends *bytes* to the terminal untouched, after the current frame.
     def passthrough(bytes : Bytes) : Nil
       issue Commands::Passthrough.new(bytes)
@@ -124,6 +150,11 @@ module TermBuf
     getter buffer : Buffer
 
     def initialize(@buffer : Buffer)
+    end
+
+    # What the buffer being drawn into measures with.
+    def policy : Unicode::WidthPolicy
+      @buffer.policy
     end
 
     # Applies *command*, ignoring the ones that need a terminal to mean
@@ -150,6 +181,7 @@ module TermBuf
       in Commands::Clear        then buffer.clear command.style
       in Commands::Scroll       then buffer.scroll command.rect, command.lines, command.style
       in Commands::ScrollRegion then buffer.scroll_region command.region, command.lines, command.style
+      in Commands::Blit         then buffer.blit command.source, command.x, command.y, command.from
       in Commands::Invalidate   then buffer.invalidate
       in Commands::Passthrough, Commands::Paint, Commands::Resize,
          Commands::Apply, Commands::Batch, Commands::Stop

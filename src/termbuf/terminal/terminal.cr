@@ -386,6 +386,12 @@ module TermBuf
       @cursor ||= cursor @screen
     end
 
+    # What the buffer measures clusters with, so a `View` cuts writes where the
+    # cells will fall.
+    def policy : Unicode::WidthPolicy
+      @widths
+    end
+
     # A cursor over *region*, which scrolls and wraps within it.
     def cursor(region : Region) : Cursor
       made = Cursor.new self, region
