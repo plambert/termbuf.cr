@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `Terminal#on_resize`: a handler run when the screen changes size, after the grids are resized and
+  before `Events::Resize`, so an application relays new bounds to the regions it made in one place.
+  `Terminal#forget_resize` takes one back. Layout stays out of this shard by design. ([#2])
+
 ## [0.1.1] - 2026-08-27
 
 ### Added
@@ -79,3 +85,4 @@ First release. Everything below is new.
 [0.1.1]: https://github.com/plambert/termbuf.cr/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/plambert/termbuf.cr/releases/tag/v0.1.0
 [#1]: https://github.com/plambert/termbuf.cr/issues/1
+[#2]: https://github.com/plambert/termbuf.cr/issues/2

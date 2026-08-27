@@ -58,6 +58,10 @@ require "./termbuf/widgets"
 # writes to one can be pointed at a pane. `Terminal#hardware_cursor=` puts the
 # terminal's own cursor wherever a chosen cursor is, after every paint.
 #
+# A region an application made keeps the rectangle it was given; only the
+# screen-wide one follows the window. `Terminal#on_resize` is where an
+# application states its layout once rather than at every `Events::Resize`.
+#
 # ### Input
 #
 # `Terminal#events` carries everything the terminal has to say. Keystrokes

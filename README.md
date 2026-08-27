@@ -117,6 +117,36 @@ Wrapping is deferred the way a terminal defers it: a character landing in the la
 cursor at the margin, and only the next character takes it to the row below. Turn `autowrap` off and
 the cursor stops at the margin; turn `scrolls` off and the bottom row stops scrolling.
 
+### Panes and resizing
+
+A `Region` an application makes covers a pane it chose, and the driver does not move it: only the
+screen-wide region follows the window, because nothing tells the buffer whether a pane was meant to
+be a bottom edge, a fixed sidebar, or a third of the width. So a region an application placed keeps
+its rectangle until the application assigns a new one, and a stale region goes on drawing where the
+window used to be.
+
+Register the layout once instead of repeating it at every `Events::Resize`:
+
+```crystal
+status = terminal.cursor TermBuf::Rect.new(0, rows - 1, columns, 1)
+log = terminal.cursor TermBuf::Rect.new(0, 0, columns, rows - 1), scrollback: 500
+
+terminal.on_resize do |size|
+  status.region.bounds = TermBuf::Rect.new 0, size.rows - 1, size.columns, 1
+  log.region.bounds = TermBuf::Rect.new 0, 0, size.columns, size.rows - 1
+end
+```
+
+Handlers run in the order registered, on the fibre that owns the buffer, after the grids have been
+resized and before `Events::Resize` reaches the application — so whatever it draws in response
+already sees panes in their new places. That fibre is the one servicing commands, so a handler must
+not call back into `#batch`, `#paint`, or `#sync`; moving regions and recomputing rectangles is what
+it is for. Anything it raises arrives as an `Events::Failure`, and the remaining handlers still run.
+`#forget_resize` takes a handler back.
+
+There is no layout engine here on purpose. Anchors, splits, and constraint solving belong a layer
+up; this shard gives that layer the one hook it needs.
+
 ### The terminal's own cursor
 
 Hidden by default, which is what a full-screen application wants. Point it at a cursor and every

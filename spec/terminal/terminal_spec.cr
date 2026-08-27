@@ -485,6 +485,110 @@ Spectator.describe TermBuf::Terminal do
         expect(harness.event_of(TermBuf::Events::Resize, 200.milliseconds)).to be_nil
       end
     end
+
+    it "runs a resize handler before the event reaches the application" do
+      with_harness do |harness|
+        placed = nil.as(TermBuf::Rect?)
+        pane = TermBuf::Region.new TermBuf::Rect.new(0, 5, 20, 1)
+
+        harness.terminal.on_resize do |size|
+          pane.bounds = TermBuf::Rect.new 0, size.rows - 1, size.columns, 1
+          placed = pane.bounds
+        end
+
+        harness.terminal.issue TermBuf::Commands::Resize.new(TermBuf::ScreenSize.new(40, 10))
+        expect(harness.event_of(TermBuf::Events::Resize)).not_to be_nil
+
+        # Set by the handler, so it had already run when the event arrived.
+        expect(placed).to eq TermBuf::Rect.new(0, 9, 40, 1)
+        expect(pane.bounds).to eq TermBuf::Rect.new(0, 9, 40, 1)
+      end
+    end
+
+    it "runs after the terminal has taken the new size" do
+      with_harness do |harness|
+        reported = nil.as(Tuple(Int32, Int32)?)
+        settled = nil.as(Tuple(Int32, Int32)?)
+
+        harness.terminal.on_resize do |size|
+          reported = {size.columns, size.rows}
+          # Already updated, so a handler can lay out from either one.
+          settled = {harness.terminal.size.columns, harness.terminal.size.rows}
+        end
+
+        harness.terminal.issue TermBuf::Commands::Resize.new(TermBuf::ScreenSize.new(40, 10))
+        harness.event_of TermBuf::Events::Resize
+
+        expect(reported).to eq({40, 10})
+        expect(settled).to eq({40, 10})
+
+        harness.terminal.sync do |buffer|
+          expect(buffer.width).to eq 40
+          expect(buffer.height).to eq 10
+        end
+      end
+    end
+
+    it "runs handlers in the order they were registered" do
+      with_harness do |harness|
+        order = [] of Int32
+
+        harness.terminal.on_resize { order << 1 }
+        harness.terminal.on_resize { order << 2 }
+        harness.terminal.on_resize { order << 3 }
+
+        harness.terminal.issue TermBuf::Commands::Resize.new(TermBuf::ScreenSize.new(40, 10))
+        harness.event_of TermBuf::Events::Resize
+
+        expect(order).to eq [1, 2, 3]
+      end
+    end
+
+    it "reports a handler that raises and runs the rest anyway" do
+      with_harness do |harness|
+        reached = false
+
+        harness.terminal.on_resize { raise "layout is wrong" }
+        harness.terminal.on_resize { reached = true }
+
+        harness.terminal.issue TermBuf::Commands::Resize.new(TermBuf::ScreenSize.new(40, 10))
+        failure = harness.event_of TermBuf::Events::Failure
+
+        expect(failure.try &.error.message).to eq "layout is wrong"
+        expect(harness.event_of(TermBuf::Events::Resize)).not_to be_nil
+        expect(reached).to be_true
+      end
+    end
+
+    it "stops running a handler that was taken back" do
+      with_harness do |harness|
+        runs = 0
+        handler = harness.terminal.on_resize { runs += 1 }
+
+        harness.terminal.issue TermBuf::Commands::Resize.new(TermBuf::ScreenSize.new(40, 10))
+        harness.event_of TermBuf::Events::Resize
+
+        expect(harness.terminal.forget_resize(handler)).to be_true
+        expect(harness.terminal.forget_resize(handler)).to be_false
+
+        harness.terminal.issue TermBuf::Commands::Resize.new(TermBuf::ScreenSize.new(30, 8))
+        harness.event_of TermBuf::Events::Resize
+
+        expect(runs).to eq 1
+      end
+    end
+
+    it "does not run handlers when the size did not change" do
+      with_harness do |harness|
+        runs = 0
+        harness.terminal.on_resize { runs += 1 }
+
+        harness.terminal.issue TermBuf::Commands::Resize.new(TermBuf::ScreenSize.new(20, 6))
+        expect(harness.event_of(TermBuf::Events::Resize, 200.milliseconds)).to be_nil
+
+        expect(runs).to eq 0
+      end
+    end
   end
 
   describe "input" do
