@@ -1,6 +1,7 @@
 require "../core/rect"
 require "../core/style"
 require "../terminal/command"
+require "../unicode/text"
 
 module TermBuf
   # A box drawn around something, with an optional title in its top edge.
@@ -101,26 +102,10 @@ module TermBuf
       title = @title
       return unless title && rect.width > 4
 
-      room = rect.width - 4
-      shown = Unicode.string_width(title) > room ? trim(title, room) : title
+      shown = Unicode.truncate title, rect.width - 4
       return if shown.empty?
 
       screen.write rect.x + 2, rect.y, shown, @title_style
-    end
-
-    # Cut to *room* cells, which for a cluster that would straddle the end
-    # means leaving it out rather than splitting it.
-    private def trim(text : String, room : Int32) : String
-      String.build do |io|
-        used = 0
-
-        Unicode.each_grapheme text do |grapheme|
-          break if used + grapheme.width > room
-
-          io << grapheme.text(text)
-          used += grapheme.width
-        end
-      end
     end
   end
 end
