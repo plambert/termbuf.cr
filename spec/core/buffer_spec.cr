@@ -329,4 +329,125 @@ Spectator.describe TermBuf::Buffer do
       expect(buffer.dirty?).to be_false
     end
   end
+
+  describe "#blit" do
+    # A panel drawn somewhere else, which is how a shard compositing its own
+    # buffers would build one.
+    let(panel) do
+      made = TermBuf::Buffer.new 4, 2
+      made.clear
+      made.write 0, 0, "abcd"
+      made.write 0, 1, "efgh"
+      made
+    end
+
+    it "copies a whole buffer in at a position" do
+      buffer.clear
+      buffer.blit panel, 2, 1
+
+      expect(buffer.to_text.lines[1]).to eq "  abcd  "
+      expect(buffer.to_text.lines[2]).to eq "  efgh  "
+      expect(buffer.to_text.lines[0]).to eq "        "
+    end
+
+    it "copies only the part it was asked for" do
+      buffer.clear
+      buffer.blit panel, 0, 0, TermBuf::Rect.new(1, 1, 2, 1)
+
+      expect(buffer.to_text.lines[0]).to eq "fg      "
+    end
+
+    it "cuts what falls past the destination edges" do
+      buffer.clear
+      buffer.blit panel, 6, 3
+
+      expect(buffer.to_text.lines[3]).to eq "      ab"
+    end
+
+    it "drops what the destination clipped off the left and top" do
+      buffer.clear
+      buffer.blit panel, -2, -1
+
+      expect(buffer.to_text.lines[0]).to eq "gh      "
+    end
+
+    it "does nothing when nothing lands on the destination" do
+      buffer.clear
+      buffer.commit_paint
+      buffer.blit panel, 20, 20
+      buffer.blit panel, -9, 0
+
+      expect(buffer.dirty?).to be_false
+    end
+
+    it "translates styles into this buffer's table" do
+      red = TermBuf::Style::DEFAULT.fg TermBuf::Color::RED
+      panel.write 0, 0, "ab", red
+      buffer.clear
+      buffer.blit panel, 1, 0
+
+      expect(buffer.styles[buffer.back[1, 0].style]).to eq red
+      expect(buffer.styles[buffer.back[2, 0].style]).to eq red
+      expect(buffer.styles[buffer.back[3, 0].style]).to eq TermBuf::Style::DEFAULT
+    end
+
+    it "translates clusters into this buffer's pool" do
+      family = "\u{1F468}\u200D\u{1F469}\u200D\u{1F467}"
+      panel.write 0, 0, family
+      buffer.clear
+      buffer.blit panel, 1, 0
+
+      cell = buffer.back[1, 0]
+
+      expect(cell.cluster).not_to eq TermBuf::ClusterPool::NONE
+      expect(cell.text(buffer.clusters)).to eq family
+      expect(buffer.back[2, 0].continuation?).to be_true
+    end
+
+    it "keeps the width the source stored rather than remeasuring" do
+      narrow = TermBuf::Buffer.new 4, 1
+      narrow.policy = TermBuf::Unicode::WidthPolicy::DEFAULT.copy_with ambiguous: 2
+      narrow.clear
+      narrow.write 0, 0, "\u00A1" # ambiguous, two cells there and one here
+
+      buffer.clear
+      buffer.blit narrow, 0, 0
+
+      expect(buffer.back[0, 0].width).to eq 2
+      expect(buffer.back[1, 0].continuation?).to be_true
+    end
+
+    it "blanks a wide character with only one half inside the source rect" do
+      wide = TermBuf::Buffer.new 4, 1
+      wide.clear
+      wide.write 0, 0, "a\u4E16b" # a 世 b, the ideograph across columns 1 and 2
+
+      buffer.clear
+      buffer.blit wide, 0, 0, TermBuf::Rect.new(0, 0, 2, 1) # keeps only its lead
+      buffer.blit wide, 4, 0, TermBuf::Rect.new(2, 0, 2, 1) # keeps only its tail
+
+      expect(buffer.to_text.lines[0]).to eq "a    b  "
+    end
+
+    it "blanks a wide character the destination cut in half" do
+      wide = TermBuf::Buffer.new 2, 1
+      wide.clear
+      wide.write 0, 0, "\u4E16"
+
+      buffer.clear
+      buffer.write 0, 0, "\u4E16xxxxxx"
+      buffer.blit wide, 1, 0 # lands on the second half of what is already there
+
+      expect(buffer.to_text.lines[0]).to eq " \u4E16xxxxx"
+    end
+
+    it "reports the cells it changed as damage" do
+      buffer.clear
+      buffer.commit_paint
+      buffer.blit panel, 2, 1
+
+      expect(buffer.damage.span(1)).to eq(2..5)
+      expect(buffer.damage.dirty?(0)).to be_false
+    end
+  end
 end

@@ -51,6 +51,12 @@ require "./termbuf/widgets"
 # `Terminal#batch` collects a frame's drawing and sends it to the owning fibre
 # as one channel operation, which is what a full redraw should use.
 #
+# `Drawing#view` gives back a rectangle of a surface addressed from its own top
+# left and cut at its own edges, which is what a panel drawn over other content
+# wants. `Buffer` and `BufferSurface` need no terminal at all, and
+# `Buffer#blit` copies one buffer's cells into another, so a shard wanting to
+# composite its own off-screen panels has what it needs.
+#
 # ### Cursors
 #
 # A `Cursor` is somewhere to stream text to: a position, a `Style`, and the

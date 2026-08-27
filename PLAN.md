@@ -822,8 +822,16 @@ Not blocking, decide when reached:
 * Mouse tracking and the kitty keyboard protocol were deferred; confirm at Phase 7 whether they
   belong in `0.1.0` or a follow-up.
 * Sixel as an image fallback for terminals without kitty graphics — currently out of scope.
-* Whether `Region` should support overlap and z-ordering, or stay non-overlapping. Non-overlapping
-  is assumed; widget layering would be built above this shard.
+* ~~Whether `Region` should support overlap and z-ordering, or stay non-overlapping.~~ Settled
+  against layering. Clipping ships as `View`: a translated, clipped drawing surface, which is cell
+  arithmetic against a rectangle and so belongs here. Z-order does not, for two reasons. Restore is
+  already free — the buffer is double-buffered and paint diffs back against front, so an
+  application that draws base-then-overlay one frame and base-only the next puts exactly the covered
+  rectangle on the wire; dismissing an overlay is not drawing it. And a composited overlay whose
+  left edge lands mid-cluster orphans a continuation cell, so the wide-character invariant one grid
+  now establishes once at write time would have to be re-derived per cell, per layer, on every
+  paint. Compositing belongs to the widget shard, which `Buffer`, `BufferSurface`, and
+  `Buffer#blit` between them give everything it needs for.
 * ~~Whether `Field` belongs in this shard or a companion one.~~ Settled: it stays, because everyone
   needs it and because it is the thing that exercises cursors, graphemes, and paste together. Past
   two widgets they move to a companion shard rather than growing a toolkit here.

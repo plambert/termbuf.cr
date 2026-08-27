@@ -447,6 +447,40 @@ Spectator.describe TermBuf::Terminal do
     end
   end
 
+  describe "blitting" do
+    it "composites another buffer into a frame" do
+      with_harness do |harness|
+        panel = TermBuf::Buffer.new 4, 1
+        panel.clear
+        panel.write 0, 0, "pane"
+
+        harness.terminal.batch do |screen|
+          screen.write 0, 0, "........"
+          screen.blit panel, 2, 0
+        end
+        harness.terminal.paint
+
+        expect(harness.drain).to contain "..pane.."
+      end
+    end
+
+    it "clips a blit through a view" do
+      with_harness do |harness|
+        panel = TermBuf::Buffer.new 4, 1
+        panel.clear
+        panel.write 0, 0, "pane"
+
+        harness.terminal.batch do |screen|
+          screen.write 0, 0, "........"
+          screen.view(TermBuf::Rect.new(2, 0, 2, 1)).blit panel, 0, 0
+        end
+        harness.terminal.paint
+
+        expect(harness.drain).to contain "..pa...."
+      end
+    end
+  end
+
   describe "resizing" do
     it "resizes the buffer and says so" do
       with_harness do |harness|
