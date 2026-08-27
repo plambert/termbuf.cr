@@ -279,6 +279,12 @@ with no damage. Off by default.
   `read`; isolating it means a blocked read cannot stall the owner fiber or the application's
   fibers.
 * The **event channel** (`Channel(Event)`) is the only thing the application reads from.
+* **Resize handlers** (`terminal.on_resize`) run on the owner fiber inside the resize command,
+  after the grids are resized and before `Events::Resize` is sent, so an application relays new
+  bounds to its regions in one place instead of at every `Events::Resize`. They run on the fiber
+  servicing commands, so a handler must not call back into `#batch`, `#paint`, or `#sync`. Layout
+  itself stays out of this shard: anchors and splits belong to the widget layer above it, which
+  this hook exists to serve.
 * Shutdown closes the command channel, drains it, restores the terminal, then closes the event
   channel — so a crash in application code cannot leave the terminal in raw mode with the alt screen
   active. `at_exit` and signal handlers both route through the same restore path.

@@ -139,6 +139,7 @@ module TermBuf
     @scheduling = false
     @signals = [] of Signal
     @restored = false
+    @resize_handlers = [] of ResizeHandler
 
     def initialize(@tty : Tty,
                    @capabilities : Capabilities = Capabilities::NONE,
@@ -330,6 +331,48 @@ module TermBuf
       @responses.unregister pattern
     end
 
+    # --------------------------------------------------------------- resizing
+
+    # Something to run when the screen changes size, before the application
+    # hears about it.
+    alias ResizeHandler = ScreenSize -> Nil
+
+    # Registers *handler*, run when the screen changes size: after the grids
+    # have been resized and before `Events::Resize` is sent.
+    #
+    # This is where an application puts its layout. A `Region` the application
+    # made covers a pane it chose, and the driver has no idea what that pane
+    # was meant to be a fraction or an edge of, so it does not move it — see
+    # `Region#bounds=`. Rather than repeating the arithmetic at every
+    # `Events::Resize`, work it out once here:
+    #
+    #     terminal.on_resize do |size|
+    #       status.bounds = Rect.new 0, size.rows - 1, size.columns, 1
+    #       log.bounds = Rect.new 0, 0, size.columns, size.rows - 1
+    #     end
+    #
+    # Handlers run in the order they were registered, on the fibre that owns
+    # the buffer. That fibre is the one servicing commands, so a handler must
+    # not call back into `#batch`, `#paint`, or `#sync`; moving regions and
+    # recomputing rectangles is what it is for. Anything it raises arrives as
+    # an `Events::Failure` and the remaining handlers still run.
+    #
+    # Returns the handler, which `#forget_resize` takes back.
+    def on_resize(&handler : ResizeHandler) : ResizeHandler
+      on_resize handler
+    end
+
+    # :ditto:
+    def on_resize(handler : ResizeHandler) : ResizeHandler
+      @resize_handlers << handler
+      handler
+    end
+
+    # Stops running *handler* on a resize, and says whether it was registered.
+    def forget_resize(handler : ResizeHandler) : Bool
+      !@resize_handlers.delete(handler).nil?
+    end
+
     # -------------------------------------------------------------- cursors
 
     # The cursor streamed output goes to, covering the whole screen.
@@ -517,11 +560,25 @@ module TermBuf
 
       # The screen-wide region has to follow the screen. A region an
       # application made covers a pane it chose, and moving that is its
-      # business rather than the driver's.
+      # business rather than the driver's — which is what `#on_resize` is for.
       @screen.bounds = Rect.full size.columns, size.rows
       @buffer.invalidate
 
+      run_resize_handlers size
+
       emit Events::Resize.new(size)
+    end
+
+    # The application's layout, run before it is told the screen changed so
+    # that whatever it draws next sees panes already in their new places. One
+    # handler raising does not stop the others, since a half-placed layout is
+    # worse than a reported failure.
+    private def run_resize_handlers(size : ScreenSize) : Nil
+      @resize_handlers.each do |handler|
+        handler.call size
+      rescue error
+        emit Events::Failure.new(error)
+      end
     end
 
     private def perform_apply(command : Commands::Apply) : Nil
