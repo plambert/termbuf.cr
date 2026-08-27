@@ -105,6 +105,27 @@ module TermBuf
       copy_with link: id
     end
 
+    # A copy of this style with everything *other* sets taking over. A field
+    # *other* leaves at its default is kept from here.
+    #
+    # What a surface carrying a base style needs: a panel says its background
+    # once, and a write inside it names only the colour and the attributes it
+    # cares about. Colours, the underline style, and the link merge that way.
+    #
+    # Attributes are the exception. They are flags rather than a choice of one,
+    # so they combine: a bold write inside a faint panel is both, and there is
+    # no value of `Attributes` that means "leave the panel's alone" separately
+    # from "add none of my own".
+    def merge(other : Style) : Style
+      Style.new(
+        other.foreground.default? ? @foreground : other.foreground,
+        other.background.default? ? @background : other.background,
+        other.underline_color.default? ? @underline_color : other.underline_color,
+        @attributes | other.attributes,
+        other.underline.none? ? @underline : other.underline,
+        other.link.zero? ? @link : other.link)
+    end
+
     # Returns a copy with *flags* added.
     def with(flags : Attributes) : Style
       copy_with attributes: @attributes | flags

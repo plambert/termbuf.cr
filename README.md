@@ -138,6 +138,21 @@ surface the view came from. Views nest, so a border can hand what it surrounds a
 the space left inside it. `#passthrough` and `#scroll_region` pass through untouched, since neither
 is addressed in the view's cells.
 
+A view can also carry a style that everything drawn through it merges onto, so a highlighted row is
+filled once and its columns name only what each one adds:
+
+```crystal
+row = screen.view rect, TermBuf::Style::DEFAULT.bg(highlight)
+row.clear                                              # paints the highlight
+row.write 0, 0, name, TermBuf::Style::DEFAULT.bold     # bold, on the highlight
+row.write 24, 0, rate, TermBuf::Style::DEFAULT.faint
+```
+
+A write that names a field of its own wins; one that leaves a field unset takes the view's. Nested
+views layer the same way. Attributes are the exception and combine rather than replace, since flags
+have no value meaning "leave the panel's alone" — a bold write inside a faint panel is both. The
+merge is `Style#merge`, usable on its own.
+
 This is clipping, not layering: nothing says a view is on top of anything. Dismissing a panel means
 the next frame does not draw it, and the paint diff then sends the cells it covered and nothing
 else — a batched full frame is the cheap way to do this, not a workaround for the lack of layers.

@@ -63,15 +63,19 @@ module TermBuf
       rect = centred area
       return if rect.empty?
 
-      screen.fill rect, ' ', @style
-      @border.try &.draw screen, rect
+      # Everything drawn through here is on the panel's background without
+      # naming it, and a label longer than the panel is cut at its edge rather
+      # than landing on whatever the notice was drawn over.
+      panel = screen.view rect, @style
+      panel.fill panel.bounds, ' '
+      @border.try &.draw panel, panel.bounds
 
-      inside = @border ? Border.inset(rect) : rect
+      inside = @border ? Border.inset(panel.bounds) : panel.bounds
       return if inside.empty?
 
       label = text
       x = inside.x + Math.max((inside.width - Unicode.string_width(label)) // 2, 0)
-      screen.write x, inside.y + inside.height // 2, label, @style.bold
+      panel.write x, inside.y + inside.height // 2, label, Style::DEFAULT.bold
     end
 
     private def centred(area : Rect) : Rect

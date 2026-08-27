@@ -233,6 +233,70 @@ Spectator.describe TermBuf::View do
     end
   end
 
+  describe "a view carrying a style" do
+    let(highlight) { TermBuf::Style::DEFAULT.bg TermBuf::Color::BLUE }
+
+    it "gives its background to a write that names none" do
+      with_screen do |screen, buffer|
+        row = screen.view Rect.new(0, 1, 8, 1), highlight
+        row.clear
+        row.write 0, 0, "name", TermBuf::Style::DEFAULT.bold
+
+        expect(buffer.styles[buffer.back[0, 1].style]).to eq highlight.bold
+        expect(buffer.styles[buffer.back[6, 1].style]).to eq highlight
+      end
+    end
+
+    it "lets a write name a background of its own" do
+      with_screen do |screen, buffer|
+        row = screen.view Rect.new(0, 0, 8, 1), highlight
+        row.write 0, 0, "x", RED.bg(TermBuf::Color::GREEN)
+
+        expect(buffer.styles[buffer.back[0, 0].style].background).to eq TermBuf::Color::GREEN
+      end
+    end
+
+    it "applies to every command that carries a style" do
+      with_screen do |screen, buffer|
+        row = screen.view Rect.new(0, 0, 4, 2), highlight
+        row.fill Rect.new(0, 0, 2, 1), '#'
+        row.write_char 2, 0, 'c'
+
+        expect(buffer.styles[buffer.back[0, 0].style]).to eq highlight
+        expect(buffer.styles[buffer.back[2, 0].style]).to eq highlight
+      end
+    end
+
+    it "can be set after the view was made" do
+      with_screen do |screen, buffer|
+        row = screen.view Rect.new(0, 0, 4, 1)
+        row.style = highlight
+        row.write 0, 0, "ab"
+
+        expect(buffer.styles[buffer.back[0, 0].style]).to eq highlight
+      end
+    end
+
+    it "layers through nested views, the innermost winning each field" do
+      with_screen do |screen, buffer|
+        outer = screen.view Rect.new(0, 0, 8, 1), highlight
+        inner = outer.view Rect.new(1, 0, 6, 1), TermBuf::Style::DEFAULT.italic
+        inner.write 0, 0, "x", TermBuf::Style::DEFAULT.bold
+
+        expect(buffer.styles[buffer.back[1, 0].style]).to eq highlight.italic.bold
+      end
+    end
+
+    it "leaves styles alone when it carries none" do
+      with_screen do |screen, buffer|
+        plain = screen.view Rect.new(0, 0, 4, 1)
+        plain.write 0, 0, "ab", RED
+
+        expect(buffer.styles[buffer.back[0, 0].style]).to eq RED
+      end
+    end
+  end
+
   describe "an empty view" do
     it "drops everything" do
       with_screen do |screen, buffer|

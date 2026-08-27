@@ -104,6 +104,68 @@ Spectator.describe TermBuf::Style do
       expect(base).not_to eq base.linked(1_u32)
     end
   end
+
+  describe "#merge" do
+    let(panel) { TermBuf::Style::DEFAULT.bg(TermBuf::Color::BLUE).faint }
+
+    it "keeps what the other style leaves unset" do
+      merged = panel.merge TermBuf::Style::DEFAULT.bold
+
+      expect(merged.background).to eq TermBuf::Color::BLUE
+      expect(merged.has?(TermBuf::Attributes::Bold)).to be_true
+    end
+
+    it "lets the other style take over a colour it names" do
+      merged = panel.merge TermBuf::Style::DEFAULT.bg(TermBuf::Color::RED)
+
+      expect(merged.background).to eq TermBuf::Color::RED
+    end
+
+    it "merges the foreground and the underline colour the same way" do
+      base = TermBuf::Style::DEFAULT
+        .fg(TermBuf::Color::GREEN)
+        .underlined(TermBuf::Underline::Curly, TermBuf::Color::RED)
+
+      kept = base.merge TermBuf::Style::DEFAULT.bold
+      taken = base.merge TermBuf::Style::DEFAULT.fg(TermBuf::Color::BLUE)
+
+      expect(kept.foreground).to eq TermBuf::Color::GREEN
+      expect(kept.underline_color).to eq TermBuf::Color::RED
+      expect(kept.underline).to eq TermBuf::Underline::Curly
+      expect(taken.foreground).to eq TermBuf::Color::BLUE
+    end
+
+    it "combines attributes rather than replacing them" do
+      merged = panel.merge TermBuf::Style::DEFAULT.bold
+
+      expect(merged.has?(TermBuf::Attributes::Faint)).to be_true
+      expect(merged.has?(TermBuf::Attributes::Bold)).to be_true
+    end
+
+    it "keeps a link the other style does not carry, and takes one it does" do
+      linked = TermBuf::Style::DEFAULT.linked 7_u32
+
+      expect(linked.merge(TermBuf::Style::DEFAULT).link).to eq 7_u32
+      expect(linked.merge(TermBuf::Style::DEFAULT.linked(9_u32)).link).to eq 9_u32
+    end
+
+    it "changes nothing when either side is the default" do
+      expect(TermBuf::Style::DEFAULT.merge(panel)).to eq panel
+      expect(panel.merge(TermBuf::Style::DEFAULT)).to eq panel
+    end
+
+    it "layers, so the innermost style wins each field" do
+      outer = TermBuf::Style::DEFAULT.bg(TermBuf::Color::BLUE)
+      inner = TermBuf::Style::DEFAULT.fg(TermBuf::Color::GREEN)
+      written = TermBuf::Style::DEFAULT.fg(TermBuf::Color::RED).bold
+
+      merged = outer.merge inner.merge(written)
+
+      expect(merged.background).to eq TermBuf::Color::BLUE
+      expect(merged.foreground).to eq TermBuf::Color::RED
+      expect(merged.has?(TermBuf::Attributes::Bold)).to be_true
+    end
+  end
 end
 
 Spectator.describe TermBuf::StyleTable do

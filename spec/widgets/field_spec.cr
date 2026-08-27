@@ -278,6 +278,23 @@ Spectator.describe TermBuf::PasteNotice do
     expect(buffer.to_text).to contain "pasting 4096 bytes"
   end
 
+  it "keeps a label too wide for the screen inside its own panel" do
+    notice = TermBuf::PasteNotice.new label: "pasting a great deal of something"
+    notice.arriving 4096
+
+    buffer = TermBuf::Buffer.new 12, 5
+    buffer.clear
+    buffer.write 0, 2, "............"
+    notice.draw TermBuf::BufferSurface.new(buffer), TermBuf::Rect.full(12, 5)
+
+    # The panel is as wide as the screen, so nothing of the row it covers is
+    # left, and nothing of the label reached past it either.
+    buffer.to_text.split('\n').each do |line|
+      expect(line.size).to be <= 12
+    end
+    expect(buffer.to_text).not_to contain "."
+  end
+
   it "goes away when the paste ends" do
     notice = TermBuf::PasteNotice.new
     notice.arriving 10

@@ -6,6 +6,19 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `Style#merge`: a style laid over another, each field the upper one leaves unset coming from
+  below. Attributes combine rather than replace. ([#4])
+- A `View` carries a style everything drawn through it merges onto, so a highlighted row is filled
+  once and its columns name only what each adds rather than threading the row's background through
+  every per-cell style. `Drawing#view` takes it. ([#4])
+
+### Changed
+
+- `PasteNotice` draws through a styled view, so its label is cut at the panel edge rather than
+  landing on what the notice was drawn over.
+
 ## [0.1.3] - 2026-08-27
 
 ### Added
@@ -108,3 +121,4 @@ First release. Everything below is new.
 [#1]: https://github.com/plambert/termbuf.cr/issues/1
 [#2]: https://github.com/plambert/termbuf.cr/issues/2
 [#3]: https://github.com/plambert/termbuf.cr/issues/3
+[#4]: https://github.com/plambert/termbuf.cr/issues/4

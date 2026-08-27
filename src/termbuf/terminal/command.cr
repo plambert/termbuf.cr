@@ -115,9 +115,9 @@ module TermBuf
     end
 
     # A rectangle of this surface, addressed from its own top left and cut at
-    # its own edges. See `View`.
-    def view(rect : Rect) : View
-      made = View.new self, rect
+    # its own edges. Anything drawn through it merges onto *style*. See `View`.
+    def view(rect : Rect, style : Style = Style::DEFAULT) : View
+      made = View.new self, rect, style
       made.policy = policy
       made
     end
