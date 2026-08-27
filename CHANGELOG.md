@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.2] - 2026-08-27
+
 ### Added
 
 - `Terminal#on_resize`: a handler run when the screen changes size, after the grids are resized and
@@ -81,7 +83,8 @@ First release. Everything below is new.
 - OSC 8 links, kitty graphics, and the kitty colour stack are detected but not emitted.
 - Mouse reporting is not enabled or decoded.
 
-[Unreleased]: https://github.com/plambert/termbuf.cr/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/plambert/termbuf.cr/compare/v0.1.2...HEAD
+[0.1.2]: https://github.com/plambert/termbuf.cr/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/plambert/termbuf.cr/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/plambert/termbuf.cr/releases/tag/v0.1.0
 [#1]: https://github.com/plambert/termbuf.cr/issues/1
