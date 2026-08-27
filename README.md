@@ -282,6 +282,24 @@ TermBuf::Unicode.graphemes "🇺🇸!"       # => ["🇺🇸", "!"]
 Width tables are generated from the UCD by `scripts/gen_unicode.cr` and committed, so building the
 shard needs no network access.
 
+### Fitting text to a column
+
+Column layout is arithmetic on cells, so it has to run against the same measurement the buffer uses.
+Four helpers do it, each taking an optional `WidthPolicy` and each walking whole grapheme clusters —
+a double-width cluster that would half-cross the edge is dropped rather than split, so a result can
+come back a cell short. `fit` pads that cell back; the others leave it.
+
+```crystal
+Unicode.truncate  "hello world", 5             # => "hello"
+Unicode.ellipsize "hello world", 8             # => "hello w…"   marker measured too
+Unicode.fit       "42", 6, :right              # => "    42"     exactly 6 cells
+Unicode.fit       "name", 10, :left, '.'       # => "name......"
+Unicode.window    "a long filename", 4, 6      # => "ng fil"     a marquee step
+```
+
+`fit` is the one a table row wants: every column comes back exactly the width it was given, whatever
+is in it.
+
 ### Measured widths
 
 How many cells a cluster occupies is a property of the terminal, not of Unicode. UAX #29 says where

@@ -6,6 +6,16 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `Unicode.truncate`, `Unicode.ellipsize`, `Unicode.fit`, and `Unicode.window`: width-aware text
+  fitting for column layout, measured against a `WidthPolicy` and cutting on grapheme cluster
+  boundaries. `Unicode::Align` picks which end of a `fit` keeps its position. ([#1])
+
+### Changed
+
+- `Border` trims an over-long title with `Unicode.truncate` rather than its own copy of the walk.
+
 ## [0.1.0] - 2026-08-25
 
 First release. Everything below is new.
@@ -65,3 +75,4 @@ First release. Everything below is new.
 
 [Unreleased]: https://github.com/plambert/termbuf.cr/compare/v0.1.0...HEAD
 [0.1.0]: https://github.com/plambert/termbuf.cr/releases/tag/v0.1.0
+[#1]: https://github.com/plambert/termbuf.cr/issues/1

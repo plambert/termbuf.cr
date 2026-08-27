@@ -372,6 +372,11 @@ spec suite includes `GraphemeBreakTest.txt` as a conformance fixture.
   pairs, `Prepend`, `SpacingMark`, emoji ZWJ sequences, and `InCB` linkers. Cluster width is the
   width of the base character plus any spacing marks, capped at a pair of cells — not the sum over
   every code point, which would make a joined emoji eight cells wide.
+* **Fitting** — `truncate`, `ellipsize`, `fit`, and `window` cut and pad a string to an exact number
+  of cells for column layout, against the same `WidthPolicy` the buffer measures with. Each walks
+  whole clusters, so a wide one straddling an edge is dropped rather than split and the result may
+  come back a cell short; `fit` pads that cell. Without this every consumer writes the
+  accumulate-and-cut loop again, which is where the width bug comes back.
 
 ## Input
 

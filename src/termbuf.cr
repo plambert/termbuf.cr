@@ -1,5 +1,6 @@
 require "./termbuf/version"
 require "./termbuf/unicode/grapheme"
+require "./termbuf/unicode/text"
 require "./termbuf/unicode/overrides"
 require "./termbuf/core"
 require "./termbuf/sgr_scanner"
@@ -43,7 +44,9 @@ require "./termbuf/widgets"
 # `Drawing` is the drawing API, mixed into both `Terminal` and `Batcher`.
 # Coordinates are zero based from the top left. Text is placed one extended
 # grapheme cluster per cell, and a cluster the terminal draws double width takes
-# two — see `Unicode.string_width`.
+# two — see `Unicode.string_width`. `Unicode.truncate`, `Unicode.ellipsize`,
+# `Unicode.fit`, and `Unicode.window` fit a string to a column width under the
+# same measurement.
 #
 # `Terminal#batch` collects a frame's drawing and sends it to the owning fibre
 # as one channel operation, which is what a full redraw should use.
