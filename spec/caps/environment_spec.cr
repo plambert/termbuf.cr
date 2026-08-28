@@ -97,14 +97,60 @@ Spectator.describe TermBuf::EnvironmentDetector do
     end
 
     # Measured in Terminal.app 470.2: a 64 step ramp of one hue comes out
-    # smooth, where the palette bands it.
-    it "gives Terminal.app 24 bit colour but none of the kitty protocols" do
-      caps = detect({"TERM" => "xterm-256color", "TERM_PROGRAM" => "Apple_Terminal"})
+    # smooth, where the palette bands it. 24 bit colour arrived with the
+    # version that ships on macOS Tahoe.
+    it "gives a current Terminal.app 24 bit colour but no kitty protocol" do
+      caps = detect({"TERM"                 => "xterm-256color",
+                     "TERM_PROGRAM"         => "Apple_Terminal",
+                     "TERM_PROGRAM_VERSION" => "470.2"})
 
       expect(caps.includes?(Cap::Color256)).to be_true
       expect(caps.includes?(Cap::TrueColor)).to be_true
       expect(caps.includes?(Cap::KittyGraphics)).to be_false
       expect(caps.includes?(Cap::Osc8Links)).to be_false
+    end
+
+    it "stops an earlier Terminal.app at the palette" do
+      caps = detect({"TERM"                 => "xterm-256color",
+                     "TERM_PROGRAM"         => "Apple_Terminal",
+                     "TERM_PROGRAM_VERSION" => "455"})
+
+      expect(caps.includes?(Cap::TrueColor)).to be_false
+      expect(caps.includes?(Cap::Color256)).to be_true
+    end
+
+    it "takes the version at the boundary" do
+      below = detect({"TERM_PROGRAM" => "Apple_Terminal", "TERM_PROGRAM_VERSION" => "463.99"})
+      at = detect({"TERM_PROGRAM" => "Apple_Terminal", "TERM_PROGRAM_VERSION" => "464"})
+
+      expect(below.includes?(Cap::TrueColor)).to be_false
+      expect(at.includes?(Cap::TrueColor)).to be_true
+    end
+
+    # Worst case when there is nothing to go on: Terminal.app answers no query
+    # that would settle it, so an unreadable version is treated as too old.
+    it "assumes the palette when the version says nothing" do
+      %w[nonsense].push("").each do |version|
+        caps = detect({"TERM_PROGRAM" => "Apple_Terminal", "TERM_PROGRAM_VERSION" => version})
+
+        expect(caps.includes?(Cap::TrueColor)).to be_false
+      end
+
+      expect(detect({"TERM_PROGRAM" => "Apple_Terminal"}).includes?(Cap::TrueColor)).to be_false
+    end
+
+    it "outranks a COLORTERM inherited from whatever opened the window" do
+      caps = detect({"TERM"                 => "xterm-256color",
+                     "TERM_PROGRAM"         => "Apple_Terminal",
+                     "TERM_PROGRAM_VERSION" => "455",
+                     "COLORTERM"            => "truecolor"})
+
+      expect(caps.includes?(Cap::TrueColor)).to be_false
+    end
+
+    it "leaves COLORTERM alone for every other terminal" do
+      expect(detect({"TERM" => "xterm", "COLORTERM" => "truecolor"}).includes?(Cap::TrueColor))
+        .to be_true
     end
 
     it "matches without regard to case" do
@@ -180,8 +226,9 @@ Spectator.describe TermBuf::EnvironmentDetector do
       expect(caps.includes?(Cap::Bold)).to be_true
       expect(caps.includes?(Cap::AltScreen)).to be_true
       expect(caps.includes?(Cap::BracketedPaste)).to be_true
-      expect(caps.includes?(Cap::TrueColor)).to be_true
       expect(caps.includes?(Cap::Color256)).to be_true
+      # 470.2 is new enough for 24 bit colour; an older one would not be.
+      expect(caps.includes?(Cap::TrueColor)).to be_true
     end
 
     # The 256colour TERM pattern would otherwise put it back.

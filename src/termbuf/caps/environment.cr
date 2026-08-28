@@ -59,7 +59,8 @@ module TermBuf
       {"rio", Capabilities::MODERN.flags},
       {"alacritty", Capabilities::MODERN.flags},
       # Terminal.app 470.2, measured: a smooth 24 bit ramp, bracketed paste,
-      # blink, and conceal, but SGR 9 draws no line through anything.
+      # blink, and conceal, but SGR 9 draws no line through anything. The
+      # colour depth depends on the version; see `APPLE_TERMINAL_TRUECOLOR`.
       {"Apple_Terminal", Capabilities::XTERM.flags | Capability::TrueColor |
                          Capability::BracketedPaste},
     ]
@@ -134,8 +135,29 @@ module TermBuf
       flags
     end
 
+    # The Terminal.app that shipped with macOS Tahoe. Earlier ones take a 24
+    # bit colour and quantize it to the palette.
+    APPLE_TERMINAL_TRUECOLOR = 464
+
     private def denied(env : Hash(String, String)) : Capability
-      denials(env["TERM"]?) | denials(identified(env))
+      flags = denials(env["TERM"]?) | denials(identified(env))
+      flags |= Capability::TrueColor if palette_only_terminal_app? env
+      flags
+    end
+
+    # Whether this is a Terminal.app from before 24 bit colour.
+    #
+    # Asking would be better, and there is nothing to ask: Terminal.app answers
+    # neither `DECRQSS` for SGR, nor `XTGETTCAP`, nor `DECRPM`. It replies to
+    # the primary and secondary device attributes and to a cursor position
+    # report, and to nothing else. So the version it puts in the environment is
+    # all there is, and a version that is missing or unreadable is treated as
+    # too old rather than assumed to be new.
+    private def palette_only_terminal_app?(env : Hash(String, String)) : Bool
+      return false unless program_name(env) == "apple_terminal"
+
+      major = env["TERM_PROGRAM_VERSION"]?.try(&.split('.').first?).try &.to_i?
+      major.nil? || major < APPLE_TERMINAL_TRUECOLOR
     end
 
     # Which terminal is reading the output, as far as the environment says.

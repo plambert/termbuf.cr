@@ -12,8 +12,11 @@ All notable changes to this project are documented here. The format follows
   terminal naming itself in `TERM_PROGRAM`. Terminal.app started from a shell that had ghostty's
   environment was inheriting `GHOSTTY_RESOURCES_DIR` and with it the kitty graphics protocol, OSC 8
   links, extended underlines, synchronized output, and the rest — none of which it has. ([#5])
-- Terminal.app is measured rather than assumed: 24 bit colour and bracketed paste, which it was
-  only getting from the leak, and no strike-through, which it takes and ignores.
+- Terminal.app is measured rather than assumed: bracketed paste, which it was only getting from the
+  leak, and no strike-through, which it takes and ignores. 24 bit colour arrived with the version
+  that ships on macOS Tahoe, so it turns on at `TERM_PROGRAM_VERSION` 464 and a version that is
+  missing or unreadable is treated as older. Terminal.app answers no query that would settle it —
+  not `DECRQSS` for SGR, not `XTGETTCAP`, not `DECRPM` — so the version is all there is.
 
 ## [0.1.4] - 2026-08-28
 
