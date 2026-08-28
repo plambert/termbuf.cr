@@ -1053,6 +1053,29 @@ Spectator.describe TermBuf::Tty do
     expect(tty.entered?).to be_false
   end
 
+  # A terminal that does not recognise a query prints its payload, so probing
+  # leaves rubbish on the screen the person was looking at. Terminal.app does
+  # this with XTGETTCAP, DECRPM and the kitty graphics query.
+  describe "#scrub_line" do
+    it "blanks the line with nothing but carriage returns and spaces" do
+      output = IO::Memory.new
+      tty = TermBuf::Tty.new IO::Memory.new, output, managed: false
+      tty.scrub_line
+      written = output.to_s
+
+      expect(written).to eq "\r#{" " * tty.size.columns}\r"
+      expect(written).not_to contain "\e"
+    end
+
+    it "covers a whole line, so anything echoed onto it goes" do
+      output = IO::Memory.new
+      tty = TermBuf::Tty.new IO::Memory.new, output, managed: false
+      tty.scrub_line
+
+      expect(output.to_s.count(' ')).to eq tty.size.columns
+    end
+  end
+
   it "writes nothing when leaving a terminal it never entered" do
     output = IO::Memory.new
     tty = TermBuf::Tty.new IO::Memory.new, output, managed: false

@@ -182,7 +182,11 @@ module TermBuf
       resolved = begin
         if probe && tty.managed?
           tty.raw!
-          CapabilityResolver.resolve env, input, output
+          asked = CapabilityResolver.resolve env, input, output
+          # Whatever the terminal made of the queries it did not recognise is
+          # sitting on the screen the person was looking at. See `Tty#scrub_line`.
+          tty.scrub_line
+          asked
         else
           CapabilityResolver.resolve env
         end
