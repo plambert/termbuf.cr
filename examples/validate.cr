@@ -48,6 +48,17 @@ module Validate
     {"ﷺ", "U+FDFA arabic ligature"},
   ]
 
+  # Cycled across a row by the mixed fill: one cell, two cells, and a cluster
+  # of seven code points that a terminal may or may not measure as one.
+  MIXED_FILL = ["a", "漢", "\u{1F468}\u200D\u{1F469}\u200D\u{1F467}\u200D\u{1F466}"]
+
+  # How the edges page is filled, or `None` for the box.
+  enum Fill
+    None
+    Digits
+    Mixed
+  end
+
   # The pages, in the order tab walks them.
   class Validator
     include TermBuf
@@ -58,7 +69,7 @@ module Validate
     def initialize(@terminal : Terminal)
       @page = 0
       @rebuild = true
-      @filled = false
+      @fill = Fill::None
       @running = true
       @frame = 0
       @log = 0
@@ -301,7 +312,7 @@ module Validate
     # scrolls when the bottom right cell is written, the box loses its top row
     # and everything shifts; if it does not, this is a closed rectangle.
     private def draw_edges(screen) : Nil
-      return draw_fill screen if @filled
+      return draw_fill screen unless @fill.none?
 
       last_column = columns - 1
       last_row = rows - 1
@@ -350,7 +361,8 @@ module Validate
         {"#{rows - 1} as the last column and row on the rulers. A missing top", Style::DEFAULT},
         {"edge means writing the bottom right cell scrolled the screen.", Style::DEFAULT},
         {"", Style::DEFAULT},
-        {"[f] fill every cell   [ctrl-r] redraw   [tab] page   [q] quit", Style::DEFAULT.faint},
+        {"[1] fill with digits   [2] fill with mixed widths   [ctrl-r] redraw", Style::DEFAULT.faint},
+        {"[tab] page   [q] quit", Style::DEFAULT.faint},
       ]
 
       top = Math.max (rows - lines.size) // 2, 2
@@ -367,16 +379,53 @@ module Validate
     # obvious.
     private def draw_fill(screen) : Nil
       rows.times do |row|
-        line = String.build do |io|
-          columns.times { |column| io << (column % 10) }
-        end
-
         tint = Color.indexed 232 + (row * 23 // Math.max(rows - 1, 1))
+        line = @fill.digits? ? digit_row : mixed_row
         screen.write 0, row, line, Style::DEFAULT.bg(tint).fg(Color.indexed(15))
       end
 
-      screen.write 2, rows // 2, " every cell is written; press f for the box ",
-        Style::DEFAULT.reverse.bold
+      screen.write 2, rows // 2, " #{fill_note} ", Style::DEFAULT.reverse.bold
+    end
+
+    private def fill_note : String
+      return "every cell is written; press 1 for the box, 2 for the mixed fill" if @fill.digits?
+
+      "narrow, wide, composed; press 2 for the box, 1 for digits"
+    end
+
+    # A digit per column, so the row reads as a ruler and any cell the terminal
+    # would not take shows as a gap.
+    private def digit_row : String
+      String.build do |io|
+        columns.times { |column| io << (column % 10) }
+      end
+    end
+
+    # The same row, cycling a one cell character, a two cell one, and a cluster
+    # made of several code points.
+    #
+    # Every piece is one or two cells here, so the row reaches the right edge
+    # on a terminal that measures clusters the way this does.
+    #
+    # On one that adds up the code points instead, each cluster costs it eleven
+    # columns rather than the two it was written as, so a cycle costs fourteen
+    # of its columns for five of ours and the row stops about a third of the
+    # way across. The empty part is what that terminal made unaddressable.
+    private def mixed_row : String
+      String.build do |io|
+        used = 0
+        index = 0
+
+        while used < columns
+          piece = MIXED_FILL[index % MIXED_FILL.size]
+          width = Unicode.string_width piece, @terminal.widths
+          break if width.zero? || used + width > columns
+
+          io << piece
+          used += width
+          index += 1
+        end
+      end
     end
 
     # ---------------------------------------------------------------- page 3
@@ -395,6 +444,7 @@ module Validate
       row = 4
       shown = 0
       policy = @terminal.widths
+      counted = @terminal.quirks.per_code_point_columns?
 
       SAMPLES.each do |(sample, description)|
         break if row >= rows - 3
@@ -402,6 +452,15 @@ module Validate
         width = Unicode.string_width sample, policy
         dots = Math.max bar - 3 - width, 0
         screen.write 2, row, "#{width}  #{sample}#{"." * dots}|  #{description}"
+
+        # This terminal has already said it counts a cluster by adding up its
+        # code points, so which rows it will misplace, and by how far, is
+        # arithmetic rather than a surprise. Saying so beats leaving someone to
+        # wonder whether the page is broken.
+        drift = counted ? Unicode.code_point_columns(sample, policy) - width : 0
+        screen.write bar + 4 + description.size + 2, row,
+          drift.zero? ? "" : "bar is #{drift.abs} #{drift > 0 ? "right" : "left"}",
+          Style::DEFAULT.fg(Color.indexed(1))
 
         row += 1
         shown += 1
@@ -411,10 +470,17 @@ module Validate
       # Without the wrapper, since the row is only so wide.
       rules = policy.to_s.lchop("WidthPolicy(").rchop(')')
       screen.write 2, rows - 3, "#{note}measured: #{rules}", Style::DEFAULT.faint
-      screen.write 2, rows - 2,
-        "a bar out of line: the terminal moved the cursor further than this counted. " \
-        "a glyph over its neighbour: it drew wider than it moved.",
-        Style::DEFAULT.faint
+      screen.write 2, rows - 2, widths_note, Style::DEFAULT.faint
+    end
+
+    private def widths_note : String
+      unless @terminal.quirks.per_code_point_columns?
+        return "a bar out of line: the terminal moved the cursor further than this counted. " \
+               "a glyph over its neighbour: it drew wider than it moved."
+      end
+
+      "this terminal counts a cluster by adding up its code points, so the marked rows cannot " \
+      "line up. a glyph over its neighbour is it drawing wider than it moved."
     end
 
     # ---------------------------------------------------------------- page 9
@@ -1008,7 +1074,8 @@ module Validate
       return unless key.character?
 
       case key.char
-      when 'f' then @filled = !@filled
+      when '1' then @fill = @fill.digits? ? Fill::None : Fill::Digits
+      when '2' then @fill = @fill.mixed? ? Fill::None : Fill::Mixed
       when ' ' then @frozen = !@frozen
       end
     end
