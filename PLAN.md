@@ -375,10 +375,12 @@ a table once it is measured. `TERMBUF_QUIRKS` overrides detection, as `TERMBUF_C
   departures: the zero width joiner takes a column, so does an enclosing mark, and a regional
   indicator takes one rather than two. That count is what `CPR` reports and what `CUP` addresses,
   but it paints the composed glyph at the glyph's own width and slides the rest of the row left, so
-  no layout of such a row is correct. The painter notices the first cluster where the two counts
-  differ and the driver says so, once, on stderr with the screen handed back and as an
-  `Events::Warning`. The width probe's answers are ignored on such a terminal, since they describe
-  its bookkeeping rather than what it draws.
+  no layout of such a row is correct. The columns it consumes come out of the row's budget too: on
+  a 155 column window a `CUP` to 155 lands on screen column 146 and one to 164 clamps to the same
+  place, so the last nine columns of that row cannot be addressed at all. The painter notices the
+  first cluster where the two counts differ and the driver says so, once, on stderr with the screen
+  handed back and as an `Events::Warning`. The width probe's answers are ignored on such a
+  terminal, since they describe its bookkeeping rather than what it draws.
 
 ## Unicode
 

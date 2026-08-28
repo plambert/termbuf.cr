@@ -456,9 +456,14 @@ terminal will misplace:
 
 ```text
 termbuf: this terminal counts a grapheme cluster's columns by adding up its code points, so
-"👨‍👩‍👧‍👦" takes 11 columns where it is drawn in 2. Everything after it on that row will be 9
-columns out of step with every other row.
+"👨‍👩‍👧‍👦" takes 11 columns where it is drawn in 2. Everything after it on that row is 9 columns
+out of step with every other row, and the last 9 columns of it cannot be reached at all.
 ```
+
+The last part is measured, not inferred: on a 155 column window, a `CUP` to column 155 on such a row
+lands on screen column 146, and asking for 164 clamps at the margin and lands there too. The columns
+the cluster consumes come out of the row's budget, so a right-anchored column vanishes from that row
+and no escape sequence reaches it.
 
 That goes to stderr with the alternate screen handed back for as long as it takes, and to
 `Events::Warning` as well. `Terminal#warn_composed_drift = false` keeps the event and leaves the

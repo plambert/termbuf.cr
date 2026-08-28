@@ -1150,6 +1150,7 @@ Spectator.describe TermBuf::ResponseRegistry do
         expect(warning).not_to be_nil
         expect(warning.try &.message).to contain "adding up its code points"
         expect(warning.try &.message).to contain "11 columns"
+        expect(warning.try &.message).to contain "cannot be reached"
       end
     end
 

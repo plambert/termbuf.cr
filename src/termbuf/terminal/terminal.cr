@@ -596,10 +596,11 @@ module TermBuf
 
       columns = @buffer.clusters.code_point_columns @buffer.clusters.id(cluster, @widths)
       ours = Unicode.string_width cluster, @widths
+      short = (columns - ours).abs
       message = "this terminal counts a grapheme cluster's columns by adding up its code " \
                 "points, so #{cluster.inspect} takes #{columns} columns where it is drawn in " \
-                "#{ours}. Everything after it on that row will be #{(columns - ours).abs} " \
-                "columns out of step with every other row."
+                "#{ours}. Everything after it on that row is #{short} columns out of step with " \
+                "every other row, and the last #{short} columns of it cannot be reached at all."
 
       emit Events::Warning.new(message)
       return unless @warn_composed_drift
