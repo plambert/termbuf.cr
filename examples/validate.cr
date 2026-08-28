@@ -730,7 +730,7 @@ module Validate
       draw_bar screen
     end
 
-    # Highlighted rows drawn without naming the highlight in every column.
+    # Highlighted rows drawn without repeating the highlight in every column.
     private def draw_rows(screen) : Nil
       width = Math.min columns - 4, 46
 
@@ -739,14 +739,19 @@ module Validate
         row = screen.view Rect.new(2, 4 + index, width, 1), style
         row.clear
         row.write 0, 0, "row #{index}", Style::DEFAULT.bold
-        row.write 10, 0, "no column names the background", Style::DEFAULT.faint
+        row.write 10, 0, "a second column, faint", Style::DEFAULT.faint
       end
+
+      screen.write 2, 7, "the highlight is on the middle row's view; the two writes",
+        Style::DEFAULT.faint
+      screen.write 2, 8, "in every row pass only bold and faint, never a background",
+        Style::DEFAULT.faint
     end
 
     # A line far longer than the box it is written into.
     private def draw_overflow(screen) : Nil
       width = Math.min columns - 4, 46
-      box = Rect.new 2, 9, width // 2, 3
+      box = Rect.new 2, 10, width // 2, 3
       Border.new(Border::ROUNDED, title: "clipped").draw screen, box
 
       inside = screen.view Border.inset(box)
@@ -762,7 +767,7 @@ module Validate
     private def draw_bar(screen) : Nil
       width = Math.min columns - 4, 46
       filled = width // 2
-      y = 13
+      y = 14
 
       row = screen.view Rect.new(2, y, width, 1)
       row.fill Rect.new(0, 0, filled, 1), ' ', Style::DEFAULT.bg(Color.indexed(28))
