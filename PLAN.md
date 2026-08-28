@@ -363,6 +363,23 @@ corrupt the screen.
 re-detection and a `Resize` event; resize resizes both grids, preserving content anchored at the top
 left, and forces a full repaint.
 
+### Quirks
+
+`TermBuf::Quirk` is a separate `@[Flags]` enum from `Capability`, because the two answer different
+questions: a capability turned off means an application should not ask, where a quirk means it
+should ask and then cope with the answer. Named for the behaviour, so another terminal is a row in
+a table once it is measured. `TERMBUF_QUIRKS` overrides detection, as `TERMBUF_CAPS` does.
+
+* **`PerCodePointColumns`** — the terminal counts a cluster's columns by summing its code points.
+  Terminal.app does; measured across forty-four samples, it is `wcwidth` per code point with three
+  departures: the zero width joiner takes a column, so does an enclosing mark, and a regional
+  indicator takes one rather than two. That count is what `CPR` reports and what `CUP` addresses,
+  but it paints the composed glyph at the glyph's own width and slides the rest of the row left, so
+  no layout of such a row is correct. The painter notices the first cluster where the two counts
+  differ and the driver says so, once, on stderr with the screen handed back and as an
+  `Events::Warning`. The width probe's answers are ignored on such a terminal, since they describe
+  its bookkeeping rather than what it draws.
+
 ## Unicode
 
 `scripts/gen_unicode.cr` downloads the pinned UCD files (`UnicodeData.txt`, `EastAsianWidth.txt`,

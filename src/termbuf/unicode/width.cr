@@ -106,4 +106,51 @@ module TermBuf::Unicode
   def self.ambiguous?(char : Char) : Bool
     properties(char.ord) & Tables::AMBIGUOUS_BIT != 0
   end
+
+  # Enclosing marks, general category `Me`. There are thirteen of them, so a
+  # list costs less than a bit in the generated tables.
+  #
+  # They matter only to `.code_point_columns`: a terminal counting per code
+  # point gives an enclosing mark a column of its own, where it gives a
+  # nonspacing mark none. That is the difference between `1️⃣` owning one
+  # column and owning two.
+  ENCLOSING_MARKS = StaticArray[
+    0x0488..0x0489, 0x1ABE..0x1ABE, 0x20DD..0x20E0, 0x20E2..0x20E4, 0xA670..0xA672,
+  ]
+
+  # Whether *char* is an enclosing mark.
+  def self.enclosing_mark?(char : Char) : Bool
+    codepoint = char.ord
+    return false if codepoint < 0x0488
+
+    ENCLOSING_MARKS.any? &.includes?(codepoint)
+  end
+
+  # Columns a terminal takes for *text* when it counts them by summing the
+  # code points rather than by measuring the grapheme cluster.
+  #
+  # Not what any standard says a cluster is worth — what
+  # `Quirk::PerCodePointColumns` terminals do. Measured against Terminal.app
+  # 470.2 across forty-four samples: `.char_width` per code point, with three
+  # departures.
+  #
+  # * The zero width joiner takes a column, so four joined faces own eleven.
+  # * So does an enclosing mark, which is what makes `1️⃣` own two.
+  # * A regional indicator takes one rather than two, so a flag owns two and
+  #   five indicators own five. That reads as if the terminal went by East
+  #   Asian Width alone and never applied emoji presentation, but only the
+  #   indicators were measured, so only they are named here.
+  def self.code_point_columns(text : String, policy : WidthPolicy = Unicode.policy) : Int32
+    total = 0
+    text.each_char { |char| total += code_point_columns char, policy }
+    total
+  end
+
+  # :ditto:
+  def self.code_point_columns(char : Char, policy : WidthPolicy = Unicode.policy) : Int32
+    return 1 if char == ZERO_WIDTH_JOINER || enclosing_mark? char
+    return 1 if grapheme_class(char).regional_indicator?
+
+    char_width char, policy.ambiguous
+  end
 end

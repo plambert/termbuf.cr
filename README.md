@@ -437,6 +437,49 @@ terminal.width_readings   # what was asked and what came back
 makes. A measurement no rule explains — Terminal.app's eleven — becomes an `Events::Warning` naming
 the cluster rather than being modelled wrong.
 
+### What a terminal gets wrong
+
+`Capability` says what a terminal can do. `Quirk` says what it gets wrong, and the two are kept
+apart: a capability turned off means don't ask, where a quirk means ask and then cope with the
+answer. Quirks are named for the behaviour, so mapping another terminal onto one is a row in a
+table once somebody measures it.
+
+`Quirk::PerCodePointColumns` is the one there is. Terminal.app counts a cluster's columns by adding
+up its code points — `👨‍👩‍👧‍👦` is four emoji of two columns and three joiners of one, so it owns
+eleven. That count is what `CPR` reports and what `CUP` addresses; forcing a character to column
+three of such a row tears the cluster into `👨X👪`. It draws the composed glyph anyway, two columns
+wide, and slides the rest of the row left to sit flush against it. So a row holding one of these has
+everything after it out of step with every other row, and nothing here can lay it out correctly.
+
+What the shard does instead is notice and say so, once, the first time it draws a cluster the
+terminal will misplace:
+
+```text
+termbuf: this terminal counts a grapheme cluster's columns by adding up its code points, so
+"👨‍👩‍👧‍👦" takes 11 columns where it is drawn in 2. Everything after it on that row will be 9
+columns out of step with every other row.
+```
+
+That goes to stderr with the alternate screen handed back for as long as it takes, and to
+`Events::Warning` as well. `Terminal#warn_composed_drift = false` keeps the event and leaves the
+screen alone, for an application that renders its own warnings.
+
+The check costs one predictable branch per run of text on any terminal without the quirk, and stops
+looking after the first one it finds. An application certain it will never draw such a cluster can
+switch it off outright:
+
+```crystal
+TermBuf::Terminal.open detect_composed_drift: false
+```
+
+A terminal with this quirk also has its width probe answers ignored: it reports the columns it
+counts rather than the ones it paints, so taking those as rules would put text under the glyph.
+
+```bash
+TERMBUF_QUIRKS=-per_code_point_columns   # same shape as TERMBUF_CAPS
+TERMBUF_QUIRKS=none
+```
+
 `TERMBUF_WIDTHS` has the last word:
 
 ```bash

@@ -76,4 +76,70 @@ module TermBuf
       enable ? capabilities.with(capability) : capabilities.without(capability)
     end
   end
+
+  # The `TERMBUF_QUIRKS` escape hatch, over what detection decided a terminal
+  # gets wrong.
+  #
+  #     TERMBUF_QUIRKS=+per_code_point_columns
+  #     TERMBUF_QUIRKS=-per_code_point_columns
+  #     TERMBUF_QUIRKS=none
+  #
+  # Same shape as `TERMBUF_CAPS`: a bare name or a leading `+` turns a quirk
+  # on, `-` turns it off, `none` clears the lot, and an unknown name is
+  # reported rather than raised on.
+  module QuirkOverrides
+    extend self
+
+    # The variable itself, deliberately not application specific.
+    VARIABLE = "TERMBUF_QUIRKS"
+
+    # What the variable asked for, and anything in it that made no sense.
+    record Result, quirks : Quirk, warnings : Array(String)
+
+    # Applies `VARIABLE` from *env* to *base*.
+    def apply(base : Quirk, env : Hash(String, String)) : Result
+      apply base, env[VARIABLE]?
+    end
+
+    # :ditto:
+    def apply(base : Quirk, spec : String?) : Result
+      warnings = [] of String
+      return Result.new base, warnings if spec.nil? || spec.blank?
+
+      quirks = base
+
+      spec.split(/[,\s]+/, remove_empty: true).each do |token|
+        quirks = apply_token quirks, token, warnings
+      end
+
+      Result.new quirks, warnings
+    end
+
+    private def apply_token(quirks : Quirk, token : String,
+                            warnings : Array(String)) : Quirk
+      enable = true
+      name = token
+
+      case token[0]?
+      when '+' then name = token[1..]
+      when '-'
+        enable = false
+        name = token[1..]
+      end
+
+      case name.downcase
+      when "none" then return Quirk::None
+      when "all"  then return Quirk::All
+      end
+
+      quirk = Quirk.parse? name
+
+      unless quirk
+        warnings << "#{VARIABLE}: unknown quirk #{token.inspect}"
+        return quirks
+      end
+
+      enable ? quirks | quirk : quirks & ~quirk
+    end
+  end
 end

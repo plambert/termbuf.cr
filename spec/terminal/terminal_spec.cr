@@ -24,13 +24,16 @@ private class Harness
 
   def initialize(columns = 20, rows = 6,
                  capabilities = TermBuf::Capabilities::XTERM,
-                 pending : Bytes = Bytes.empty)
+                 pending : Bytes = Bytes.empty,
+                 quirks : TermBuf::Quirk = TermBuf::Quirk::None,
+                 detect_composed_drift : Bool = true)
     reader, @keyboard = IO.pipe
     @output = IO::Memory.new
     tty = TermBuf::Tty.new reader, @output, managed: false
 
     @terminal = TermBuf::Terminal.new tty, capabilities,
-      TermBuf::ScreenSize.new(columns, rows), pending
+      TermBuf::ScreenSize.new(columns, rows), pending,
+      quirks: quirks, detect_composed_drift: detect_composed_drift
     @terminal.start
   end
 
@@ -1129,5 +1132,101 @@ Spectator.describe TermBuf::ResponseRegistry do
   it "refuses a pattern with an empty end" do
     expect { TermBuf::ResponsePattern.new("", "R") }.to raise_error(ArgumentError)
     expect { TermBuf::ResponsePattern.new("\e[", "") }.to raise_error(ArgumentError)
+  end
+  # Terminal.app counts a cluster's columns by adding up its code points, so
+  # the row it is on comes apart. Nothing here can lay that row out; the point
+  # is that the application is told rather than left watching it happen.
+  describe "a cluster the terminal will misplace" do
+    FAMILY = "\u{1F468}\u200D\u{1F469}\u200D\u{1F467}\u200D\u{1F466}"
+
+    it "says so on the first paint that draws one" do
+      with_harness quirks: TermBuf::Quirk::PerCodePointColumns do |harness|
+        harness.terminal.warn_composed_drift = false
+        harness.terminal.write 0, 0, FAMILY
+        harness.terminal.paint
+
+        warning = harness.event_of TermBuf::Events::Warning
+
+        expect(warning).not_to be_nil
+        expect(warning.try &.message).to contain "adding up its code points"
+        expect(warning.try &.message).to contain "11 columns"
+      end
+    end
+
+    it "says nothing on a terminal that measures clusters properly" do
+      with_harness do |harness|
+        harness.terminal.write 0, 0, FAMILY
+        harness.terminal.paint
+
+        expect(harness.event_of(TermBuf::Events::Warning, 200.milliseconds)).to be_nil
+      end
+    end
+
+    it "says nothing when detection was turned off at construction" do
+      with_harness quirks: TermBuf::Quirk::PerCodePointColumns,
+        detect_composed_drift: false do |harness|
+        harness.terminal.write 0, 0, FAMILY
+        harness.terminal.paint
+
+        expect(harness.event_of(TermBuf::Events::Warning, 200.milliseconds)).to be_nil
+      end
+    end
+
+    it "says it once and then leaves it alone" do
+      with_harness quirks: TermBuf::Quirk::PerCodePointColumns do |harness|
+        harness.terminal.warn_composed_drift = false
+
+        harness.terminal.write 0, 0, FAMILY
+        harness.terminal.paint
+        expect(harness.event_of(TermBuf::Events::Warning)).not_to be_nil
+
+        harness.terminal.write 0, 1, FAMILY
+        harness.terminal.paint
+        expect(harness.event_of(TermBuf::Events::Warning, 200.milliseconds)).to be_nil
+      end
+    end
+
+    it "says nothing about a cluster the terminal counts the same way" do
+      with_harness quirks: TermBuf::Quirk::PerCodePointColumns do |harness|
+        harness.terminal.warn_composed_drift = false
+        harness.terminal.write 0, 0, "e\u0301 \u0BA8\u0BBF"
+        harness.terminal.paint
+
+        expect(harness.event_of(TermBuf::Events::Warning, 200.milliseconds)).to be_nil
+      end
+    end
+
+    it "gives the screen back before writing where anyone can see it" do
+      with_harness quirks: TermBuf::Quirk::PerCodePointColumns,
+        capabilities: TermBuf::Capabilities::MODERN do |harness|
+        harness.terminal.write 0, 0, FAMILY
+        harness.terminal.paint
+        harness.event_of TermBuf::Events::Warning
+
+        written = harness.drain
+
+        # Out of the alternate screen and back into it, in that order.
+        leave = written.index("\e[?1049l") || -1
+        enter = written.rindex("\e[?1049h") || -1
+
+        expect(leave).to be >= 0
+        expect(enter).to be > leave
+      end
+    end
+
+    it "redraws afterwards, since the screen was handed back" do
+      with_harness quirks: TermBuf::Quirk::PerCodePointColumns,
+        capabilities: TermBuf::Capabilities::MODERN do |harness|
+        harness.terminal.write 0, 2, "comes back"
+        harness.terminal.write 0, 0, FAMILY
+        harness.terminal.paint
+        harness.event_of TermBuf::Events::Warning
+
+        written = harness.drain
+        after = written[(written.rindex("\e[?1049h") || 0)..]
+
+        expect(after).to contain "comes back"
+      end
+    end
   end
 end

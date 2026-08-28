@@ -342,4 +342,66 @@ Spectator.describe TermBuf::Painter do
       expect(texts(ops)).not_to be_empty
     end
   end
+  # Terminal.app counts a cluster's columns by adding up its code points, so it
+  # puts everything after one somewhere the buffer did not ask for. The painter
+  # cannot fix that; it notices the first one so the driver can say so.
+  describe "noticing a cluster the terminal will misplace" do
+    it "sees nothing when it is not watching" do
+      session = Session.new
+      session.buffer.write 0, 0, "\u{1F468}\u200D\u{1F469}\u200D\u{1F467}\u200D\u{1F466}"
+      session.paint
+
+      expect(session.painter.composed_drift).to be_nil
+    end
+
+    it "notices a joined emoji when it is" do
+      session = Session.new
+      session.painter.watch_composed_drift = true
+      session.buffer.write 0, 0, "\u{1F468}\u200D\u{1F469}\u200D\u{1F467}\u200D\u{1F466}"
+      session.paint
+
+      expect(session.painter.composed_drift)
+        .to eq "\u{1F468}\u200D\u{1F469}\u200D\u{1F467}\u200D\u{1F466}"
+    end
+
+    # Two code points, and the terminal counts them the way the cluster does.
+    it "passes over a cluster the terminal counts the same way" do
+      session = Session.new
+      session.painter.watch_composed_drift = true
+      session.buffer.write 0, 0, "e\u0301 \u0BA8\u0BBF"
+      session.paint
+
+      expect(session.painter.composed_drift).to be_nil
+      expect(session.painter.watch_composed_drift?).to be_true
+    end
+
+    it "passes over text with no clusters at all" do
+      session = Session.new
+      session.painter.watch_composed_drift = true
+      session.buffer.write 0, 0, "plain ascii and \u6F22"
+      session.paint
+
+      expect(session.painter.composed_drift).to be_nil
+    end
+
+    it "stops looking once it has found one" do
+      session = Session.new
+      session.painter.watch_composed_drift = true
+      session.buffer.write 0, 0, "\u{1F3F3}\uFE0F\u200D\u{1F308}"
+      session.paint
+
+      expect(session.painter.composed_drift).not_to be_nil
+      expect(session.painter.watch_composed_drift?).to be_false
+    end
+
+    it "hands the cluster over once and forgets it" do
+      session = Session.new
+      session.painter.watch_composed_drift = true
+      session.buffer.write 0, 0, "\u0915\u094D\u0937\u093F"
+      session.paint
+
+      expect(session.painter.take_composed_drift).to eq "\u0915\u094D\u0937\u093F"
+      expect(session.painter.take_composed_drift).to be_nil
+    end
+  end
 end

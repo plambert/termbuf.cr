@@ -68,20 +68,38 @@ module TermBuf
 
     @texts : Array(String)
     @ids : Hash(String, UInt32)
+    @columns : Array(Int32)
 
     def initialize
       @texts = [""]
       @ids = {"" => NONE}
+      @columns = [0]
     end
 
     # The id for *text*, assigning one if this is the first time it is seen.
-    def id(text : String) : UInt32
+    #
+    # *policy* settles how many columns a terminal counting per code point
+    # would take for it, which is worked out here rather than at every paint;
+    # see `#code_point_columns`.
+    def id(text : String, policy : Unicode::WidthPolicy = Unicode.policy) : UInt32
       @ids.fetch text do
         assigned = @texts.size.to_u32
         @texts << text
+        @columns << Unicode.code_point_columns text, policy
         @ids[text] = assigned
         assigned
       end
+    end
+
+    # Columns a terminal that counts them per code point rather than per
+    # cluster would take for the cluster *id* refers to.
+    #
+    # Worked out once, when the cluster was interned, because the paint path
+    # asks this of every composed cluster it writes and a terminal with
+    # `Quirk::PerCodePointColumns` misplaces the ones where this differs from
+    # the width the cell was given.
+    def code_point_columns(id : UInt32) : Int32
+      @columns[id]
     end
 
     # The cluster *id* refers to.
