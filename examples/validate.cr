@@ -163,6 +163,14 @@ module Validate
       screen.write 1, rows - 1, status.ljust(Math.max(columns - 1, 0)), Style::DEFAULT.faint
     end
 
+    # An unbroken line across the terminal, separating a page's sections.
+    # Written rather than filled: the light horizontal is East Asian Ambiguous,
+    # so on a terminal that draws it two cells wide a fill would refuse it,
+    # while a write lays down as many as the row holds.
+    private def rule(screen, y : Int32) : Nil
+      screen.write 0, y, "─" * columns, Style::DEFAULT.faint
+    end
+
     private def status : String
       String.build do |io|
         io << @terminal.size << "   frame " << @frame
@@ -725,8 +733,11 @@ module Validate
     private def draw_panels(screen) : Nil
       screen.write 2, 2, "views: clipping, a base style, backgrounds", Style::DEFAULT.bold
 
+      rule screen, 3
       draw_rows screen
-      draw_overflow screen
+      rule screen, 9
+      draw_clipping screen
+      rule screen, 16
       draw_bar screen
     end
 
@@ -748,16 +759,43 @@ module Validate
         Style::DEFAULT.faint
     end
 
-    # A line far longer than the box it is written into.
-    private def draw_overflow(screen) : Nil
-      width = Math.min columns - 4, 46
-      box = Rect.new 2, 10, width // 2, 3
+    # Text cut at a panel's edge, including the two cases a wide glyph makes:
+    # one that will not fit the last cell, and one the far edge cuts in half.
+    #
+    # The interior is filled with dots first, so a cell the clipping left
+    # untouched is visible rather than being an indistinguishable blank.
+    private def draw_clipping(screen) : Nil
+      # Fixed rather than sized to the terminal: the interior has to come to an
+      # odd number of cells for a two-cell glyph to be left with nowhere to go.
+      box = Rect.new 2, 10, 23, 6
       Border.new(Border::ROUNDED, title: "clipped").draw screen, box
 
       inside = screen.view Border.inset(box)
-      inside.write 0, 0, "this line is far longer than the box holding it"
-      screen.write box.right + 2, box.y + 1, "nothing bled to here",
-        Style::DEFAULT.faint
+      inside.fill inside.bounds, '.', Style::DEFAULT.faint
+
+      inside.write 0, 0, "this line is far longer than the box"
+      inside.write 0, 1, WIDE_SAMPLE
+      inside.write -1, 2, WIDE_SAMPLE
+      draw_orphan inside
+
+      label screen, box, 0, "ascii, cut at the border"
+      label screen, box, 1, "the last cell will not hold a wide glyph"
+      label screen, box, 2, "one the left edge halves is dropped"
+      label screen, box, 3, "a fill blanks a glyph it lands inside"
+    end
+
+    # Eleven glyphs of two cells each against a twenty-one cell panel, so one
+    # of them has nowhere to go whichever edge the run is pushed against.
+    WIDE_SAMPLE = "日本語のテキストです、"
+
+    # A wide glyph already on the row, with a fill landing partway through it.
+    private def draw_orphan(inside) : Nil
+      inside.write 0, 3, WIDE_SAMPLE
+      inside.fill Rect.new(7, 3, 8, 1), ' ', Style::DEFAULT.bg(Color.indexed(24))
+    end
+
+    private def label(screen, box : Rect, row : Int32, text : String) : Nil
+      screen.write box.right + 3, box.y + 1 + row, text, Style::DEFAULT.faint
     end
 
     # A label across a bar, taking each cell's colour as it goes. Half filled
@@ -767,7 +805,7 @@ module Validate
     private def draw_bar(screen) : Nil
       width = Math.min columns - 4, 46
       filled = width // 2
-      y = 14
+      y = 17
 
       row = screen.view Rect.new(2, y, width, 1)
       row.fill Rect.new(0, 0, filled, 1), ' ', Style::DEFAULT.bg(Color.indexed(28))
