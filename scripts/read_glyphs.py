@@ -88,19 +88,29 @@ def geometry(page: np.ndarray, floor: int, steps: int):
     Read from a staircase of bars, one per row, each a column further along.
     Consecutive steps differ by exactly one cell in each direction, so the two
     pitches are the mean of the gaps.
+
+    A band of ink is not always a step. An emoji is drawn taller than the row it
+    sits on, so the first sample can reach up into the last bar of the staircase
+    and leave one band covering both — and the next band along is then a sample
+    row, whose ink starts at column zero and sits nowhere near the step it would
+    be taken for. A step is a band carrying one mark and nothing else, so the
+    staircase is read until a band carries more than that. Four steps are enough
+    to average over; the sixth is a convenience, not a requirement.
     """
     bands = runs(np.flatnonzero((page > floor).any(axis=1)))
-    if len(bands) < steps:
-        raise SystemExit(f"expected {steps} calibration steps, found {len(bands)}")
 
     centres = []
     for band in bands[:steps]:
         strip = page[band[0]:band[1] + 1].max(axis=0)
         lit = np.flatnonzero(strip > floor)
-        if lit.size == 0:
-            raise SystemExit("a calibration step has no ink")
+        if len(runs(lit)) != 1:
+            break
 
         centres.append(((lit[0] + lit[-1]) / 2, (band[0] + band[1]) / 2))
+
+    if len(centres) < 4:
+        raise SystemExit(
+            f"expected {steps} calibration steps, could read {len(centres)}")
 
     xs = np.array([c[0] for c in centres])
     ys = np.array([c[1] for c in centres])
