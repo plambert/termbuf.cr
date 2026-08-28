@@ -594,19 +594,40 @@ module TermBuf
       cluster = @painter.take_composed_drift
       return unless cluster
 
-      columns = @buffer.clusters.code_point_columns @buffer.clusters.id(cluster, @widths)
-      ours = Unicode.string_width cluster, @widths
-      short = (columns - ours).abs
-      message = "this terminal counts a grapheme cluster's columns by adding up its code " \
-                "points, so #{cluster.inspect} takes #{columns} columns where it is drawn in " \
-                "#{ours}. Everything after it on that row is #{short} columns out of step with " \
-                "every other row, and the last #{short} columns of it cannot be reached at all."
+      message = composed_drift_message cluster
 
       emit Events::Warning.new(message)
       return unless @warn_composed_drift
 
       say_aside message
       repaint_in_place
+    end
+
+    # What went wrong with *cluster*, in the direction it went wrong.
+    #
+    # Counting more columns than the glyph is drawn in pushes the rest of the
+    # row along and eats the room at its end; counting fewer leaves the glyph
+    # sitting on whatever comes next. They are the same arithmetic and they do
+    # not look remotely alike, so the message says which one happened.
+    private def composed_drift_message(cluster : String) : String
+      counted = @buffer.clusters.code_point_columns @buffer.clusters.id(cluster, @widths)
+      drawn = Unicode.string_width cluster, @widths
+      by = (counted - drawn).abs
+      opening = "this terminal counts a grapheme cluster's columns by adding up its code " \
+                "points, so #{cluster.inspect} takes #{plural counted, "column"} where it is " \
+                "drawn in #{drawn}."
+
+      if counted > drawn
+        "#{opening} Everything after it on that row sits #{plural by, "column"} to the right of " \
+        "where it was put, and the last #{plural by, "column"} of the row cannot be reached."
+      else
+        "#{opening} Everything after it on that row sits #{plural by, "column"} to the left of " \
+        "where it was put, so the glyph covers what follows it."
+      end
+    end
+
+    private def plural(count : Int32, noun : String) : String
+      "#{count} #{noun}#{"s" unless count == 1}"
     end
 
     # Writes *message* where the application can see it, with the screen given

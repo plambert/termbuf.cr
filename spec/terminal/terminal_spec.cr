@@ -1150,7 +1150,27 @@ Spectator.describe TermBuf::ResponseRegistry do
         expect(warning).not_to be_nil
         expect(warning.try &.message).to contain "adding up its code points"
         expect(warning.try &.message).to contain "11 columns"
+        expect(warning.try &.message).to contain "9 columns to the right"
         expect(warning.try &.message).to contain "cannot be reached"
+      end
+    end
+
+    # Counting fewer columns than the glyph is drawn in is the other direction:
+    # nothing is pushed along and no room is lost, the glyph simply covers what
+    # comes after it. Saying the row lost a column would be wrong.
+    it "says which way it went wrong" do
+      with_harness quirks: TermBuf::Quirk::PerCodePointColumns do |harness|
+        harness.terminal.warn_composed_drift = false
+        harness.terminal.write 0, 0, "\u263A\uFE0F" # counted 1, drawn 2
+        harness.terminal.paint
+
+        message = harness.event_of(TermBuf::Events::Warning).try &.message || ""
+
+        expect(message).to contain "takes 1 column where"
+        expect(message).to contain "1 column to the left"
+        expect(message).to contain "covers what follows"
+        expect(message).not_to contain "cannot be reached"
+        expect(message).not_to contain "1 columns"
       end
     end
 
