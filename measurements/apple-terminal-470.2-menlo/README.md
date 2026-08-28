@@ -28,8 +28,12 @@ Four clusters of sixty seven, and no emoji among them:
 | `क्षि` conjunct plus a spacing vowel | 2/3 | 2/2 |
 | `நி` tamil na plus a vowel | 1/2 | 1/1 |
 
-All four are scripts neither font covers, so the two runs differ in which fallback did the
-shaping. Everything else is identical, including every emoji: `👨‍👩` still fails to compose and
+All four are scripts neither font covers. **A later run showed this is not a rendering
+difference at all**: AtkynsonMono Nerd Font Mono covers none of them either, has different
+coverage from Menlo and the same 14 px cell, and reproduces all four. The cause is the cell
+getting wider, which moves the same glyph's overhang from 0.33 of a cell to 0.21 and across this
+instrument's `INK = 0.25` floor. See `../apple-terminal-470.2-atkynson/`. Everything else is
+identical, including every emoji: `👨‍👩` still fails to compose and
 advances 4, `👨‍👩‍👧` still composes and advances 2, `🏳️‍🌈` still advances 1 across two drawn
 columns. Menlo has no emoji either, so both runs got the same Apple Color Emoji from the same
 fallback chain — **changing the primary font cannot reach the clusters that are in dispute.**
