@@ -13,3 +13,8 @@
 /.spectator-failures
 /tmp/
 /.rumdl_cache/
+
+# Compiled examples: crystal build drops the binary beside its source.
+/examples/clock
+/examples/prompt
+/examples/validate

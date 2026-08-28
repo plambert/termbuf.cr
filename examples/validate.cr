@@ -63,6 +63,7 @@ module Validate
       @frame = 0
       @log = 0
       @frozen = false
+      @focused = false
       @presses = [] of String
       @arriving = nil.as(Int32?)
       @entered = [] of String
@@ -163,6 +164,12 @@ module Validate
       screen.write 1, rows - 1, status.ljust(Math.max(columns - 1, 0)), Style::DEFAULT.faint
     end
 
+    # *note* once the page has the keyboard, and how to give it the keyboard
+    # before that.
+    private def focus_note(note : String) : String
+      @focused ? note : "press enter to type here"
+    end
+
     # An unbroken line across the terminal, separating a page's sections.
     # Written rather than filled: the light horizontal is East Asian Ambiguous,
     # so on a terminal that draws it two cells wide a fill would refuse it,
@@ -171,12 +178,21 @@ module Validate
       screen.write 0, y, "─" * columns, Style::DEFAULT.faint
     end
 
+    # What the keyboard does here, which changes with the page and with
+    # whether it has been entered.
+    private def keys_note : String
+      return "[esc] leave the pane  [ctrl-r] redraw" if @focused
+      return "[enter] type here  [tab] page  [ctrl-r] redraw  [q] quit" if typeable?
+
+      "[tab]/[shift-tab] page  [ctrl-r] redraw  [q] quit"
+    end
+
     private def status : String
       String.build do |io|
         io << @terminal.size << "   frame " << @frame
         io << "   last paint " << @terminal.last_paint_bytes << " B"
         io << "   total " << (@terminal.total_paint_bytes / 1024).round(1) << " kB"
-        io << "   [r] redraw  [q] quit"
+        io << "   " << keys_note
       end
     end
 
@@ -222,11 +238,53 @@ module Validate
         mark = on ? '+' : '-'
         style = on ? Style::DEFAULT.fg(Color.indexed(2)) : Style::DEFAULT.faint
 
-        screen.write column, row, "#{mark} #{member}", style
+        screen.write column, row, "#{mark} ", style
+        # A capability that draws something draws its own name in it, so a
+        # claim the terminal does not honour is one glance away from being
+        # spotted: strike-through that renders as plain text says more than a
+        # green plus does.
+        screen.write column + 2, row, member.to_s, on ? shown_as(member) : style
         shown += 1
       end
 
       members.size - shown
+    end
+
+    # The style *member* turns on, for a capability that changes how text
+    # looks. The rest keep the colour that says they were detected.
+    private def shown_as(member : Capability) : Style
+      found = Style::DEFAULT.fg Color.indexed(2)
+
+      # Conceal is left out of both: a working one draws the name as nothing,
+      # which reads as a bug rather than a demonstration. Page 5 shows it
+      # beside a label that stays put.
+      attributed(member, found) || coloured(member, found) || found
+    end
+
+    private def attributed(member : Capability, found : Style) : Style?
+      case member
+      when .bold?        then found.bold
+      when .faint?       then found.faint
+      when .italic?      then found.italic
+      when .reverse?     then found.reverse
+      when .strike?      then found.strike
+      when .blink?       then found.blink
+      when .rapid_blink? then found.blink rapid: true
+      when .overline?    then found.with Attributes::Overline
+      when .superscript? then found.with Attributes::Superscript
+      end
+    end
+
+    private def coloured(member : Capability, found : Style) : Style?
+      case member
+      when .underline?          then found.underlined
+      when .extended_underline? then found.underlined Underline::Curly
+      when .underline_color?    then found.underlined Underline::Single, Color.indexed(1)
+      when .bright_colors?      then found.fg Color.indexed(10)
+      when .color256?           then found.fg Color.indexed(208)
+      when .true_color?         then found.fg Color.rgb(255, 140, 0)
+      when .osc8_links?         then found.linked 1_u32
+      end
     end
 
     # ---------------------------------------------------------------- page 2
@@ -344,7 +402,11 @@ module Validate
       note = shown < SAMPLES.size ? "#{SAMPLES.size - shown} more need a taller window; " : ""
       # Without the wrapper, since the row is only so wide.
       rules = policy.to_s.lchop("WidthPolicy(").rchop(')')
-      screen.write 2, rows - 2, "#{note}measured: #{rules}", Style::DEFAULT.faint
+      screen.write 2, rows - 3, "#{note}measured: #{rules}", Style::DEFAULT.faint
+      screen.write 2, rows - 2,
+        "a bar out of line: the terminal moved the cursor further than this counted. " \
+        "a glyph over its neighbour: it drew wider than it moved.",
+        Style::DEFAULT.faint
     end
 
     # ---------------------------------------------------------------- page 9
@@ -365,7 +427,8 @@ module Validate
         return
       end
 
-      screen.write 2, 2, "sample  said  ours  rule", Style::DEFAULT.bold
+      screen.write 2, 2, "said  ours  rule                 what of it            sample",
+        Style::DEFAULT.bold
       screen.write 2, 3, @terminal.widths.to_s.lchop("WidthPolicy(").rchop(')'),
         Style::DEFAULT.faint
 
@@ -382,12 +445,14 @@ module Validate
         odd = said && said != ours
         style = odd ? Style::DEFAULT.fg(Color.indexed(1)) : Style::DEFAULT
 
-        screen.write 2, row, reading.sample.text
-        screen.write 10, row, (said || "-").to_s.rjust(4), style
-        screen.write 16, row, ours.to_s.rjust(4), style
-        screen.write 22, row,
-          "#{reading.sample.rule || "-"}#{odd ? "   no rule reaches this" : ""}",
-          Style::DEFAULT.faint
+        # The sample goes last, on its own. A cluster this terminal counts
+        # differently takes the rest of its row with it, and a table that comes
+        # apart is no use for reading which terminal counted what.
+        screen.write 2, row, (said || "-").to_s.rjust(4), style
+        screen.write 8, row, ours.to_s.rjust(4), style
+        screen.write 14, row, (reading.sample.rule || "-"), Style::DEFAULT.faint
+        screen.write 35, row, odd ? "no rule reaches this" : "", style
+        screen.write 58, row, reading.sample.text
 
         row += 1
       end
@@ -447,9 +512,31 @@ module Validate
         screen.write_char 2 + offset, row, ' ', Style::DEFAULT.bg(from_hue(hue))
       end
 
+      row = draw_one_hue screen, row + 2, span
+
       sample = Color.rgb 200, 40, 90
-      screen.write 2, row + 2,
+      screen.write 2, row + 1,
         "rgb(200,40,90) is sent as #{describe_colour sample}", Style::DEFAULT.faint
+    end
+
+    # One hue from black to full, which is what tells 24 bit colour from the
+    # palette. A sweep through every hue looks smooth either way at this width,
+    # because 256 has enough hues to fake it; a single hue does not, because the
+    # cube carries six levels per channel and the steps are unmistakable.
+    private def draw_one_hue(screen, row : Int32, span : Int32) : Int32
+      return row if row >= rows - 3
+
+      screen.write 2, row, "one hue, black to full — steps here mean it is being quantized",
+        Style::DEFAULT.bold
+      row += 1
+
+      span.times do |offset|
+        level = offset * 255 // Math.max(span - 1, 1)
+        shade = Color.rgb level * 40 // 255, level * 110 // 255, level
+        screen.write_char 2 + offset, row, ' ', Style::DEFAULT.bg(shade)
+      end
+
+      row + 1
     end
 
     # What the encoder will make of *colour* under the capabilities in force.
@@ -628,7 +715,8 @@ module Validate
     # paragraph survives — which is what a pane with no scrollback does.
     private def draw_cursors(screen) : Nil
       screen.write 2, 2, "type into the pane", Style::DEFAULT.bold
-      screen.write 22, 2, "the block is the terminal's cursor", Style::DEFAULT.faint
+      screen.write 22, 2, focus_note("the block is the terminal's cursor"),
+        Style::DEFAULT.faint
 
       pane = Rect.new 3, 5, Math.max(columns - 6, 4), Math.max(rows - 12, 2)
       return if pane.height < 2
@@ -835,7 +923,7 @@ module Validate
       @terminal.cursor.move_to x, y
 
       screen.write 2, 2, "an input field", Style::DEFAULT.bold
-      screen.write 20, 2, "enter accepts, escape clears, up walks back",
+      screen.write 20, 2, focus_note("enter accepts, up walks back"),
         Style::DEFAULT.faint
       screen.write 2, 3, "tab completes a colour name: #{WORDS.first(4).join(", ")}, …",
         Style::DEFAULT.faint
@@ -873,18 +961,31 @@ module Validate
       end
     end
 
+    # Two pages want the keyboard for themselves, so they are entered rather
+    # than merely visited: nothing on them acts until enter, and escape gives
+    # the keyboard back. That is what leaves tab free to mean the same thing
+    # everywhere.
     private def press(key : Key, bytes : Bytes) : Nil
       remember key, bytes
-      return field_key key if field?
-      return @running = false if key.is? 'q'
 
-      # Tab moves between pages everywhere, which is what leaves the keys page
-      # free to show the arrows and the digits instead of acting on them.
-      if key.is? Key::Name::Tab
-        return go_to(key.shift? ? @page - 1 : @page + 1)
+      if @focused
+        return leave_page if key.is? Key::Name::Escape
+        return focused_key key
       end
 
-      return type(key) if cursors?
+      browsing_key key
+    end
+
+    # What the keys mean on a page that has not been entered, which is every
+    # page until enter is pressed on one of the two that take typing.
+    private def browsing_key(key : Key) : Nil
+      return force_repaint if key.ctrl? && key.character? && key.char == 'r'
+      return go_to(key.shift? ? @page - 1 : @page + 1) if key.is? Key::Name::Tab
+      return @running = false if key.is? 'q'
+      return enter_page if key.is?(Key::Name::Enter) && typeable?
+
+      # The keys page is here to show what arrives, so everything the lines
+      # above have not claimed is left alone for it to draw.
       return if keys?
 
       case key.name
@@ -898,11 +999,29 @@ module Validate
       return unless key.character?
 
       case key.char
-      when 'r'      then force_repaint
       when 'f'      then @filled = !@filled
       when ' '      then @frozen = !@frozen
       when '1'..'9' then go_to key.char.to_i - 1
       end
+    end
+
+    # Whether this page has something to type into.
+    private def typeable? : Bool
+      field? || cursors?
+    end
+
+    private def enter_page : Nil
+      @focused = true
+      @rebuild = true
+    end
+
+    private def leave_page : Nil
+      @focused = false
+      @rebuild = true
+    end
+
+    private def focused_key(key : Key) : Nil
+      field? ? field_key(key) : type(key)
     end
 
     private def type(key : Key) : Nil
@@ -920,13 +1039,10 @@ module Validate
       @presses.shift if @presses.size > 64
     end
 
-    # On the field page the field gets almost everything, since q and the
-    # digits are things people type.
+    # Once the page has been entered the field gets everything, tab included:
+    # completion is what tab is for in a text field, and escape has already
+    # been taken as the way back out.
     private def field_key(key : Key) : Nil
-      if key.is? Key::Name::Tab
-        return go_to(key.shift? ? @page - 1 : @page + 1) unless completing?
-      end
-
       case @field.handle key
       in Editor::Outcome::Continue  then nil
       in Editor::Outcome::Accepted  then @entered << @field.editor.accepted
@@ -935,16 +1051,10 @@ module Validate
       end
     end
 
-    # Tab belongs to completion while there is a hook with something to say,
-    # and to page switching otherwise.
-    private def completing? : Bool
-      !@field.buffer.empty?
-    end
-
     private def pasted(text : String, complete : Bool) : Nil
       preview = text.size > 40 ? "#{text[0, 40]}…" : text
       note = complete ? "" : ", never closed"
-      return @field.paste text if field?
+      return @field.paste text if field? && @focused
 
       @presses << "#{"paste".ljust(18)}#{preview.inspect} (#{text.bytesize} bytes#{note})"
 
@@ -965,10 +1075,24 @@ module Validate
       @page = page
       @rebuild = true
       @log = 0
+      # Leaving a page gives its keyboard back, so tab always means the same
+      # thing on arrival.
+      @focused = false
       field? ? @terminal.hardware_cursor = @terminal.cursor : @terminal.hide_cursor
       # Only one page has anywhere for someone to type, so the terminal's own
       # cursor has no business blinking on the others.
       @terminal.hide_cursor unless cursors?
+
+      # On a terminal that counts a cluster's columns by adding up its code
+      # points, a row holding one leaves the screen showing something the
+      # buffer has no record of, so the diff skips cells that are wrong and the
+      # last page's text is still there.
+      #
+      # Repainting clears the rows that no longer carry such a cluster, which
+      # is most of them. It cannot clear the rest: the rewrite lands at the
+      # columns the buffer counted, and on those rows the terminal puts them
+      # somewhere else. Every other terminal keeps the diff.
+      force_repaint if @terminal.quirks.per_code_point_columns?
     end
 
     # Sends the screen again without touching what is on it. Whatever scribbled

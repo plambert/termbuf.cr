@@ -6,6 +6,18 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- `examples/validate.cr`: tab and shift-tab move between pages everywhere, ctrl-r redraws
+  everywhere, and the two pages with somewhere to type are entered with enter and left with escape,
+  which is what frees tab to mean the same thing on every page. The capability grid draws each
+  capability's name in the style it claims, so one the terminal ignores is a glance away from being
+  spotted. The colours page carries a single hue from black to full, which bands under the palette
+  where a sweep through every hue does not. The measured page keeps its sample in a column of its
+  own, so a cluster the terminal counts differently cannot take the table with it. A page change
+  repaints outright on a terminal with `Quirk::PerCodePointColumns`, which clears the rows that no
+  longer carry such a cluster.
+
 ## [0.1.6] - 2026-08-28
 
 ### Added
