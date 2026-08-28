@@ -28,9 +28,15 @@ from pathlib import Path
 import numpy as np
 
 PAD = 20
-# A pixel counts as lit at this fraction of the brightest thing on the page.
-# Well below a glyph stroke and well above the background and its antialiasing.
-THRESHOLD = 0.22
+# A pixel counts as lit at this fraction of the brightest thing in the content
+# area. Well below a glyph stroke and well above the background, its
+# antialiasing, and any chrome that crept in.
+THRESHOLD = 0.5
+
+# A row belongs to the content area when most of it is darker than this. The
+# window's title bar is a solid light band and would otherwise be brighter than
+# every glyph on the page.
+BACKGROUND = 60
 
 
 def load(path: Path) -> np.ndarray:
@@ -56,6 +62,24 @@ def runs(indices: np.ndarray):
     starts = np.concatenate(([0], breaks + 1))
     ends = np.concatenate((breaks, [indices.size - 1]))
     return [(int(indices[a]), int(indices[b])) for a, b in zip(starts, ends)]
+
+
+def content(page: np.ndarray) -> np.ndarray:
+    """The terminal's own rows, with the window's furniture cut away.
+
+    A screen capture takes the whole window, and the title bar is a solid light
+    band brighter than any glyph — bright enough to make every row of the
+    picture look as though something were drawn on it. The terminal's rows are
+    the ones that are mostly background, so the longest run of those is the part
+    worth reading.
+    """
+    dark = np.flatnonzero(np.median(page, axis=1) < BACKGROUND)
+    bands = runs(dark)
+    if not bands:
+        raise SystemExit("no dark rows: is this a picture of a terminal?")
+
+    top, bottom = max(bands, key=lambda band: band[1] - band[0])
+    return page[top:bottom + 1]
 
 
 def geometry(page: np.ndarray, floor: int, steps: int):
@@ -113,19 +137,30 @@ def bar_column(x: float, first: float, cell: float) -> int:
     return int(round((x - first) / cell))
 
 
-def cells_covered(lit: np.ndarray, cell: float) -> int:
+# A cell counts as painted when this much of its width carries ink. Antialiasing
+# puts a pixel or two into the cell beyond a glyph that fills its own edge to
+# edge — a block or a box drawing character — and without a floor those would
+# measure two cells wide.
+INK = 0.25
+
+
+def cells_covered(lit: np.ndarray, first: float, cell: float) -> int:
     """How many cells a glyph's ink covers.
 
-    From the width of the ink rather than from its position, so this needs no
-    idea of where column zero begins. A glyph never fills its cell exactly —
-    there is side bearing either side — so rounding up is what turns ink into
-    cells.
+    Counted per cell rather than from the width of the ink, because a glyph
+    that reaches its own edges bleeds a pixel into the next one and the two are
+    indistinguishable by extent alone.
     """
     if lit.size == 0:
         return 0
 
-    extent = float(lit[-1] - lit[0] + 1)
-    return max(int(-(-extent // cell)), 1)
+    # The staircase bars sit in the middle of their cells, so column c runs
+    # from half a cell either side of where its bar was.
+    columns = np.floor((lit - (first - cell / 2)) / cell).astype(int)
+    painted = [column for column in set(columns.tolist())
+               if (columns == column).sum() >= cell * INK]
+
+    return max(painted) - min(painted) + 1 if painted else 0
 
 
 def main() -> int:
@@ -151,7 +186,7 @@ def main() -> int:
             print(f"# missing {path}", file=sys.stderr)
             continue
 
-        page = load(path)
+        page = content(load(path))
         floor = int(page.max() * THRESHOLD)
         left, cell, top, pitch = geometry(page, floor, steps)
 
@@ -170,7 +205,7 @@ def main() -> int:
             # Nothing follows on the bare row, so its rightmost ink is the
             # glyph's own edge — which runs past the pen, and past anything
             # drawn after it on the row above.
-            drawn = cells_covered(bare_ink, cell)
+            drawn = cells_covered(bare_ink, left, cell)
 
             note_out = note
             if advance is not None and drawn > pad:
