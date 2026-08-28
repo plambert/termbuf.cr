@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.4] - 2026-08-28
+
 ### Added
 
 - `Editor#completion`: what the last completion came to — `Idle`, `Inserted`, `Choices`, `Listing`,
@@ -129,7 +131,8 @@ First release. Everything below is new.
 - OSC 8 links, kitty graphics, and the kitty colour stack are detected but not emitted.
 - Mouse reporting is not enabled or decoded.
 
-[Unreleased]: https://github.com/plambert/termbuf.cr/compare/v0.1.3...HEAD
+[Unreleased]: https://github.com/plambert/termbuf.cr/compare/v0.1.4...HEAD
+[0.1.4]: https://github.com/plambert/termbuf.cr/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/plambert/termbuf.cr/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/plambert/termbuf.cr/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/plambert/termbuf.cr/compare/v0.1.0...v0.1.1
