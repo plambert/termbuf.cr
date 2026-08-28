@@ -755,22 +755,27 @@ module Validate
         Style::DEFAULT.faint
     end
 
-    # A label across a bar, taking each cell's colour as it goes.
+    # A label across a bar, taking each cell's colour as it goes. Half filled
+    # and the label centred, so the join lands inside a word rather than on a
+    # space, where it would be impossible to tell from a bar that simply
+    # stopped at the text.
     private def draw_bar(screen) : Nil
       width = Math.min columns - 4, 46
-      filled = width * 2 // 3
+      filled = width // 2
       y = 13
 
-      screen.fill Rect.new(2, y, width, 1), ' ', Style::DEFAULT.bg(Color.indexed(28))
-      screen.fill Rect.new(2 + filled, y, width - filled, 1), ' ',
+      row = screen.view Rect.new(2, y, width, 1)
+      row.fill Rect.new(0, 0, filled, 1), ' ', Style::DEFAULT.bg(Color.indexed(28))
+      row.fill Rect.new(filled, 0, width - filled, 1), ' ',
         Style::DEFAULT.bg(Color.indexed(236))
 
-      label = " 67% of #{width} cells "
-      x = 2 + (width - label.size) // 2
-      screen.write x, y, label, Style::DEFAULT.bold, keep_background: true
+      label = " 50% of #{width} cells "
+      row.write Math.max((width - label.size) // 2, 0), 0, label,
+        Style::DEFAULT.bold, keep_background: true
 
+      screen.write_char 2 + filled, y + 1, '^', Style::DEFAULT.faint
       screen.write 2, y + 2,
-        "the label crosses the join and keeps whichever colour is under it",
+        "the bar ends at the caret; the label crosses it, taking each cell's colour",
         Style::DEFAULT.faint
     end
 
