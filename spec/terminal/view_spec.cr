@@ -233,6 +233,84 @@ Spectator.describe TermBuf::View do
     end
   end
 
+  describe "a view carrying a style" do
+    let(highlight) { TermBuf::Style::DEFAULT.bg TermBuf::Color::BLUE }
+
+    it "gives its background to a write that names none" do
+      with_screen do |screen, buffer|
+        row = screen.view Rect.new(0, 1, 8, 1), highlight
+        row.clear
+        row.write 0, 0, "name", TermBuf::Style::DEFAULT.bold
+
+        expect(buffer.styles[buffer.back[0, 1].style]).to eq highlight.bold
+        expect(buffer.styles[buffer.back[6, 1].style]).to eq highlight
+      end
+    end
+
+    it "lets a write name a background of its own" do
+      with_screen do |screen, buffer|
+        row = screen.view Rect.new(0, 0, 8, 1), highlight
+        row.write 0, 0, "x", RED.bg(TermBuf::Color::GREEN)
+
+        expect(buffer.styles[buffer.back[0, 0].style].background).to eq TermBuf::Color::GREEN
+      end
+    end
+
+    it "applies to every command that carries a style" do
+      with_screen do |screen, buffer|
+        row = screen.view Rect.new(0, 0, 4, 2), highlight
+        row.fill Rect.new(0, 0, 2, 1), '#'
+        row.write_char 2, 0, 'c'
+
+        expect(buffer.styles[buffer.back[0, 0].style]).to eq highlight
+        expect(buffer.styles[buffer.back[2, 0].style]).to eq highlight
+      end
+    end
+
+    it "can be set after the view was made" do
+      with_screen do |screen, buffer|
+        row = screen.view Rect.new(0, 0, 4, 1)
+        row.style = highlight
+        row.write 0, 0, "ab"
+
+        expect(buffer.styles[buffer.back[0, 0].style]).to eq highlight
+      end
+    end
+
+    it "layers through nested views, the innermost winning each field" do
+      with_screen do |screen, buffer|
+        outer = screen.view Rect.new(0, 0, 8, 1), highlight
+        inner = outer.view Rect.new(1, 0, 6, 1), TermBuf::Style::DEFAULT.italic
+        inner.write 0, 0, "x", TermBuf::Style::DEFAULT.bold
+
+        expect(buffer.styles[buffer.back[1, 0].style]).to eq highlight.italic.bold
+      end
+    end
+
+    it "lets a write keep what is behind it instead of the view's background" do
+      with_screen do |screen, buffer|
+        row = screen.view Rect.new(0, 0, 8, 1), highlight
+        row.clear
+        # A bar painted inside the row, then a label across the join.
+        row.fill Rect.new(0, 0, 3, 1), ' ', TermBuf::Style::DEFAULT.bg(TermBuf::Color::GREEN)
+        row.write 2, 0, "ab", TermBuf::Style::DEFAULT.bold, keep_background: true
+
+        expect(buffer.styles[buffer.back[2, 0].style].background).to eq TermBuf::Color::GREEN
+        expect(buffer.styles[buffer.back[3, 0].style].background).to eq TermBuf::Color::BLUE
+        expect(buffer.styles[buffer.back[2, 0].style].has?(TermBuf::Attributes::Bold)).to be_true
+      end
+    end
+
+    it "leaves styles alone when it carries none" do
+      with_screen do |screen, buffer|
+        plain = screen.view Rect.new(0, 0, 4, 1)
+        plain.write 0, 0, "ab", RED
+
+        expect(buffer.styles[buffer.back[0, 0].style]).to eq RED
+      end
+    end
+  end
+
   describe "an empty view" do
     it "drops everything" do
       with_screen do |screen, buffer|
@@ -255,6 +333,13 @@ Spectator.describe TermBuf::View do
 
       expect(batcher.commands.size).to eq 1
       expect({command.x, command.y, command.text}).to eq({4, 3, "abc"})
+    end
+
+    it "carries the keep-background flag through unchanged" do
+      batcher = TermBuf::Batcher.new
+      batcher.view(Rect.new(1, 0, 4, 1)).write 0, 0, "ab", keep_background: true
+
+      expect(batcher.commands.first.as(TermBuf::Commands::Write).keep_background).to be_true
     end
   end
 end

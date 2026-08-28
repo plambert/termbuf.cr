@@ -104,6 +104,11 @@ module TermBuf
 
     # Blanks both halves of the wide character overlapping column *x*, if one
     # does. A cell that is neither half of a pair is left alone.
+    #
+    # Both halves take *blank*, which for `#place` is the style being written:
+    # a terminal erases what it displaces in whatever the current style is,
+    # having no memory of what the cell used to be, and this follows it. The
+    # rectangle operations want a different answer and use `#clip_wide`.
     def detach(x : Int32, y : Int32, blank : Cell = Cell.blank) : Nil
       return unless contains? x, y
 
@@ -174,12 +179,36 @@ module TermBuf
 
     # Blanks any wide character straddling the left or right edge of *rect*, so
     # that filling or scrolling the rectangle cannot tear one in half.
+    #
+    # The half lying outside *rect* keeps the style it had and loses only its
+    # glyph. A rectangle operation has no business changing how a cell outside
+    # it looks, and giving that half the incoming style would paint the
+    # rectangle a column wider than it is — on the rows where a wide character
+    # happens to straddle, and not on the others.
     def clip_wide(rect : Rect, blank : Cell = Cell.blank) : Nil
       return if rect.empty?
 
       rect.each_row do |row_index|
-        detach rect.x, row_index, blank if self[rect.x, row_index].continuation?
-        detach rect.right, row_index, blank if self[rect.right, row_index].wide?
+        detach_at_edge rect.x, row_index, blank if self[rect.x, row_index].continuation?
+        detach_at_edge rect.right, row_index, blank if self[rect.right, row_index].wide?
+      end
+    end
+
+    # Blanks the pair straddling an edge, splitting the difference: the half
+    # inside takes *blank*, since the caller is about to paint over it anyway,
+    # and the half outside keeps its own style.
+    #
+    # A continuation carries its lead's style, so either half answers for both.
+    private def detach_at_edge(x : Int32, y : Int32, blank : Cell) : Nil
+      cell = self[x, y]
+      kept = Cell.blank cell.style
+
+      if cell.continuation?
+        self[x - 1, y] = kept if x > 0
+        self[x, y] = blank
+      elsif cell.wide?
+        self[x, y] = blank
+        self[x + 1, y] = kept if x + 1 < @width
       end
     end
 

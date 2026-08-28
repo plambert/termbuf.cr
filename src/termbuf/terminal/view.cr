@@ -22,6 +22,18 @@ module TermBuf
   # it surrounds a surface of exactly the space left inside it. Everything
   # built on `Drawing` works against one.
   #
+  # A view can also carry a `#style` that everything drawn through it merges
+  # onto, which is what a highlighted row wants: fill it once, then write its
+  # columns naming only what each one adds.
+  #
+  #     row = screen.view rect, style: Style::DEFAULT.bg(highlight)
+  #     row.clear                                     # paints the highlight
+  #     row.write 0, 0, name, Style::DEFAULT.bold     # bold, on the highlight
+  #     row.write 24, 0, rate, Style::DEFAULT.faint
+  #
+  # A write that names a background of its own still wins. Nested views layer
+  # the same way, each filling in what the one inside it left unset.
+  #
   # This is clipping, not layering. Nothing here says a view is on top of
   # anything, and dismissing a panel means the next frame does not draw it —
   # the paint diff then sends the cells it covered and nothing else.
@@ -45,7 +57,11 @@ module TermBuf
     # the cells.
     property policy : Unicode::WidthPolicy = Unicode::WidthPolicy::DEFAULT
 
-    def initialize(@target : Drawing, @rect : Rect)
+    # What everything drawn through the view merges onto: a field a write
+    # leaves unset comes from here, and one it names wins. See `Style#merge`.
+    property style : Style
+
+    def initialize(@target : Drawing, @rect : Rect, @style : Style = Style::DEFAULT)
     end
 
     # The view's own rectangle, which starts at its origin rather than at the
@@ -88,7 +104,8 @@ module TermBuf
       return unless shown
 
       start, text = shown
-      @target.issue Commands::Write.new(@rect.x + start, @rect.y + command.y, text, command.style)
+      @target.issue Commands::Write.new(@rect.x + start, @rect.y + command.y, text,
+        styled(command.style), command.keep_background)
     end
 
     # The part of *text* that lands inside the view when it is drawn at column
@@ -136,21 +153,21 @@ module TermBuf
       return if columns == 2 && x + 1 >= @rect.width
 
       @target.issue Commands::WriteChar.new(@rect.x + x, @rect.y + command.y,
-        command.char, command.style)
+        command.char, styled(command.style), command.keep_background)
     end
 
     private def clip_fill(rect : Rect, char : Char, style : Style) : Nil
       area = rect.intersect bounds
       return if area.empty?
 
-      @target.issue Commands::Fill.new(translate(area), char, style)
+      @target.issue Commands::Fill.new(translate(area), char, styled(style))
     end
 
     private def clip_scroll(command : Commands::Scroll) : Nil
       area = command.rect.intersect bounds
       return if area.empty?
 
-      @target.issue Commands::Scroll.new(translate(area), command.lines, command.style)
+      @target.issue Commands::Scroll.new(translate(area), command.lines, styled(command.style))
     end
 
     private def clip_blit(command : Commands::Blit) : Nil
@@ -164,6 +181,12 @@ module TermBuf
         placed.width, placed.height
 
       @target.issue Commands::Blit.new(command.source, @rect.x + placed.x, @rect.y + placed.y, taken)
+    end
+
+    # *style* laid over the view's own. Most views carry none, so the common
+    # case costs a comparison rather than a merge.
+    private def styled(style : Style) : Style
+      @style.default? ? style : @style.merge(style)
     end
 
     # A rectangle of this view, in the target's coordinates.

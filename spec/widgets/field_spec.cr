@@ -254,6 +254,63 @@ Spectator.describe TermBuf::Field do
       expect(made.editor.listing?).to be_true
       expect(made.desired_height).to be > 1
     end
+
+    # A completion key that finds nothing and a completion key that is not
+    # bound look exactly alike unless the field says which happened.
+    it "says so when nothing matched" do
+      made = TermBuf::Field.new bounds: TermBuf::Rect.new(0, 0, 20, 3),
+        editor: TermBuf::Editor.new(completions: ->(_request : TermBuf::Completion::Request) do
+          TermBuf::Completion::Result.new [] of String
+        end)
+      type made, "zzz"
+      made.handle TermBuf::Key.named(Name::Tab)
+      made.bounds = TermBuf::Rect.new 0, 0, 20, made.desired_height
+
+      expect(made.desired_height).to eq 2
+      expect(render(made)[0]).to eq "zzz"
+      expect(render(made)[1]).to contain "no match"
+    end
+
+    it "says how many there are before it lists them" do
+      made = TermBuf::Field.new bounds: TermBuf::Rect.new(0, 0, 24, 3),
+        editor: TermBuf::Editor.new(completions: ->(_request : TermBuf::Completion::Request) do
+          TermBuf::Completion::Result.new ["commit", "commander"]
+        end)
+      type made, "co"
+      made.handle TermBuf::Key.named(Name::Tab)
+      made.bounds = TermBuf::Rect.new 0, 0, 24, made.desired_height
+
+      expect(made.editor.completion.choices?).to be_true
+      expect(render(made, columns: 24)[1]).to contain "2 matches"
+    end
+
+    it "says nothing once a single candidate has gone in" do
+      made = TermBuf::Field.new bounds: TermBuf::Rect.new(0, 0, 20, 3),
+        editor: TermBuf::Editor.new(completions: ->(_request : TermBuf::Completion::Request) do
+          TermBuf::Completion::Result.new ["commit"]
+        end)
+      type made, "co"
+      made.handle TermBuf::Key.named(Name::Tab)
+
+      expect(render(made)[0]).to eq "commit"
+      expect(render(made)[1]).to eq ""
+      expect(made.desired_height).to eq 1
+    end
+
+    it "takes the note back at the next keystroke" do
+      made = TermBuf::Field.new bounds: TermBuf::Rect.new(0, 0, 20, 3),
+        editor: TermBuf::Editor.new(completions: ->(_request : TermBuf::Completion::Request) do
+          TermBuf::Completion::Result.new [] of String
+        end)
+      type made, "zzz"
+      made.handle TermBuf::Key.named(Name::Tab)
+      type made, "x"
+      made.bounds = TermBuf::Rect.new 0, 0, 20, made.desired_height
+
+      expect(made.editor.completion.idle?).to be_true
+      expect(made.desired_height).to eq 1
+      expect(render(made)[1]).to eq ""
+    end
   end
 end
 
@@ -276,6 +333,23 @@ Spectator.describe TermBuf::PasteNotice do
     notice.draw TermBuf::BufferSurface.new(buffer), TermBuf::Rect.full(30, 5)
 
     expect(buffer.to_text).to contain "pasting 4096 bytes"
+  end
+
+  it "keeps a label too wide for the screen inside its own panel" do
+    notice = TermBuf::PasteNotice.new label: "pasting a great deal of something"
+    notice.arriving 4096
+
+    buffer = TermBuf::Buffer.new 12, 5
+    buffer.clear
+    buffer.write 0, 2, "............"
+    notice.draw TermBuf::BufferSurface.new(buffer), TermBuf::Rect.full(12, 5)
+
+    # The panel is as wide as the screen, so nothing of the row it covers is
+    # left, and nothing of the label reached past it either.
+    buffer.to_text.split('\n').each do |line|
+      expect(line.size).to be <= 12
+    end
+    expect(buffer.to_text).not_to contain "."
   end
 
   it "goes away when the paste ends" do

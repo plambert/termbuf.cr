@@ -16,7 +16,7 @@ module Validate
   alias Color = TermBuf::Color
   alias Rect = TermBuf::Rect
 
-  PAGES = %w[caps edges widths colours attrs motion keys cursors measured field]
+  PAGES = %w[caps edges widths colours attrs motion keys cursors measured panels field]
 
   # One line of the width page: something to draw, and what it is.
   #
@@ -113,6 +113,7 @@ module Validate
       when "keys"     then draw_keys screen
       when "cursors"  then draw_cursors screen
       when "measured" then draw_measured screen
+      when "panels"   then draw_panels screen
       when "field"    then draw_field screen
       end
     end
@@ -160,6 +161,14 @@ module Validate
       end
 
       screen.write 1, rows - 1, status.ljust(Math.max(columns - 1, 0)), Style::DEFAULT.faint
+    end
+
+    # An unbroken line across the terminal, separating a page's sections.
+    # Written rather than filled: the light horizontal is East Asian Ambiguous,
+    # so on a terminal that draws it two cells wide a fill would refuse it,
+    # while a write lays down as many as the row holds.
+    private def rule(screen, y : Int32) : Nil
+      screen.write 0, y, "─" * columns, Style::DEFAULT.faint
     end
 
     private def status : String
@@ -714,7 +723,103 @@ module Validate
         prompt: Field::Prompt.new("› ", Style::DEFAULT.fg(Color.indexed(4))),
         growth: Field::Growth::Grow,
         max_rows: 8,
-        placeholder: "tab completes a colour, up walks back")
+        placeholder: "type sc, or c, then tab")
+    end
+
+    # Clipping, a view's own style, and a background that varies under text.
+    # A row that reads right proves all three: the bar is painted once, the
+    # label crosses where its colour changes, and nothing reaches past the
+    # panel's border.
+    private def draw_panels(screen) : Nil
+      screen.write 2, 2, "views: clipping, a base style, backgrounds", Style::DEFAULT.bold
+
+      rule screen, 3
+      draw_rows screen
+      rule screen, 9
+      draw_clipping screen
+      rule screen, 16
+      draw_bar screen
+    end
+
+    # Highlighted rows drawn without repeating the highlight in every column.
+    private def draw_rows(screen) : Nil
+      width = Math.min columns - 4, 46
+
+      3.times do |index|
+        style = index == 1 ? Style::DEFAULT.bg(Color.indexed(24)) : Style::DEFAULT
+        row = screen.view Rect.new(2, 4 + index, width, 1), style
+        row.clear
+        row.write 0, 0, "row #{index}", Style::DEFAULT.bold
+        row.write 10, 0, "a second column, faint", Style::DEFAULT.faint
+      end
+
+      screen.write 2, 7, "the highlight is on the middle row's view; the two writes",
+        Style::DEFAULT.faint
+      screen.write 2, 8, "in every row pass only bold and faint, never a background",
+        Style::DEFAULT.faint
+    end
+
+    # Text cut at a panel's edge, including the two cases a wide glyph makes:
+    # one that will not fit the last cell, and one the far edge cuts in half.
+    #
+    # The interior is filled with dots first, so a cell the clipping left
+    # untouched is visible rather than being an indistinguishable blank.
+    private def draw_clipping(screen) : Nil
+      # Fixed rather than sized to the terminal: the interior has to come to an
+      # odd number of cells for a two-cell glyph to be left with nowhere to go.
+      box = Rect.new 2, 10, 23, 6
+      Border.new(Border::ROUNDED, title: "clipped").draw screen, box
+
+      inside = screen.view Border.inset(box)
+      inside.fill inside.bounds, '.', Style::DEFAULT.faint
+
+      inside.write 0, 0, "this line is far longer than the box"
+      inside.write 0, 1, WIDE_SAMPLE
+      inside.write -1, 2, WIDE_SAMPLE
+      draw_orphan inside
+
+      label screen, box, 0, "ascii, cut at the border"
+      label screen, box, 1, "the last cell will not hold a wide glyph"
+      label screen, box, 2, "one the left edge halves is dropped"
+      label screen, box, 3, "a fill blanks a glyph it lands inside"
+    end
+
+    # Eleven glyphs of two cells each against a twenty-one cell panel, so one
+    # of them has nowhere to go whichever edge the run is pushed against.
+    WIDE_SAMPLE = "日本語のテキストです、"
+
+    # A wide glyph already on the row, with a fill landing partway through it.
+    private def draw_orphan(inside) : Nil
+      inside.write 0, 3, WIDE_SAMPLE
+      inside.fill Rect.new(7, 3, 8, 1), ' ', Style::DEFAULT.bg(Color.indexed(24))
+    end
+
+    private def label(screen, box : Rect, row : Int32, text : String) : Nil
+      screen.write box.right + 3, box.y + 1 + row, text, Style::DEFAULT.faint
+    end
+
+    # A label across a bar, taking each cell's colour as it goes. Half filled
+    # and the label centred, so the join lands inside a word rather than on a
+    # space, where it would be impossible to tell from a bar that simply
+    # stopped at the text.
+    private def draw_bar(screen) : Nil
+      width = Math.min columns - 4, 46
+      filled = width // 2
+      y = 17
+
+      row = screen.view Rect.new(2, y, width, 1)
+      row.fill Rect.new(0, 0, filled, 1), ' ', Style::DEFAULT.bg(Color.indexed(28))
+      row.fill Rect.new(filled, 0, width - filled, 1), ' ',
+        Style::DEFAULT.bg(Color.indexed(236))
+
+      label = " 50% of #{width} cells "
+      row.write Math.max((width - label.size) // 2, 0), 0, label,
+        Style::DEFAULT.bold, keep_background: true
+
+      screen.write_char 2 + filled, y + 1, '^', Style::DEFAULT.faint
+      screen.write 2, y + 2,
+        "the bar ends at the caret; the label crosses it, taking each cell's colour",
+        Style::DEFAULT.faint
     end
 
     # An input field driven from an application's own loop rather than by
@@ -730,7 +835,10 @@ module Validate
       @terminal.cursor.move_to x, y
 
       screen.write 2, 2, "an input field", Style::DEFAULT.bold
-      screen.write 20, 2, "enter accepts, escape clears", Style::DEFAULT.faint
+      screen.write 20, 2, "enter accepts, escape clears, up walks back",
+        Style::DEFAULT.faint
+      screen.write 2, 3, "tab completes a colour name: #{WORDS.first(4).join(", ")}, …",
+        Style::DEFAULT.faint
 
       row = field.bounds.bottom + 2
 

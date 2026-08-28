@@ -138,6 +138,41 @@ surface the view came from. Views nest, so a border can hand what it surrounds a
 the space left inside it. `#passthrough` and `#scroll_region` pass through untouched, since neither
 is addressed in the view's cells.
 
+A view can also carry a style that everything drawn through it merges onto, so a highlighted row is
+filled once and its columns name only what each one adds:
+
+```crystal
+row = screen.view rect, TermBuf::Style::DEFAULT.bg(highlight)
+row.clear                                              # paints the highlight
+row.write 0, 0, name, TermBuf::Style::DEFAULT.bold     # bold, on the highlight
+row.write 24, 0, rate, TermBuf::Style::DEFAULT.faint
+```
+
+A write that names a field of its own wins; one that leaves a field unset takes the view's. Nested
+views layer the same way. Attributes are the exception and combine rather than replace, since flags
+have no value meaning "leave the panel's alone" — a bold write inside a faint panel is both. The
+merge is `Style#merge`, usable on its own.
+
+That covers one background for a whole row. When the background varies *under* the text — a label
+across a progress bar — the cells themselves have the answer, and `keep_background` takes it from
+them per cell:
+
+```crystal
+screen.fill TermBuf::Rect.new(0, y, filled, 1), ' ', TermBuf::Style::DEFAULT.bg(bar)
+screen.write x, y, "#{percent}%", TermBuf::Style::DEFAULT.bold, keep_background: true
+```
+
+Each cell keeps the colour already behind it and the style supplies everything else; a background
+named in the style is ignored. A cluster covering two cells takes the colour of the cell its first
+half lands on. `#write_char` takes the same argument, and it survives a view's translation and
+clipping.
+
+A `fill`, `scroll`, or `blit` whose edge falls inside a wide character takes the whole character —
+half of one cannot be drawn — and the half lying outside the rectangle keeps the style it had,
+losing only its glyph. So a panel over CJK text is the width it says it is on every row. Writing a
+character over half of one is different: there the displaced half is erased in the style being
+written, which is what a terminal does.
+
 This is clipping, not layering: nothing says a view is on top of anything. Dismissing a panel means
 the next frame does not draw it, and the paint diff then sends the cells it covered and nothing
 else — a batched full frame is the cheap way to do this, not a workaround for the lack of layers.
@@ -491,6 +526,17 @@ History keeps the line being typed when a walk starts and gives it back on the w
 `History::Search::Prefix` walks only the entries beginning with what was typed. Completion is a
 hook: one candidate is inserted, several insert what they agree on, and a second `Tab` lists them.
 
+`Editor#completion` says what the last press came to — `Idle`, `Inserted`, `Choices`, `Listing`, or
+`Nothing` — until the next edit. `Field` puts it under the line, because a key that found no match
+and a key that is bound to nothing look identical otherwise:
+
+```text
+› s                            › zzz
+ 3 matches, again to list       no match
+```
+
+An application driving an `Editor` itself reads the same property.
+
 ### Saying a paste is arriving
 
 `PasteNotice` draws the panel the paste deadlines exist for:
@@ -507,13 +553,14 @@ in TermBuf::Events::Paste   then notice.finished
 ```bash
 crystal run examples/clock.cr     # drawing, input, and resize in one small program
 crystal run examples/prompt.cr    # an input field, and nothing else
-crystal run examples/validate.cr  # ten pages checking a real terminal against the shard
+crystal run examples/validate.cr  # eleven pages checking a real terminal against the shard
 ```
 
 `validate.cr` is worth running in any terminal you intend to support: it reports what detection
 concluded, writes every cell of the screen including the bottom-right corner, checks the terminal's
 idea of grapheme widths against the tables, shows what a frame costs in bytes, decodes whatever you
-type, and gives you a pane to type into with the terminal's own cursor following along.
+type, draws clipped panels and a label across a two-colour bar, and gives you a pane to type into
+with the terminal's own cursor following along.
 
 ## Development
 

@@ -132,6 +132,121 @@ Spectator.describe TermBuf::Buffer do
     end
   end
 
+  describe "keeping the background" do
+    private def background_at(buffer, x, y)
+      buffer.styles[buffer.back[x, y].style].background
+    end
+
+    let(green) { TermBuf::Color::GREEN }
+    let(blue) { TermBuf::Color::BLUE }
+
+    # Two colours side by side, which is what a half-full progress bar is.
+    before_each do
+      buffer.fill TermBuf::Rect.new(0, 0, 4, 1), ' ', TermBuf::Style::DEFAULT.bg(green)
+      buffer.fill TermBuf::Rect.new(4, 0, 4, 1), ' ', TermBuf::Style::DEFAULT.bg(blue)
+    end
+
+    it "takes each cell's own colour across a run" do
+      buffer.write 2, 0, "abcd", TermBuf::Style::DEFAULT, keep_background: true
+
+      expect(background_at(buffer, 2, 0)).to eq green
+      expect(background_at(buffer, 3, 0)).to eq green
+      expect(background_at(buffer, 4, 0)).to eq blue
+      expect(background_at(buffer, 5, 0)).to eq blue
+      expect(buffer.to_text.lines[0]).to eq "  abcd  "
+    end
+
+    it "applies everything else in the style" do
+      red = TermBuf::Style::DEFAULT.fg(TermBuf::Color::RED).bold
+      buffer.write 0, 0, "ab", red, keep_background: true
+
+      style = buffer.styles[buffer.back[0, 0].style]
+
+      expect(style.foreground).to eq TermBuf::Color::RED
+      expect(style.has?(TermBuf::Attributes::Bold)).to be_true
+      expect(style.background).to eq green
+    end
+
+    it "ignores a background named in the style" do
+      buffer.write 0, 0, "a", TermBuf::Style::DEFAULT.bg(TermBuf::Color::RED),
+        keep_background: true
+
+      expect(background_at(buffer, 0, 0)).to eq green
+    end
+
+    it "replaces the background when it is not asked to keep it" do
+      buffer.write 0, 0, "ab"
+
+      expect(background_at(buffer, 0, 0)).to eq TermBuf::Color.default
+    end
+
+    it "gives a wide cluster the colour its first half lands on" do
+      buffer.write 3, 0, "世", TermBuf::Style::DEFAULT, keep_background: true
+
+      # Straddles the join: the lead is on green, so both halves are.
+      expect(background_at(buffer, 3, 0)).to eq green
+      expect(background_at(buffer, 4, 0)).to eq green
+    end
+
+    it "keeps the background for a single character too" do
+      buffer.write_char 5, 0, 'x', TermBuf::Style::DEFAULT.bold, keep_background: true
+
+      expect(background_at(buffer, 5, 0)).to eq blue
+      expect(buffer.styles[buffer.back[5, 0].style].has?(TermBuf::Attributes::Bold)).to be_true
+    end
+
+    it "blanks a displaced wide character in the colour it took" do
+      buffer.write 4, 0, "世", TermBuf::Style::DEFAULT.bg(green)
+      buffer.write 5, 0, "x", TermBuf::Style::DEFAULT, keep_background: true
+
+      # Writing over the second half detaches the pair, and the blank left
+      # behind carries the colour the write ended up with.
+      expect(buffer.to_text.lines[0]).to eq "     x  "
+      expect(background_at(buffer, 4, 0)).to eq green
+    end
+  end
+
+  describe "filling over a wide character" do
+    private def background_at(buffer, x, y)
+      buffer.styles[buffer.back[x, y].style].background
+    end
+
+    # A panel drawn over CJK text has to be the width it says it is, on every
+    # row, whether or not a glyph happens to straddle its edge.
+    it "paints exactly the rectangle it was given" do
+      red = TermBuf::Style::DEFAULT.bg TermBuf::Color::RED
+      buffer.write 0, 0, "世世世世"
+      buffer.fill TermBuf::Rect.new(3, 0, 2, 1), ' ', red
+
+      expect(background_at(buffer, 2, 0)).to eq TermBuf::Color.default
+      expect(background_at(buffer, 3, 0)).to eq TermBuf::Color::RED
+      expect(background_at(buffer, 4, 0)).to eq TermBuf::Color::RED
+      expect(background_at(buffer, 5, 0)).to eq TermBuf::Color.default
+    end
+
+    it "leaves the halves it orphaned holding nothing" do
+      buffer.write 0, 0, "世世世世"
+      buffer.fill TermBuf::Rect.new(3, 0, 2, 1), ' ', TermBuf::Style::DEFAULT
+
+      # Four glyphs across eight columns. The fill took 3 and 4, which were
+      # halves of the second and third, so those two go and the outer pair
+      # stay: 世, four blanks, 世.
+      expect(buffer.to_text.lines[0]).to eq "世    世"
+      expect(buffer.back[2, 0].blank?).to be_true
+      expect(buffer.back[5, 0].blank?).to be_true
+    end
+
+    it "keeps the row's own background under an orphaned half" do
+      green = TermBuf::Style::DEFAULT.bg TermBuf::Color::GREEN
+      buffer.fill TermBuf::Rect.new(0, 0, 8, 1), ' ', green
+      buffer.write 0, 0, "世世世世", green
+      buffer.fill TermBuf::Rect.new(3, 0, 2, 1), ' ', TermBuf::Style::DEFAULT
+
+      expect(background_at(buffer, 2, 0)).to eq TermBuf::Color::GREEN
+      expect(background_at(buffer, 5, 0)).to eq TermBuf::Color::GREEN
+    end
+  end
+
   describe "damage tracking" do
     it "starts clean" do
       expect(buffer.dirty?).to be_false

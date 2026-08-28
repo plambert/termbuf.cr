@@ -203,6 +203,17 @@ Spectator.describe TermBuf::Grid do
       expect(grid[3, 0]).to eq TermBuf::Cell.blank
     end
 
+    # Unlike a rectangle operation, which leaves the half outside it alone.
+    # A terminal erases what it displaces in whatever style it is writing in,
+    # having no memory of what the cell used to be, and this follows it.
+    it "blanks a displaced half in the style being written" do
+      grid.place 1, 0, wide_cell(7_u32)
+      grid.place 2, 0, TermBuf::Cell.new('x', 3_u32), TermBuf::Cell.blank(3_u32)
+
+      expect(grid[1, 0]).to eq TermBuf::Cell.blank(3_u32)
+      expect(grid[2, 0].char).to eq 'x'
+    end
+
     it "never leaves a continuation without its lead" do
       grid.place 0, 0, wide_cell
       grid.place 2, 0, wide_cell
@@ -235,6 +246,25 @@ Spectator.describe TermBuf::Grid do
 
       expect(grid[0, 0]).to eq TermBuf::Cell.blank
       expect(grid[1, 0].char).to eq '#'
+    end
+
+    # Giving the half outside the rectangle the fill's style would paint one
+    # column wider than asked for, and only on the rows where a wide character
+    # happens to straddle.
+    it "leaves the half before the left edge in the style it had" do
+      grid.place 0, 0, wide_cell(7_u32)
+      grid.fill TermBuf::Rect.new(1, 0, 2, 1), TermBuf::Cell.new('#', 3_u32)
+
+      expect(grid[0, 0]).to eq TermBuf::Cell.blank(7_u32)
+      expect(grid[1, 0].style).to eq 3_u32
+    end
+
+    it "leaves the half past the right edge in the style it had" do
+      grid.place 1, 0, wide_cell(7_u32)
+      grid.fill TermBuf::Rect.new(0, 0, 2, 1), TermBuf::Cell.new('#', 3_u32)
+
+      expect(grid[2, 0]).to eq TermBuf::Cell.blank(7_u32)
+      expect(grid[1, 0].style).to eq 3_u32
     end
 
     it "clips a rectangle that runs off the grid" do
@@ -329,6 +359,13 @@ Spectator.describe TermBuf::Grid do
       grid.scroll TermBuf::Rect.new(0, 0, 2, 3), 1
 
       expect(grid[2, 0]).to eq TermBuf::Cell.blank
+    end
+
+    it "leaves the half outside the scrolled rectangle in the style it had" do
+      grid.place 1, 0, wide_cell(7_u32)
+      grid.scroll TermBuf::Rect.new(0, 0, 2, 3), 1, TermBuf::Cell.blank(3_u32)
+
+      expect(grid[2, 0]).to eq TermBuf::Cell.blank(7_u32)
     end
 
     it "marks the rows it touched as damaged" do

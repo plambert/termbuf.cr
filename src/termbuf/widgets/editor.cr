@@ -160,11 +160,36 @@ module TermBuf
     # a field to list. Emptied by anything else.
     getter candidates = [] of String
 
+    # What the last completion came to, for a field to say something about.
+    #
+    # Without this an application cannot tell a completion that found nothing
+    # from one that was never asked for: both leave no candidates behind. A
+    # completion key that appears to do nothing is the usual result.
+    enum Completed
+      # Nothing has been asked for since the last edit.
+      Idle
+
+      # One candidate, and it went into the line.
+      Inserted
+
+      # Several candidates sharing nothing more; asking again lists them.
+      Choices
+
+      # The candidates are being listed.
+      Listing
+
+      # The hook was asked and offered nothing.
+      Nothing
+    end
+
+    # What the last completion came to. Reset by the next edit.
+    getter completion : Completed = Completed::Idle
+
     # Whether the candidates are worth showing, which they are only once the
     # completion key has been pressed twice with nothing chosen in between.
-    getter? listing : Bool = false
-
-    @completed = false
+    def listing? : Bool
+      @completion.listing?
+    end
 
     def initialize(@buffer : LineBuffer = LineBuffer.new,
                    keymap : Keymap? = nil,
@@ -339,30 +364,32 @@ module TermBuf
       end
 
       if result.candidates.size == 1
-        forget_completion
+        @candidates = [] of String
+        @completion = Completed::Inserted
         return
       end
 
       # One press inserts what is common; the second says there was a choice
       # and shows it. Listing on the first press is noise on a line that only
       # ever had one answer.
-      @listing = @completed
       @candidates = result.candidates
-      @completed = true
+      @completion = if @completion.choices? || @completion.listing?
+                      Completed::Listing
+                    else
+                      Completed::Choices
+                    end
     end
 
     private def apply_nothing : Nil
       @candidates = [] of String
-      @listing = false
-      @completed = false
+      @completion = Completed::Nothing
     end
 
     private def forget_completion : Nil
-      return unless @completed || @listing
+      return if @completion.idle?
 
       @candidates = [] of String
-      @listing = false
-      @completed = false
+      @completion = Completed::Idle
     end
   end
 end

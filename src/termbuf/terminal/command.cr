@@ -9,10 +9,12 @@ module TermBuf
   # over. That is what makes ordering total and locking unnecessary.
   module Commands
     # Text from (*x*, *y*) rightwards, one grapheme cluster per cell.
-    record Write, x : Int32, y : Int32, text : String, style : Style
+    record Write, x : Int32, y : Int32, text : String, style : Style,
+      keep_background : Bool
 
     # One cluster at (*x*, *y*).
-    record WriteChar, x : Int32, y : Int32, char : Char, style : Style
+    record WriteChar, x : Int32, y : Int32, char : Char, style : Style,
+      keep_background : Bool
 
     # Every cell of *rect* set to *char*.
     record Fill, rect : Rect, char : Char, style : Style
@@ -75,13 +77,20 @@ module TermBuf
 
     # Writes *text* starting at (*x*, *y*), one grapheme cluster per cell,
     # stopping at the right edge of the row.
-    def write(x : Int32, y : Int32, text : String, style : Style = Style::DEFAULT) : Nil
-      issue Commands::Write.new(x, y, text, style)
+    #
+    # With *keep_background*, each cell keeps the colour already behind it and
+    # *style* supplies the rest — a label across a progress bar. See
+    # `Buffer#write`.
+    def write(x : Int32, y : Int32, text : String, style : Style = Style::DEFAULT,
+              keep_background : Bool = false) : Nil
+      issue Commands::Write.new(x, y, text, style, keep_background)
     end
 
-    # Writes one character at (*x*, *y*).
-    def write_char(x : Int32, y : Int32, char : Char, style : Style = Style::DEFAULT) : Nil
-      issue Commands::WriteChar.new(x, y, char, style)
+    # Writes one character at (*x*, *y*), keeping the colour already behind it
+    # when *keep_background* is set.
+    def write_char(x : Int32, y : Int32, char : Char, style : Style = Style::DEFAULT,
+                   keep_background : Bool = false) : Nil
+      issue Commands::WriteChar.new(x, y, char, style, keep_background)
     end
 
     # Sets every cell of *rect* to *char*.
@@ -115,9 +124,9 @@ module TermBuf
     end
 
     # A rectangle of this surface, addressed from its own top left and cut at
-    # its own edges. See `View`.
-    def view(rect : Rect) : View
-      made = View.new self, rect
+    # its own edges. Anything drawn through it merges onto *style*. See `View`.
+    def view(rect : Rect, style : Style = Style::DEFAULT) : View
+      made = View.new self, rect, style
       made.policy = policy
       made
     end
@@ -175,8 +184,10 @@ module TermBuf
     # own reasons to keep hold of the ones this leaves alone.
     def self.apply(command : Command, buffer : Buffer) : Bool
       case command
-      in Commands::Write        then buffer.write command.x, command.y, command.text, command.style
-      in Commands::WriteChar    then buffer.write_char command.x, command.y, command.char, command.style
+      in Commands::Write then buffer.write command.x, command.y, command.text,
+        command.style, command.keep_background
+      in Commands::WriteChar then buffer.write_char command.x, command.y, command.char,
+        command.style, command.keep_background
       in Commands::Fill         then buffer.fill command.rect, command.char, command.style
       in Commands::Clear        then buffer.clear command.style
       in Commands::Scroll       then buffer.scroll command.rect, command.lines, command.style

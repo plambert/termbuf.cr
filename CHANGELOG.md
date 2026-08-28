@@ -6,6 +6,35 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `Editor#completion`: what the last completion came to — `Idle`, `Inserted`, `Choices`, `Listing`,
+  or `Nothing` — so an application can tell a completion that found nothing from one that was never
+  asked for. `Field` says which under the line: `no match`, or how many matches there are before it
+  will list them. Without it a completion key that finds nothing looks like a key bound to nothing.
+
+- `Style#merge`: a style laid over another, each field the upper one leaves unset coming from
+  below. Attributes combine rather than replace. ([#4])
+- A `View` carries a style everything drawn through it merges onto, so a highlighted row is filled
+  once and its columns name only what each adds rather than threading the row's background through
+  every per-cell style. `Drawing#view` takes it. ([#4])
+- `keep_background` on `#write` and `#write_char`: each cell keeps the colour already behind it and
+  the style supplies the rest, for text over a background that varies under it — a label across a
+  progress bar. ([#4])
+
+### Fixed
+
+- A `fill`, `scroll`, or `blit` whose edge landed inside a wide character gave the half lying
+  outside the rectangle the incoming style, so the operation painted a column wider than it was —
+  on the rows where a character straddled, and not on the others. That half now keeps the style it
+  had and loses only its glyph. `Grid#place` is unchanged: a terminal erases what it displaces in
+  whatever style it is writing in, and that is what typing over half a character should do.
+
+### Changed
+
+- `PasteNotice` draws through a styled view, so its label is cut at the panel edge rather than
+  landing on what the notice was drawn over.
+
 ## [0.1.3] - 2026-08-27
 
 ### Added
@@ -108,3 +137,4 @@ First release. Everything below is new.
 [#1]: https://github.com/plambert/termbuf.cr/issues/1
 [#2]: https://github.com/plambert/termbuf.cr/issues/2
 [#3]: https://github.com/plambert/termbuf.cr/issues/3
+[#4]: https://github.com/plambert/termbuf.cr/issues/4
