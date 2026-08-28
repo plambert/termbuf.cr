@@ -700,7 +700,8 @@ module Validate
       end
 
       screen.write 2, rows - 3,
-        "[tab] next page   [shift+tab] previous   [q] quit   paste to see the notice",
+        "everything pressed here is listed, except tab, shift-tab, ctrl-r and q, " \
+        "which act. paste to see the notice.",
         Style::DEFAULT.faint
     end
 
@@ -1032,10 +1033,17 @@ module Validate
       end
     end
 
-    # Kept whichever page is showing, so a key pressed on another one is still
-    # there to look at afterwards.
+    # Only what was pressed while the keys page is showing. Recording
+    # everywhere filled it with the tab presses that walked here, so arriving
+    # meant reading someone else's log before your own.
     private def remember(key : Key, bytes : Bytes) : Nil
-      @presses << "#{key.to_s.ljust(18)}#{String.new(bytes).inspect}"
+      return unless keys?
+
+      note "#{key.to_s.ljust(18)}#{String.new(bytes).inspect}"
+    end
+
+    private def note(line : String) : Nil
+      @presses << line
       @presses.shift if @presses.size > 64
     end
 
@@ -1053,10 +1061,12 @@ module Validate
 
     private def pasted(text : String, complete : Bool) : Nil
       preview = text.size > 40 ? "#{text[0, 40]}…" : text
-      note = complete ? "" : ", never closed"
+      tail = complete ? "" : ", never closed"
       return @field.paste text if field? && @focused
 
-      @presses << "#{"paste".ljust(18)}#{preview.inspect} (#{text.bytesize} bytes#{note})"
+      # Logged on the keys page for the same reason keystrokes are: that is the
+      # page showing what arrived.
+      note "#{"paste".ljust(18)}#{preview.inspect} (#{text.bytesize} bytes#{tail})" if keys?
 
       # The notice was drawn over whatever was underneath, and the motion page
       # does not clear between frames.
@@ -1078,6 +1088,8 @@ module Validate
       # Leaving a page gives its keyboard back, so tab always means the same
       # thing on arrival.
       @focused = false
+      # The keys page shows this visit, not the last one.
+      @presses.clear if keys?
       field? ? @terminal.hardware_cursor = @terminal.cursor : @terminal.hide_cursor
       # Only one page has anywhere for someone to type, so the terminal's own
       # cursor has no business blinking on the others.
