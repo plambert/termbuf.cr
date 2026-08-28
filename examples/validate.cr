@@ -48,7 +48,7 @@ module Validate
     {"ﷺ", "U+FDFA arabic ligature"},
   ]
 
-  # The pages, in the order the number keys select them.
+  # The pages, in the order tab walks them.
   class Validator
     include TermBuf
 
@@ -149,13 +149,15 @@ module Validate
       screen.fill Rect.new(0, 0, columns, 1), ' ', Style::DEFAULT.reverse
       screen.write 1, 0, "termbuf", Style::DEFAULT.reverse.bold
 
-      # The names cost about sixty columns; below that the numbers alone have
-      # to do, since a half-drawn tab bar says less than a full row of digits.
-      named = columns >= 70
+      # The names cost about ninety columns. Below that a half-drawn bar says
+      # less than naming the page you are on and how far along it is, since
+      # tab is the only way to move and the others cannot be reached directly.
+      return draw_narrow_tabs screen if columns < 96
+
       column = 10
 
       PAGES.each_with_index do |name, index|
-        label = named ? " #{index + 1} #{name} " : " #{index + 1} "
+        label = " #{name} "
         style = index == @page ? Style::DEFAULT.bold : Style::DEFAULT.reverse
         screen.write column, 0, label, style
         column += label.size
@@ -185,6 +187,12 @@ module Validate
       return "[enter] type here  [tab] page  [ctrl-r] redraw  [q] quit" if typeable?
 
       "[tab]/[shift-tab] page  [ctrl-r] redraw  [q] quit"
+    end
+
+    private def draw_narrow_tabs(screen) : Nil
+      screen.write 10, 0, " #{PAGES[@page]} ", Style::DEFAULT.bold
+      screen.write 12 + PAGES[@page].size, 0, "#{@page + 1} of #{PAGES.size}",
+        Style::DEFAULT.reverse
     end
 
     private def status : String
@@ -342,7 +350,7 @@ module Validate
         {"#{rows - 1} as the last column and row on the rulers. A missing top", Style::DEFAULT},
         {"edge means writing the bottom right cell scrolled the screen.", Style::DEFAULT},
         {"", Style::DEFAULT},
-        {"[f] fill every cell   [r] redraw   [1-6] page   [q] quit", Style::DEFAULT.faint},
+        {"[f] fill every cell   [ctrl-r] redraw   [tab] page   [q] quit", Style::DEFAULT.faint},
       ]
 
       top = Math.max (rows - lines.size) // 2, 2
@@ -1000,9 +1008,8 @@ module Validate
       return unless key.character?
 
       case key.char
-      when 'f'      then @filled = !@filled
-      when ' '      then @frozen = !@frozen
-      when '1'..'9' then go_to key.char.to_i - 1
+      when 'f' then @filled = !@filled
+      when ' ' then @frozen = !@frozen
       end
     end
 
