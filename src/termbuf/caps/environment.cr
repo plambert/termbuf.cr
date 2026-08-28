@@ -58,20 +58,25 @@ module TermBuf
       {"Hyper", Capabilities::XTERM.flags | Capability::TrueColor},
       {"rio", Capabilities::MODERN.flags},
       {"alacritty", Capabilities::MODERN.flags},
-      # Terminal.app reaches the 256 colour palette and stops there.
-      {"Apple_Terminal", Capabilities::XTERM.flags},
+      # Terminal.app 470.2, measured: a smooth 24 bit ramp, bracketed paste,
+      # blink, and conceal, but SGR 9 draws no line through anything.
+      {"Apple_Terminal", Capabilities::XTERM.flags | Capability::TrueColor |
+                         Capability::BracketedPaste},
     ]
 
-    # Set by a terminal that has no `TERM_PROGRAM` of its own.
+    # Set by a terminal that has no `TERM_PROGRAM` of its own, or as well as
+    # one. Each carries the name of the terminal that sets it, so a marker
+    # inherited from whatever opened the window can be told from one the
+    # terminal reading the output set itself.
     MARKER_VARIABLES = [
-      {"KITTY_WINDOW_ID", Capabilities::MODERN.flags | KITTY_EXTRAS},
-      {"GHOSTTY_RESOURCES_DIR", GHOSTTY},
-      {"WEZTERM_PANE", Capabilities::MODERN.flags | Capability::KittyGraphics},
-      {"WEZTERM_EXECUTABLE", Capabilities::MODERN.flags | Capability::KittyGraphics},
-      {"ALACRITTY_WINDOW_ID", Capabilities::MODERN.flags},
-      {"KONSOLE_VERSION", Capabilities::XTERM.flags | Capability::TrueColor |
-                          Capability::Osc8Links},
-      {"ITERM_SESSION_ID", Capabilities::MODERN.flags},
+      {"KITTY_WINDOW_ID", "kitty", Capabilities::MODERN.flags | KITTY_EXTRAS},
+      {"GHOSTTY_RESOURCES_DIR", "ghostty", GHOSTTY},
+      {"WEZTERM_PANE", "wezterm", Capabilities::MODERN.flags | Capability::KittyGraphics},
+      {"WEZTERM_EXECUTABLE", "wezterm", Capabilities::MODERN.flags | Capability::KittyGraphics},
+      {"ALACRITTY_WINDOW_ID", "alacritty", Capabilities::MODERN.flags},
+      {"KONSOLE_VERSION", "konsole", Capabilities::XTERM.flags | Capability::TrueColor |
+                                     Capability::Osc8Links},
+      {"ITERM_SESSION_ID", "iterm", Capabilities::MODERN.flags},
     ]
 
     # A multiplexer sits between the application and the terminal and does not
@@ -101,24 +106,67 @@ module TermBuf
       Capabilities.new flags
     end
 
-    # Capabilities *name* is known not to have, whatever else in the
-    # environment implies one.
+    # Capabilities a name is known not to imply, however much the rest of the
+    # environment says otherwise.
     #
-    # This is separate from the pattern tables because composition is
-    # additive: under ghostty with a `TERM` of `xterm-256color`, the xterm
-    # entry would put blink back after the ghostty entry left it out. A name
-    # that identifies the terminal outranks one that only describes a family.
+    # Separate from the pattern tables because composition is additive: under
+    # ghostty with a `TERM` of `xterm-256color`, the xterm entry would put
+    # blink back after the ghostty entry left it out, and the `256color`
+    # pattern puts strike-through back on Terminal.app. A name that identifies
+    # the terminal outranks one that only describes a family.
+    DENIALS = [
+      {"ghostty", BLINKING},
+      # Terminal.app takes SGR 9 and draws the text unchanged.
+      {"apple_terminal", Capability::Strike},
+    ]
+
+    # :ditto:
     def denials(name : String?) : Capability
       return Capability::None unless name
 
-      name.downcase.includes?("ghostty") ? BLINKING : Capability::None
+      lowered = name.downcase
+      flags = Capability::None
+
+      DENIALS.each do |(candidate, denied)|
+        flags |= denied if lowered.includes? candidate
+      end
+
+      flags
     end
 
     private def denied(env : Hash(String, String)) : Capability
-      flags = denials(env["TERM"]?) | denials(env["TERM_PROGRAM"]?)
-      # The marker variable names the terminal as surely as `TERM` does.
-      flags |= BLINKING if present? env, "GHOSTTY_RESOURCES_DIR"
-      flags
+      denials(env["TERM"]?) | denials(identified(env))
+    end
+
+    # Which terminal is reading the output, as far as the environment says.
+    #
+    # `TERM_PROGRAM` wins, because a terminal writing its own name there is
+    # saying what it is; a marker variable naming something else was inherited
+    # from whatever opened the window and describes a terminal that is no
+    # longer in the picture. With no `TERM_PROGRAM`, a marker is the best name
+    # there is.
+    private def identified(env : Hash(String, String)) : String?
+      program = program_name env
+      return program if program
+
+      MARKER_VARIABLES.each do |(variable, terminal, _)|
+        return terminal if present? env, variable
+      end
+
+      nil
+    end
+
+    # The `TERM_PROGRAM` entry this environment matches, by the name the table
+    # knows it as.
+    private def program_name(env : Hash(String, String)) : String?
+      name = env["TERM_PROGRAM"]?
+      return unless name
+
+      PROGRAM_PATTERNS.each do |(candidate, _)|
+        return candidate.downcase if name.compare(candidate, case_insensitive: true).zero?
+      end
+
+      nil
     end
 
     private def dumb?(env : Hash(String, String)) : Bool
@@ -149,11 +197,19 @@ module TermBuf
       Capability::None
     end
 
+    # Marker variables, less any that name a terminal other than the one
+    # reading the output. Starting Terminal.app from a shell that had ghostty's
+    # environment leaves `GHOSTTY_RESOURCES_DIR` set, and taking that at face
+    # value hands Terminal.app the kitty graphics protocol.
     private def from_markers(env : Hash(String, String)) : Capability
+      named = identified env
       flags = Capability::None
 
-      MARKER_VARIABLES.each do |(name, capability)|
-        flags |= capability if present? env, name
+      MARKER_VARIABLES.each do |(variable, terminal, capability)|
+        next unless present? env, variable
+        next if named && !named.includes?(terminal)
+
+        flags |= capability
       end
 
       flags
