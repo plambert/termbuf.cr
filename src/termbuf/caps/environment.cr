@@ -1,4 +1,5 @@
 require "./capability"
+require "./quirk"
 
 module TermBuf
   # Guesses what a terminal can do from the environment it was started in.
@@ -130,6 +131,27 @@ module TermBuf
 
       DENIALS.each do |(candidate, denied)|
         flags |= denied if lowered.includes? candidate
+      end
+
+      flags
+    end
+
+    # Terminals that get a grapheme cluster's column count wrong, matched
+    # against the terminal that names itself the way `PROGRAM_PATTERNS` is. A
+    # terminal has to be measured before it goes in here; see `Quirk`.
+    QUIRK_PATTERNS = [
+      {"apple_terminal", Quirk::PerCodePointColumns},
+    ]
+
+    # What the terminal in *env* is known to get wrong.
+    def quirks(env : Hash(String, String)) : Quirk
+      named = identified env
+      return Quirk::None unless named
+
+      flags = Quirk::None
+
+      QUIRK_PATTERNS.each do |(candidate, quirk)|
+        flags |= quirk if named.includes? candidate
       end
 
       flags

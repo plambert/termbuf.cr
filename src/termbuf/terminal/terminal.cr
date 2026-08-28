@@ -147,7 +147,9 @@ module TermBuf
                    pending_input : Bytes = Bytes.empty,
                    warnings : Array(String) = [] of String,
                    @width_spec : String? = nil,
-                   @probe_widths : Bool = false)
+                   @probe_widths : Bool = false,
+                   @quirks : Quirk = Quirk::None,
+                   @detect_composed_drift : Bool = true)
       @size = size || @tty.size
       @buffer = Buffer.new @size.columns, @size.rows
       @screen = Region.new Rect.full(@size.columns, @size.rows)
@@ -169,7 +171,8 @@ module TermBuf
     # on its own.
     def self.open(input : IO = STDIN, output : IO = STDOUT,
                   env : Hash(String, String) = ENV.to_h,
-                  probe : Bool = true) : Terminal
+                  probe : Bool = true,
+                  detect_composed_drift : Bool = true) : Terminal
       tty = Tty.new input, output
 
       # Raw mode first, and only then ask the terminal anything. A cooked
@@ -190,7 +193,9 @@ module TermBuf
 
       terminal = new tty, resolved.capabilities, tty.size, resolved.input, resolved.warnings,
         width_spec: env[Unicode::WidthOverrides::VARIABLE]?,
-        probe_widths: probe && tty.managed?
+        probe_widths: probe && tty.managed?,
+        quirks: resolved.quirks,
+        detect_composed_drift: detect_composed_drift
       terminal.start
       terminal
     end
@@ -198,8 +203,9 @@ module TermBuf
     # Opens a terminal, yields it, and closes it however the block ends.
     def self.open(input : IO = STDIN, output : IO = STDOUT,
                   env : Hash(String, String) = ENV.to_h,
-                  probe : Bool = true, & : Terminal ->) : Nil
-      terminal = open input, output, env, probe
+                  probe : Bool = true,
+                  detect_composed_drift : Bool = true, & : Terminal ->) : Nil
+      terminal = open input, output, env, probe, detect_composed_drift
 
       begin
         yield terminal
@@ -230,12 +236,30 @@ module TermBuf
     # because the samples have to go somewhere and the screen the person was
     # looking at is not it. Before the reader starts, because the replies would
     # otherwise arrive as keystrokes.
+    # What this terminal is known to get wrong. See `Quirk`.
+    getter quirks : Quirk
+
+    # Whether to give the screen back and say so on stderr the first time a
+    # cluster this terminal will misplace is drawn.
+    #
+    # An application that handles `Events::Warning` itself will want this off:
+    # the event arrives either way, and being pulled out of the alternate
+    # screen mid-frame is worse than a message it chose where to put. On by
+    # default, since a terminal quietly misrendering is the thing being
+    # guarded against.
+    property? warn_composed_drift : Bool = true
+
     private def measure_widths : Nil
       measured = Unicode::WidthPolicy::DEFAULT
 
       if @probe_widths && Unicode::WidthOverrides.probe?(@width_spec)
         result = WidthProbe.run @tty.input, @tty.output, measured
-        measured = result.policy
+        # A terminal counting columns per code point answers the probe with
+        # that count, so its answers describe its bookkeeping rather than what
+        # it draws: it reports one column for a variation selector emoji and
+        # paints two. Taking those answers as rules would have the buffer place
+        # text under the glyph. The tables are the better guess here.
+        measured = result.policy unless @quirks.per_code_point_columns?
         @width_readings = result.readings
         @pending_input = keep @pending_input, result.input
         note_width_disagreements result
@@ -246,6 +270,8 @@ module TermBuf
 
       @widths = overrides.policy
       @buffer.policy = @widths
+      @painter.watch_composed_drift = @detect_composed_drift &&
+                                      @quirks.per_code_point_columns?
     end
 
     # Terminals reach conclusions this design has no rule for. Naming what is
@@ -550,10 +576,59 @@ module TermBuf
       @total_paint_bytes += @meter.bytes
 
       @buffer.commit_paint
+      report_composed_drift
       command.reply.try &.send nil
     rescue error
       reply = command.reply
       reply ? reply.send(error) : emit(Events::Failure.new(error))
+    end
+
+    # Says so, once, when a cluster this terminal will misplace has gone out.
+    #
+    # The message goes to stderr as well as to the events, which is the one
+    # exception to warnings staying off it: the screen is handed back first,
+    # so there is nothing to corrupt, and an application that never reads its
+    # events would otherwise watch the display come apart with no explanation.
+    # `#warn_composed_drift=` turns the screen half off and leaves the event.
+    private def report_composed_drift : Nil
+      cluster = @painter.take_composed_drift
+      return unless cluster
+
+      columns = @buffer.clusters.code_point_columns @buffer.clusters.id(cluster, @widths)
+      ours = Unicode.string_width cluster, @widths
+      short = (columns - ours).abs
+      message = "this terminal counts a grapheme cluster's columns by adding up its code " \
+                "points, so #{cluster.inspect} takes #{columns} columns where it is drawn in " \
+                "#{ours}. Everything after it on that row is #{short} columns out of step with " \
+                "every other row, and the last #{short} columns of it cannot be reached at all."
+
+      emit Events::Warning.new(message)
+      return unless @warn_composed_drift
+
+      say_aside message
+      repaint_in_place
+    end
+
+    # Writes *message* where the application can see it, with the screen given
+    # back for as long as it takes.
+    private def say_aside(message : String) : Nil
+      @tty.output << "\e[?1049l" if @capabilities.includes? Capability::AltScreen
+      @tty.flush
+      STDERR.puts "termbuf: #{message}"
+      STDERR.flush
+      @tty.output << "\e[?1049h" if @capabilities.includes? Capability::AltScreen
+      @tty.flush
+    rescue IO::Error
+      # The terminal has gone; there is nobody left to tell.
+    end
+
+    # A forced repaint from inside the owning fibre, which cannot send itself a
+    # command and wait for it.
+    private def repaint_in_place : Nil
+      @buffer.invalidate
+      @encoder.reset_state
+      @painter.reset_state
+      perform_paint Commands::Paint.new(false, nil)
     end
 
     private def perform_resize(size : ScreenSize) : Nil

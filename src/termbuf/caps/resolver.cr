@@ -32,7 +32,9 @@ module TermBuf
       # What the terminal called itself, when it was asked and answered.
       name : String?,
       # Whether the terminal answered anything at all.
-      probed : Bool
+      probed : Bool,
+      # What this terminal is known to get wrong. See `Quirk`.
+      quirks : Quirk
 
     # Runs the four stages. Probes only when both *input* and *output* are
     # given.
@@ -54,8 +56,10 @@ module TermBuf
       end
 
       overridden = CapabilityOverrides.apply detected, env
+      quirks = QuirkOverrides.apply EnvironmentDetector.quirks(env), env
 
-      Result.new overridden.capabilities, keystrokes, overridden.warnings, name, probed
+      Result.new overridden.capabilities, keystrokes,
+        overridden.warnings + quirks.warnings, name, probed, quirks.quirks
     end
   end
 end

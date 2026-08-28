@@ -182,7 +182,7 @@ module TermBuf
         Cell.new char, style, grapheme.width.to_u8
       else
         text = grapheme.text source
-        Cell.new text[0], style, grapheme.width.to_u8, @clusters.id(text)
+        Cell.new text[0], style, grapheme.width.to_u8, @clusters.id(text, @policy)
       end
     end
 
@@ -301,7 +301,7 @@ module TermBuf
 
       cluster = cell.cluster
       unless cluster == ClusterPool::NONE
-        cluster = clusters[cell.cluster] ||= @clusters.id source.clusters[cell.cluster]
+        cluster = clusters[cell.cluster] ||= @clusters.id source.clusters[cell.cluster], @policy
       end
 
       Cell.new cell.char, style, cell.width, cluster

@@ -6,6 +6,24 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `Quirk`, a flags enum beside `Capability` for what a terminal gets wrong rather than what it can
+  do, with `TERMBUF_QUIRKS` to override detection. ([#6])
+- `Quirk::PerCodePointColumns`: Terminal.app counts a grapheme cluster's columns by adding up its
+  code points, so `👨‍👩‍👧‍👦` owns eleven columns and is painted in two, and everything after it on
+  that row is nine columns out of step with every other row. The first such cluster drawn is
+  reported on stderr with the alternate screen handed back, and as an `Events::Warning`.
+  `Terminal.open(detect_composed_drift: false)` switches the check off; `#warn_composed_drift=`
+  keeps it and leaves the screen alone. ([#6])
+- `Unicode.code_point_columns`, the column count such a terminal takes for a string.
+
+### Fixed
+
+- The width probe's answers are ignored on a terminal with `Quirk::PerCodePointColumns`. It reports
+  the columns it counts rather than the ones it paints — one for a variation selector emoji it
+  draws in two — so taking those as rules had the buffer place text under the glyph. ([#6])
+
 ## [0.1.5] - 2026-08-28
 
 ### Fixed
@@ -157,3 +175,4 @@ First release. Everything below is new.
 [#3]: https://github.com/plambert/termbuf.cr/issues/3
 [#4]: https://github.com/plambert/termbuf.cr/issues/4
 [#5]: https://github.com/plambert/termbuf.cr/issues/5
+[#6]: https://github.com/plambert/termbuf.cr/issues/6

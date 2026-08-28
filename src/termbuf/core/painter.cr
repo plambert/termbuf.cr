@@ -48,6 +48,26 @@ module TermBuf
     @cursor_shown = false
     @cursor_placed : {Int32, Int32}? = nil
 
+    # A cluster the terminal will put in the wrong place, noticed on its way
+    # out, or `nil` while none has been. Read and cleared by the driver, which
+    # is what turns it into a warning.
+    #
+    # Only watched for under `Quirk::PerCodePointColumns`, and only until the
+    # first one: after that the application has been told, and the cost of
+    # looking goes back to a boolean nothing reads.
+    getter composed_drift : String? = nil
+
+    # Whether to look. False on every terminal that measures clusters the way
+    # this does, and false again once one has been found.
+    property? watch_composed_drift : Bool = false
+
+    # Forgets the cluster that was found, so the next one is reported too.
+    def take_composed_drift : String?
+      found = @composed_drift
+      @composed_drift = nil
+      found
+    end
+
     def initialize(@capabilities : Capabilities)
     end
 
@@ -389,11 +409,22 @@ module TermBuf
     private def run_text(buffer : Buffer, row : Int32, from : Int32, to : Int32) : String
       back = buffer.back
       pool = buffer.clusters
+      watch = @watch_composed_drift
 
       String.build do |io|
         (from..to).each do |column|
           cell = back[column, row]
           next if cell.continuation?
+
+          # Hoisted out of the loop and false on any terminal that measures a
+          # cluster the way this does, so the usual cost is one predictable
+          # branch per run. A cell with no cluster never gets past the second
+          # test, and one that does was already taking the slow path.
+          if watch && cell.cluster != ClusterPool::NONE &&
+             pool.code_point_columns(cell.cluster) != cell.width
+            @composed_drift = cell.text pool
+            watch = @watch_composed_drift = false
+          end
 
           io << cell.text(pool)
         end

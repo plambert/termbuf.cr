@@ -1,4 +1,5 @@
 require "./caps/capability"
+require "./caps/quirk"
 require "./caps/response_scanner"
 require "./caps/environment"
 require "./caps/overrides"
