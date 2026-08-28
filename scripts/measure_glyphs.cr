@@ -35,7 +35,13 @@
 # Run it in the terminal being measured, with the font small and the window
 # large. It needs permission to record the screen, which it inherits from the
 # terminal it is running in — so run it from that terminal rather than from
-# somewhere else.
+# somewhere else, and from an instance started after the permission was granted,
+# since a process is told what it may do when it starts.
+#
+# Terminal.app will say where its window is and only that window is
+# photographed. No other terminal here will, so any other one has to be run
+# fullscreen: the picture is then the whole screen, and the window is the only
+# thing on it.
 require "../src/termbuf"
 require "./glyph_samples"
 
@@ -79,7 +85,7 @@ class Sheet
 
   def draw(page : Array(Sample)) : Nil
     @tty.output << String.build do |io|
-      io << "\e[2J\e[H"
+      io << "\e[?25l\e[2J\e[H"
       CALIBRATION_STEPS.times { |step| io << at(step, step) << '|' }
 
       page.each_with_index do |sample, index|
@@ -94,8 +100,12 @@ class Sheet
 
   def photograph(number : Int32) : String
     path = File.join @directory, "page-#{number.to_s.rjust 2, '0'}.png"
-    # Only the terminal's own window, not the screen it happens to be on.
-    Process.run "screencapture", ["-x", "-R#{@bounds}", path]
+    # Only the terminal's own window, not the screen it happens to be on --
+    # where the terminal will say where its window is. Where it will not, the
+    # window has to be the whole screen instead, and the caller has to have
+    # made it so; see `window_bounds`.
+    arguments = @bounds.empty? ? ["-x", path] : ["-x", "-R#{@bounds}", path]
+    Process.run "screencapture", arguments
     path
   end
 
@@ -107,7 +117,14 @@ class Sheet
 end
 
 # Where the window is, so the picture is of it and nothing else.
+#
+# Only Terminal.app will answer this. Nothing else here is scriptable enough to
+# ask, and taking the whole screen instead would photograph whatever else is on
+# it -- so for any other terminal the window has to *be* the whole screen, run
+# fullscreen, and the empty string says to take it whole.
 def window_bounds : String
+  return "" unless ENV["TERM_PROGRAM"]? == "Apple_Terminal"
+
   script = <<-APPLESCRIPT
     tell application "Terminal"
       set b to bounds of front window
@@ -125,7 +142,6 @@ end
 directory = ARGV[0]? || "tmp/glyphs"
 Dir.mkdir_p directory
 bounds = window_bounds
-abort "cannot find the terminal window; run this inside Terminal.app" if bounds.empty?
 
 manifest = [] of String
 taken_pages = 0
@@ -164,6 +180,8 @@ begin
     taken_samples += page.size
   end
 ensure
+  tty.output << "\e[?25h"
+  tty.output.flush
   tty.leave TermBuf::Capabilities::ANSI
 end
 
