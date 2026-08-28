@@ -22,6 +22,14 @@ All notable changes to this project are documented here. The format follows
   the style supplies the rest, for text over a background that varies under it — a label across a
   progress bar. ([#4])
 
+### Fixed
+
+- A `fill`, `scroll`, or `blit` whose edge landed inside a wide character gave the half lying
+  outside the rectangle the incoming style, so the operation painted a column wider than it was —
+  on the rows where a character straddled, and not on the others. That half now keeps the style it
+  had and loses only its glyph. `Grid#place` is unchanged: a terminal erases what it displaces in
+  whatever style it is writing in, and that is what typing over half a character should do.
+
 ### Changed
 
 - `PasteNotice` draws through a styled view, so its label is cut at the panel edge rather than

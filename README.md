@@ -167,6 +167,12 @@ named in the style is ignored. A cluster covering two cells takes the colour of 
 half lands on. `#write_char` takes the same argument, and it survives a view's translation and
 clipping.
 
+A `fill`, `scroll`, or `blit` whose edge falls inside a wide character takes the whole character —
+half of one cannot be drawn — and the half lying outside the rectangle keeps the style it had,
+losing only its glyph. So a panel over CJK text is the width it says it is on every row. Writing a
+character over half of one is different: there the displaced half is erased in the style being
+written, which is what a terminal does.
+
 This is clipping, not layering: nothing says a view is on top of anything. Dismissing a panel means
 the next frame does not draw it, and the paint diff then sends the cells it covered and nothing
 else — a batched full frame is the cheap way to do this, not a workaround for the lack of layers.
