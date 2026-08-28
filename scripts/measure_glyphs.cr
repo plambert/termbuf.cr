@@ -26,6 +26,12 @@
 # first row would then measure the pen rather than the paint. The bare row does
 # not depend on which kind it is.
 #
+# Nothing here goes through `Buffer`, `Painter` or the capability probe. An
+# instrument has no business running through what it is measuring, and a
+# terminal that puts the pen somewhere unexpected leaves the encoder's idea of
+# the cursor wrong for the rest of the frame — so a screen clear erases the
+# wrong columns and the last page stays on screen underneath this one.
+#
 # Run it in the terminal being measured, with the font small and the window
 # large. It needs permission to record the screen, which it inherits from the
 # terminal it is running in — so run it from that terminal rather than from
@@ -149,33 +155,40 @@ def samples : Array(Sample)
 end
 
 # Writes one page of samples and photographs it.
+#
+# Everything goes out as escape sequences rather than through `Buffer` and
+# `Painter`. An instrument has no business running through the thing it is
+# measuring: on a terminal that puts the pen somewhere the encoder did not
+# predict, the encoder's idea of the cursor is wrong for the rest of the frame,
+# and the erases a screen clear turns into land in the wrong columns — which is
+# how a page ended up with the last page's bars still on it.
+#
+# Every row is anchored with an absolute position of its own, so a sample that
+# moves the pen unexpectedly can only spoil its own row. Within a row the text
+# is written in one go, because where the bar lands is the measurement.
 class Sheet
-  getter written = [] of Sample
-
-  def initialize(@terminal : TermBuf::Terminal, @bounds : String, @directory : String)
+  def initialize(@tty : TermBuf::Tty, @bounds : String, @directory : String)
   end
 
   # Rows a page can hold: everything below the staircase, less one so a tall
   # glyph on the last row has somewhere to overhang.
   def capacity : Int32
-    @terminal.size.rows - CALIBRATION_STEPS - 1
+    @tty.size.rows - CALIBRATION_STEPS - 1
   end
 
   def draw(page : Array(Sample)) : Nil
-    @written = page
-
-    @terminal.batch do |screen|
-      screen.clear
-      CALIBRATION_STEPS.times { |step| screen.write_char step, step, '|' }
+    @tty.output << String.build do |io|
+      io << "\e[2J\e[H"
+      CALIBRATION_STEPS.times { |step| io << at(step, step) << '|' }
 
       page.each_with_index do |sample, index|
         row = CALIBRATION_STEPS + index * 2
-        screen.write 0, row, "#{sample.text}#{" " * PAD}|"
-        screen.write 0, row + 1, sample.text
+        io << at(0, row) << sample.text << " " * PAD << '|'
+        io << at(0, row + 1) << sample.text
       end
     end
 
-    @terminal.paint
+    @tty.output.flush
   end
 
   def photograph(number : Int32) : String
@@ -183,6 +196,12 @@ class Sheet
     # Only the terminal's own window, not the screen it happens to be on.
     Process.run "screencapture", ["-x", "-R#{@bounds}", path]
     path
+  end
+
+  # Cursor position, which counts from one where everything else here counts
+  # from zero.
+  private def at(column : Int32, row : Int32) : String
+    "\e[#{row + 1};#{column + 1}H"
   end
 end
 
@@ -207,43 +226,50 @@ Dir.mkdir_p directory
 bounds = window_bounds
 abort "cannot find the terminal window; run this inside Terminal.app" if bounds.empty?
 
-pages = [] of Array(Sample)
 manifest = [] of String
-rows_used = 0
+taken_pages = 0
+taken_samples = 0
 
-TermBuf::Terminal.open do |terminal|
-  sheet = Sheet.new terminal, bounds, directory
+# The alternate screen and raw mode, and nothing else. No probing, no width
+# measurement, no buffer: whatever ends up on the screen came from the escape
+# sequences below and from the terminal's own opinion of them.
+tty = TermBuf::Tty.standard
+tty.enter TermBuf::Capabilities::ANSI
+rows_used = tty.size.rows
+
+begin
+  sheet = Sheet.new tty, bounds, directory
   remaining = samples
-  page = 0
-  rows_used = terminal.size.rows
 
   # Two rows a sample, so a page holds half what it looks like it might.
   per_page = Math.max sheet.capacity // 2, 1
 
   while remaining.present?
-    taken = remaining[0, per_page]
-    remaining = remaining[taken.size..]
-    page += 1
+    page = remaining[0, per_page]
+    remaining = remaining[page.size..]
+    taken_pages += 1
 
-    sheet.draw taken
+    sheet.draw page
     sleep 400.milliseconds
-    sheet.photograph page
+    sheet.photograph taken_pages
     sleep 200.milliseconds
 
-    taken.each_with_index do |sample, index|
-      manifest << [page, CALIBRATION_STEPS + index * 2,
+    page.each_with_index do |sample, index|
+      manifest << [taken_pages, CALIBRATION_STEPS + index * 2,
                    sample.text.codepoints.map { |point| "%04X" % point }.join('+'),
                    sample.group, sample.note].join('\t')
     end
 
-    pages << taken
+    taken_samples += page.size
   end
+ensure
+  tty.leave TermBuf::Capabilities::ANSI
 end
 
 File.write File.join(directory, "manifest.tsv"),
   (["# pad=#{PAD} steps=#{CALIBRATION_STEPS} rows=#{rows_used}",
     "page\tbar_row\tcodepoints\tgroup\tnote"] + manifest).join('\n') + "\n"
 
-puts "#{pages.sum &.size} samples over #{pages.size} pages in #{directory}"
+puts "#{taken_samples} samples over #{taken_pages} pages in #{directory}"
 puts "pad=#{PAD} steps=#{CALIBRATION_STEPS} rows=#{rows_used} bounds=#{bounds}"
 puts "now: python3 scripts/read_glyphs.py #{directory}"
