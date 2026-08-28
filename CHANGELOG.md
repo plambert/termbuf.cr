@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.1.5] - 2026-08-28
+
 ### Fixed
 
 - A marker variable left in the environment by whatever opened the window no longer outranks the
@@ -143,7 +145,8 @@ First release. Everything below is new.
 - OSC 8 links, kitty graphics, and the kitty colour stack are detected but not emitted.
 - Mouse reporting is not enabled or decoded.
 
-[Unreleased]: https://github.com/plambert/termbuf.cr/compare/v0.1.4...HEAD
+[Unreleased]: https://github.com/plambert/termbuf.cr/compare/v0.1.5...HEAD
+[0.1.5]: https://github.com/plambert/termbuf.cr/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/plambert/termbuf.cr/compare/v0.1.3...v0.1.4
 [0.1.3]: https://github.com/plambert/termbuf.cr/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/plambert/termbuf.cr/compare/v0.1.1...v0.1.2
