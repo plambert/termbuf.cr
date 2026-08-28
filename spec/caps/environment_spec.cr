@@ -96,12 +96,61 @@ Spectator.describe TermBuf::EnvironmentDetector do
       expect(detect({"TERM" => "xterm-256color"}).includes?(Cap::Blink)).to be_true
     end
 
-    it "stops Terminal.app at the 256 colour palette" do
-      caps = detect({"TERM" => "xterm-256color", "TERM_PROGRAM" => "Apple_Terminal"})
+    # Measured in Terminal.app 470.2: a 64 step ramp of one hue comes out
+    # smooth, where the palette bands it. 24 bit colour arrived with the
+    # version that ships on macOS Tahoe.
+    it "gives a current Terminal.app 24 bit colour but no kitty protocol" do
+      caps = detect({"TERM"                 => "xterm-256color",
+                     "TERM_PROGRAM"         => "Apple_Terminal",
+                     "TERM_PROGRAM_VERSION" => "470.2"})
 
       expect(caps.includes?(Cap::Color256)).to be_true
-      expect(caps.includes?(Cap::TrueColor)).to be_false
+      expect(caps.includes?(Cap::TrueColor)).to be_true
       expect(caps.includes?(Cap::KittyGraphics)).to be_false
+      expect(caps.includes?(Cap::Osc8Links)).to be_false
+    end
+
+    it "stops an earlier Terminal.app at the palette" do
+      caps = detect({"TERM"                 => "xterm-256color",
+                     "TERM_PROGRAM"         => "Apple_Terminal",
+                     "TERM_PROGRAM_VERSION" => "455"})
+
+      expect(caps.includes?(Cap::TrueColor)).to be_false
+      expect(caps.includes?(Cap::Color256)).to be_true
+    end
+
+    it "takes the version at the boundary" do
+      below = detect({"TERM_PROGRAM" => "Apple_Terminal", "TERM_PROGRAM_VERSION" => "463.99"})
+      at = detect({"TERM_PROGRAM" => "Apple_Terminal", "TERM_PROGRAM_VERSION" => "464"})
+
+      expect(below.includes?(Cap::TrueColor)).to be_false
+      expect(at.includes?(Cap::TrueColor)).to be_true
+    end
+
+    # Worst case when there is nothing to go on: Terminal.app answers no query
+    # that would settle it, so an unreadable version is treated as too old.
+    it "assumes the palette when the version says nothing" do
+      %w[nonsense].push("").each do |version|
+        caps = detect({"TERM_PROGRAM" => "Apple_Terminal", "TERM_PROGRAM_VERSION" => version})
+
+        expect(caps.includes?(Cap::TrueColor)).to be_false
+      end
+
+      expect(detect({"TERM_PROGRAM" => "Apple_Terminal"}).includes?(Cap::TrueColor)).to be_false
+    end
+
+    it "outranks a COLORTERM inherited from whatever opened the window" do
+      caps = detect({"TERM"                 => "xterm-256color",
+                     "TERM_PROGRAM"         => "Apple_Terminal",
+                     "TERM_PROGRAM_VERSION" => "455",
+                     "COLORTERM"            => "truecolor"})
+
+      expect(caps.includes?(Cap::TrueColor)).to be_false
+    end
+
+    it "leaves COLORTERM alone for every other terminal" do
+      expect(detect({"TERM" => "xterm", "COLORTERM" => "truecolor"}).includes?(Cap::TrueColor))
+        .to be_true
     end
 
     it "matches without regard to case" do
@@ -145,6 +194,94 @@ Spectator.describe TermBuf::EnvironmentDetector do
       expect(detect({"TERM" => "xterm", "VTE_VERSION" => "6003"}).includes?(Cap::TrueColor)).to be_true
       expect(detect({"TERM" => "xterm", "VTE_VERSION" => "6003"}).includes?(Cap::Osc8Links)).to be_true
       expect(detect({"TERM" => "xterm", "VTE_VERSION" => "3400"}).includes?(Cap::TrueColor)).to be_false
+    end
+  end
+
+  # Starting one terminal from a shell that had another's environment leaves
+  # the first one's marker behind. Terminal.app opened from ghostty came back
+  # claiming the kitty graphics protocol and 24 bit colour.
+  describe "when the terminal names itself" do
+    # What Terminal.app 470.2 actually reports when opened from ghostty.
+    let(inherited) do
+      {"TERM"                  => "xterm-256color",
+       "TERM_PROGRAM"          => "Apple_Terminal",
+       "TERM_PROGRAM_VERSION"  => "470.2",
+       "COLORTERM"             => "truecolor",
+       "GHOSTTY_RESOURCES_DIR" => "/Applications/Ghostty.app/Contents/Resources/ghostty"}
+    end
+
+    it "ignores a marker left by whatever opened the window" do
+      caps = detect inherited
+
+      expect(caps.includes?(Cap::KittyGraphics)).to be_false
+      expect(caps.includes?(Cap::KittyColorStack)).to be_false
+      expect(caps.includes?(Cap::KittyKeyboard)).to be_false
+      expect(caps.includes?(Cap::Osc8Links)).to be_false
+      expect(caps.includes?(Cap::SynchronizedOutput)).to be_false
+    end
+
+    it "keeps what the named terminal does have" do
+      caps = detect inherited
+
+      expect(caps.includes?(Cap::Bold)).to be_true
+      expect(caps.includes?(Cap::AltScreen)).to be_true
+      expect(caps.includes?(Cap::BracketedPaste)).to be_true
+      expect(caps.includes?(Cap::Color256)).to be_true
+      # 470.2 is new enough for 24 bit colour; an older one would not be.
+      expect(caps.includes?(Cap::TrueColor)).to be_true
+    end
+
+    # The 256colour TERM pattern would otherwise put it back.
+    it "takes strike-through off Terminal.app whatever TERM says" do
+      expect(detect(inherited).includes?(Cap::Strike)).to be_false
+      expect(detect({"TERM" => "xterm-256color"}).includes?(Cap::Strike)).to be_true
+    end
+
+    # Blink comes off under ghostty. Inheriting ghostty's marker must not take
+    # it off a terminal that has it, any more than it adds kitty graphics.
+    it "does not carry the other terminal's denials either" do
+      expect(detect(inherited).includes?(Cap::Blink)).to be_true
+    end
+
+    it "keeps a marker the named terminal set itself" do
+      caps = detect({"TERM"                  => "xterm-256color",
+                     "TERM_PROGRAM"          => "ghostty",
+                     "GHOSTTY_RESOURCES_DIR" => "/x"})
+
+      expect(caps.includes?(Cap::KittyGraphics)).to be_true
+      expect(caps.includes?(Cap::Blink)).to be_false
+    end
+
+    it "still trusts a marker when nothing names the terminal" do
+      caps = detect({"TERM" => "xterm-256color", "GHOSTTY_RESOURCES_DIR" => "/x"})
+
+      expect(caps.includes?(Cap::KittyGraphics)).to be_true
+      expect(caps.includes?(Cap::Blink)).to be_false
+    end
+
+    it "still trusts a marker when TERM_PROGRAM names nothing it knows" do
+      caps = detect({"TERM"         => "xterm-256color",
+                     "TERM_PROGRAM" => "something-unheard-of",
+                     "WEZTERM_PANE" => "0"})
+
+      expect(caps.includes?(Cap::KittyGraphics)).to be_true
+    end
+
+    it "matches a marker to the terminal that names itself, whatever the case" do
+      caps = detect({"TERM"         => "xterm-256color",
+                     "TERM_PROGRAM" => "WezTerm",
+                     "WEZTERM_PANE" => "0"})
+
+      expect(caps.includes?(Cap::KittyGraphics)).to be_true
+    end
+
+    it "drops a foreign marker under any named terminal, not only Terminal.app" do
+      caps = detect({"TERM"            => "xterm-256color",
+                     "TERM_PROGRAM"    => "iTerm.app",
+                     "KITTY_WINDOW_ID" => "1"})
+
+      expect(caps.includes?(Cap::KittyGraphics)).to be_false
+      expect(caps.includes?(Cap::TrueColor)).to be_true
     end
   end
 
