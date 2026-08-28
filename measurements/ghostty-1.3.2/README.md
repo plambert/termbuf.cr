@@ -1,9 +1,7 @@
 # Ghostty 1.3.2
 
-Counted width only. The photographic half of this run is missing and the reason is worth
-recording: the screen was locked, so nothing composited, and `screencapture` returned the
-wallpaper on every page. Escape sequences do not care whether anyone is logged in at the
-console, so `CPR` answered normally and this file is sound.
+The same sixty seven clusters as the Terminal.app runs beside this one, in a terminal that
+disagrees with it about nearly everything.
 
 Taken on 2026-08-28:
 
@@ -11,33 +9,73 @@ Taken on 2026-08-28:
 |---|---|
 | terminal | Ghostty 1.3.2-main-+55a3e33ab |
 | system | macOS 26.5.2, build 25F84 |
-| font | SF Mono 11, in an instance started with `config-default-files=false` |
-| window | 123 columns at launch, 64 rows once fullscreen |
+| font | SF Mono 11 |
+| window | 265 columns, 64 rows, fullscreen |
+| geometry read from the pictures | cell 13 px, row 29 px |
 
-The instance was thrown away afterwards. It loaded none of the user's configuration, so the
-colours, font and padding here are the ones on the command line and nothing else.
+Run in a throwaway instance started with `config-default-files=false` and a config of its own, so
+it read none of the user's settings: the colours, font, padding and fullscreen here are that file
+and nothing else. It was fullscreen because Ghostty cannot be asked where its window is, so the
+picture is the whole screen and the window has to be the only thing on it.
 
-## Ghostty counts clusters; Terminal.app counts code points
+## The pen does not leave the grid
 
 | | of 67 |
 |---|---|
-| Ghostty's count == our cluster width | 62 |
-| Ghostty's count == per-code-point sum | 40 |
-| Ghostty's count == Terminal.app's count | 41 |
+| advance == what it counted | **67** |
+| advance == drawn | 56 |
+| our cluster width == advance | 62 |
+| our cluster width == drawn | 53 |
+| per-code-point sum == advance | 40 |
 
-Terminal.app is the mirror image of this — 64 of 67 on the per-code-point sum. The two
-terminals agree with each other on 41 of 67, so the disagreement is not a rounding difference
-in one table but two different ideas of what a column is charged to.
+**Every cluster advances by exactly the width it was charged.** Terminal.app manages 40 of 67
+against its own count, because it lets the shaped advance drive the pen and counts columns
+separately; Ghostty places each cluster at a cell origin, so the two cannot drift apart. Nothing
+here lands on top of the character before it, and the two terminals agree on advance and drawn
+together in only 36 of 67.
 
-`👨‍👩‍👧‍👦` counts 2 here and 11 there. **`Quirk::PerCodePointColumns` does not belong to
-Ghostty**, and none of what it causes on Terminal.app — the unreachable tail of a row, 14
-families to a 155 column line, a cluster torn in half by a `CUP` into its middle — happens here.
+## What goes wrong here instead
+
+The grid holds, so the failure moves into the ink: eleven clusters are painted wider than the
+cells they were given, and spill over the neighbour.
+
+| cluster | advance | drawn | Terminal.app adv/drawn | |
+|---|---|---|---|---|
+| `ﷺ` arabic ligature | 1 | 3 | 1/2 | |
+| `❤` text presentation | 1 | 2 | 1/1 | |
+| `🏳` no presentation | 1 | 2 | 1/2 | |
+| `👨‍👩` | 2 | 4 | 4/4 | the uncomposed pair |
+| `1⃣` keycap without a selector | 1 | 2 | 1/2 | |
+| `a⃝` combining enclosing circle | 1 | 2 | 2/2 | |
+| `a҈` combining cyrillic sign | 1 | 2 | 2/2 | |
+| `நோ` tamil, two part vowel | 2 | 3 | 3/3 | |
+| `ক্ষ` bengali conjunct | 2 | 3 | 1/2 | |
+| `క్ష` telugu conjunct | 2 | 4 | 1/1 | |
+| `กำำ` two sara am | 2 | 3 | 5/5 | |
+
+`👨‍👩` is the clearest of them. Neither terminal has a glyph for it, so both draw the two faces
+side by side across four columns — but Terminal.app moves the pen to match the ink and Ghostty
+does not. Here the pair is charged 2, drawn across 4, and whatever is written next goes into the
+third column, on top of the second face. **A cluster's ink can outlive its cells, so a neighbour
+written afterwards needs the cells beneath it repainted.**
+
+## Counted width: Ghostty counts clusters
+
+| | of 67 |
+|---|---|
+| == our cluster width | 62 |
+| == per-code-point sum | 40 |
+| == what Terminal.app counted | 41 |
+
+Terminal.app is the mirror image at 64 of 67 on the per-code-point sum. `👨‍👩‍👧‍👦` counts 2 here
+and 11 there; the tag flag counts 2 here and 8 there. **`Quirk::PerCodePointColumns` is
+Terminal.app's alone** — measured now, not assumed — and none of what it causes there happens
+here: no unreachable tail to a row, no fourteen families to a line, no cluster torn in half by a
+`CUP` into its middle.
 
 ## Five clusters where both terminals disagree with us
 
-Our cluster width predicts Ghostty in 62 of 67. In every one of the five it misses, Terminal.app
-counted the same as Ghostty, which makes this the strongest evidence yet that the table rather
-than the terminal is wrong:
+In all five our cluster width misses, Terminal.app counted the same as Ghostty:
 
 | cluster | both terminals | our cluster width |
 |---|---|---|
@@ -47,19 +85,14 @@ than the terminal is wrong:
 | `ক্ষ` bengali conjunct | 2 | 1 |
 | `క్ష` telugu conjunct | 2 | 1 |
 
-Four are under-counts by us and one is an over-count. The three conjuncts are the same shape
-and the same answer three times over. The tables are left alone pending a decision.
+Two independent implementations reaching the same answer is the best evidence available that the
+table is what needs changing. The three conjuncts are the same shape and the same answer three
+times. The tables are left alone pending a decision.
 
 ## Files
 
-* `counted.tsv` — counted width with both models beside it, from `scripts/measure_columns.cr`.
-
-To finish the run, unlock the screen and take the photographic half:
-
-```bash
-crystal run scripts/measure_glyphs.cr -- measurements/ghostty-1.3.2
-python3 scripts/read_glyphs.py measurements/ghostty-1.3.2
-```
-
-It must run in a Ghostty started *after* screen recording was granted, and fullscreen, since
-Ghostty cannot be asked where its window is and the picture is therefore the whole screen.
+* `page-*.png` — the pages as photographed, in LFS.
+* `manifest.tsv` — which sample is on which row of which page.
+* `measured.tsv` — advance and drawn. Regenerate with
+  `python3 scripts/read_glyphs.py measurements/ghostty-1.3.2`.
+* `counted.tsv` — counted width, with both models beside it.
