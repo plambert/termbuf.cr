@@ -612,12 +612,24 @@ module TermBuf
     # Writes *message* where the application can see it, with the screen given
     # back for as long as it takes.
     private def say_aside(message : String) : Nil
-      @tty.output << "\e[?1049l" if @capabilities.includes? Capability::AltScreen
+      alternate = @capabilities.includes? Capability::AltScreen
+
+      @tty.output << "\e[?1049l" if alternate
       @tty.flush
       STDERR.puts "termbuf: #{message}"
       STDERR.flush
-      @tty.output << "\e[?1049h" if @capabilities.includes? Capability::AltScreen
+
+      # The alternate screen keeps its own cursor visibility, so coming back
+      # to it undoes the hide that `Tty#enter` did. Without this the cursor
+      # reappears and, with nothing placing it, sits wherever each frame's last
+      # run happened to end.
+      @tty.output << "\e[?1049h" if alternate
+      @tty.output << "\e[?25l"
       @tty.flush
+      # The repaint that follows resets the painter, which is what puts the
+      # cursor back on a screen that wants one showing.
+
+
     rescue IO::Error
       # The terminal has gone; there is nobody left to tell.
     end
