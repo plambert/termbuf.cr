@@ -1215,6 +1215,41 @@ Spectator.describe TermBuf::ResponseRegistry do
       end
     end
 
+    # The alternate screen keeps its own cursor visibility, so coming back to
+    # it undoes the hide that entering did. Left alone, the cursor reappears
+    # and wanders to wherever each frame's last run ended.
+    it "hides the cursor again after coming back" do
+      with_harness quirks: TermBuf::Quirk::PerCodePointColumns,
+        capabilities: TermBuf::Capabilities::MODERN do |harness|
+        harness.terminal.write 0, 0, FAMILY
+        harness.terminal.paint
+        harness.event_of TermBuf::Events::Warning
+
+        written = harness.drain
+        enter = written.rindex("\e[?1049h") || -1
+        hide = written.index("\e[?25l", enter < 0 ? 0 : enter) || -1
+
+        expect(enter).to be >= 0
+        expect(hide).to be > enter
+      end
+    end
+
+    it "puts a wanted cursor back after coming back" do
+      with_harness quirks: TermBuf::Quirk::PerCodePointColumns,
+        capabilities: TermBuf::Capabilities::MODERN do |harness|
+        harness.terminal.hardware_cursor = harness.terminal.cursor
+        harness.terminal.write 0, 0, FAMILY
+        harness.terminal.paint
+        harness.event_of TermBuf::Events::Warning
+
+        written = harness.drain
+        enter = written.rindex("\e[?1049h") || -1
+
+        # Shown again by the repaint that follows, rather than left hidden.
+        expect(written.index("\e[?25h", enter < 0 ? 0 : enter)).not_to be_nil
+      end
+    end
+
     it "redraws afterwards, since the screen was handed back" do
       with_harness quirks: TermBuf::Quirk::PerCodePointColumns,
         capabilities: TermBuf::Capabilities::MODERN do |harness|
