@@ -444,7 +444,6 @@ module Validate
       row = 4
       shown = 0
       policy = @terminal.widths
-      counted = @terminal.quirks.per_code_point_columns?
 
       SAMPLES.each do |(sample, description)|
         break if row >= rows - 3
@@ -452,15 +451,6 @@ module Validate
         width = Unicode.string_width sample, policy
         dots = Math.max bar - 3 - width, 0
         screen.write 2, row, "#{width}  #{sample}#{"." * dots}|  #{description}"
-
-        # This terminal has already said it counts a cluster by adding up its
-        # code points, so which rows it will misplace, and by how far, is
-        # arithmetic rather than a surprise. Saying so beats leaving someone to
-        # wonder whether the page is broken.
-        drift = counted ? Unicode.code_point_columns(sample, policy) - width : 0
-        screen.write bar + 4 + description.size + 2, row,
-          drift.zero? ? "" : "bar is #{drift.abs} #{drift > 0 ? "right" : "left"}",
-          Style::DEFAULT.fg(Color.indexed(1))
 
         row += 1
         shown += 1
@@ -474,13 +464,8 @@ module Validate
     end
 
     private def widths_note : String
-      unless @terminal.quirks.per_code_point_columns?
-        return "a bar out of line: the terminal moved the cursor further than this counted. " \
-               "a glyph over its neighbour: it drew wider than it moved."
-      end
-
-      "this terminal counts a cluster by adding up its code points, so the marked rows cannot " \
-      "line up. a glyph over its neighbour is it drawing wider than it moved."
+      "each row is written as one run, so a bar out of line is a cluster this terminal draws " \
+      "wider or narrower than the shard measured it."
     end
 
     # ---------------------------------------------------------------- page 9
