@@ -723,7 +723,7 @@ module Validate
         prompt: Field::Prompt.new("› ", Style::DEFAULT.fg(Color.indexed(4))),
         growth: Field::Growth::Grow,
         max_rows: 8,
-        placeholder: "tab completes a colour, up walks back")
+        placeholder: "type sc, or c, then tab")
     end
 
     # Clipping, a view's own style, and a background that varies under text.
@@ -835,7 +835,10 @@ module Validate
       @terminal.cursor.move_to x, y
 
       screen.write 2, 2, "an input field", Style::DEFAULT.bold
-      screen.write 20, 2, "enter accepts, escape clears", Style::DEFAULT.faint
+      screen.write 20, 2, "enter accepts, escape clears, up walks back",
+        Style::DEFAULT.faint
+      screen.write 2, 3, "tab completes a colour name: #{WORDS.first(4).join(", ")}, …",
+        Style::DEFAULT.faint
 
       row = field.bounds.bottom + 2
 

@@ -208,7 +208,11 @@ module TermBuf
     end
 
     private def listing_rows : Int32
-      @editor.listing? ? @editor.candidates.size + 1 : 0
+      case @editor.completion
+      in .listing?            then @editor.candidates.size + 1
+      in .choices?, .nothing? then 1
+      in .idle?, .inserted?   then 0
+      end
     end
 
     # Keeps the cursor in view, scrolling by the least that does it.
@@ -477,12 +481,26 @@ module TermBuf
     end
 
     private def draw_listing(screen : Drawing, area : Rect) : Nil
-      return unless @editor.listing?
-
       top = area.y + visible_rows
       room = area.bottom - top + 1
       return if room <= 0
 
+      # A completion that changed nothing has to say so, or a key that found
+      # no match and a key that is not bound look exactly alike.
+      case @editor.completion
+      in .nothing?          then screen.write area.x + 1, top, "no match", @style.faint
+      in .choices?          then screen.write area.x + 1, top, choices_note, @style.faint
+      in .listing?          then draw_candidates screen, area, top, room
+      in .idle?, .inserted? then return
+      end
+    end
+
+    private def choices_note : String
+      "#{@editor.candidates.size} matches, again to list"
+    end
+
+    private def draw_candidates(screen : Drawing, area : Rect, top : Int32,
+                                room : Int32) : Nil
       candidates = @editor.candidates
       shown = Math.min candidates.size, room - 1
 

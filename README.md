@@ -520,6 +520,17 @@ History keeps the line being typed when a walk starts and gives it back on the w
 `History::Search::Prefix` walks only the entries beginning with what was typed. Completion is a
 hook: one candidate is inserted, several insert what they agree on, and a second `Tab` lists them.
 
+`Editor#completion` says what the last press came to — `Idle`, `Inserted`, `Choices`, `Listing`, or
+`Nothing` — until the next edit. `Field` puts it under the line, because a key that found no match
+and a key that is bound to nothing look identical otherwise:
+
+```text
+› s                            › zzz
+ 3 matches, again to list       no match
+```
+
+An application driving an `Editor` itself reads the same property.
+
 ### Saying a paste is arriving
 
 `PasteNotice` draws the panel the paste deadlines exist for:

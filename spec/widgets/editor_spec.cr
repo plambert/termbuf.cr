@@ -255,6 +255,90 @@ Spectator.describe TermBuf::Editor do
 
       expect(press made, Name::Tab).to eq Outcome::Continue
       expect(made.text).to eq "x"
+      expect(made.completion.idle?).to be_true
+    end
+  end
+
+  # Without this an application cannot tell a completion that found nothing
+  # from one that was never asked for, and a key that appears to do nothing is
+  # the result.
+  describe "what a completion came to" do
+    private def colours(*names : String)
+      ->(request : TermBuf::Completion::Request) do
+        TermBuf::Completion::Result.new names.to_a.select(&.starts_with? request.word)
+      end
+    end
+
+    it "is idle before anything is asked" do
+      expect(editor.completion.idle?).to be_true
+    end
+
+    it "says nothing was found" do
+      made = editor completions: colours("amber", "azure")
+      type made, "zzz"
+      press made, Name::Tab
+
+      expect(made.completion.nothing?).to be_true
+      expect(made.candidates).to be_empty
+      expect(made.text).to eq "zzz"
+    end
+
+    it "stays saying so while the key is pressed again" do
+      made = editor completions: colours("amber")
+      type made, "zzz"
+      press made, Name::Tab
+      press made, Name::Tab
+
+      expect(made.completion.nothing?).to be_true
+    end
+
+    it "says one candidate went in" do
+      made = editor completions: colours("scarlet", "teal")
+      type made, "sc"
+      press made, Name::Tab
+
+      expect(made.completion.inserted?).to be_true
+      expect(made.text).to eq "scarlet"
+    end
+
+    it "says there were choices before it says it is listing them" do
+      made = editor completions: colours("carmine", "cobalt", "crimson")
+      type made, "c"
+
+      press made, Name::Tab
+      expect(made.completion.choices?).to be_true
+      expect(made.listing?).to be_false
+
+      press made, Name::Tab
+      expect(made.completion.listing?).to be_true
+      expect(made.listing?).to be_true
+    end
+
+    it "starts over at choices after a single candidate went in" do
+      calls = 0
+      made = editor completions: ->(_request : TermBuf::Completion::Request) do
+        calls += 1
+        TermBuf::Completion::Result.new calls == 1 ? ["one"] : ["alpha", "amber"]
+      end
+      type made, "a"
+
+      press made, Name::Tab
+      expect(made.completion.inserted?).to be_true
+
+      # Several to choose from now. The press after an insertion must not jump
+      # straight to a list, having never offered the choice once.
+      press made, Name::Tab
+      expect(made.completion.choices?).to be_true
+    end
+
+    it "goes back to idle at the next edit" do
+      made = editor completions: colours("amber")
+      type made, "zzz"
+      press made, Name::Tab
+      expect(made.completion.nothing?).to be_true
+
+      type made, "x"
+      expect(made.completion.idle?).to be_true
     end
   end
 

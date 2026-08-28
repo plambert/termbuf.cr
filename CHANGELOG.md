@@ -8,6 +8,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- `Editor#completion`: what the last completion came to — `Idle`, `Inserted`, `Choices`, `Listing`,
+  or `Nothing` — so an application can tell a completion that found nothing from one that was never
+  asked for. `Field` says which under the line: `no match`, or how many matches there are before it
+  will list them. Without it a completion key that finds nothing looks like a key bound to nothing.
+
 - `Style#merge`: a style laid over another, each field the upper one leaves unset coming from
   below. Attributes combine rather than replace. ([#4])
 - A `View` carries a style everything drawn through it merges onto, so a highlighted row is filled
