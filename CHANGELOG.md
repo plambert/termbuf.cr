@@ -13,6 +13,9 @@ All notable changes to this project are documented here. The format follows
 - A `View` carries a style everything drawn through it merges onto, so a highlighted row is filled
   once and its columns name only what each adds rather than threading the row's background through
   every per-cell style. `Drawing#view` takes it. ([#4])
+- `keep_background` on `#write` and `#write_char`: each cell keeps the colour already behind it and
+  the style supplies the rest, for text over a background that varies under it — a label across a
+  progress bar. ([#4])
 
 ### Changed
 

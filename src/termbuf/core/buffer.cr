@@ -115,11 +115,15 @@ module TermBuf
     # Writes a single character at (*x*, *y*). Returns the columns it consumed:
     # zero if it is zero width, if it is a control character, or if it is wide
     # and the right edge is one column away.
-    def write_char(x : Int32, y : Int32, char : Char, style : Style = Style::DEFAULT) : Int32
+    #
+    # With *keep_background*, the cell keeps whatever colour is behind it and
+    # *style* supplies everything else. See `#write`.
+    def write_char(x : Int32, y : Int32, char : Char, style : Style = Style::DEFAULT,
+                   keep_background : Bool = false) : Int32
       columns = Unicode.char_width char, @policy.ambiguous
       return 0 if columns.zero?
 
-      style_id = @styles.id style
+      style_id = @styles.id keep_background ? behind(style, x, y) : style
       @back.place x, y, Cell.new(char, style_id, columns.to_u8), Cell.blank(style_id)
     end
 
@@ -129,7 +133,15 @@ module TermBuf
     # Zero width clusters are skipped: a combining mark with no base character
     # in front of it has nothing to attach to, and a control character is never
     # stored in the buffer.
-    def write(x : Int32, y : Int32, text : String, style : Style = Style::DEFAULT) : Int32
+    #
+    # With *keep_background*, each cell keeps the colour already behind it and
+    # *style* supplies the rest — text over something already painted, a label
+    # across a progress bar, without the caller working out where the bar's
+    # colours change. A background named in *style* is ignored; everything else
+    # in it applies as usual. A cluster covering two cells takes the colour of
+    # the cell its first half lands on.
+    def write(x : Int32, y : Int32, text : String, style : Style = Style::DEFAULT,
+              keep_background : Bool = false) : Int32
       return 0 unless @back.contains? x, y
 
       style_id = @styles.id style
@@ -140,6 +152,11 @@ module TermBuf
         next if grapheme.width.zero?
         break if column >= @width
 
+        if keep_background
+          style_id = @styles.id behind(style, column, y)
+          blank = Cell.blank style_id
+        end
+
         cell = build_cell grapheme, text, style_id
         consumed = @back.place column, y, cell, blank
         break if consumed.zero?
@@ -148,6 +165,16 @@ module TermBuf
       end
 
       column - x
+    end
+
+    # *style* wearing the background already at (*x*, *y*). Off the grid there
+    # is nothing behind, so *style* stands as it is and the write is dropped
+    # further down anyway.
+    private def behind(style : Style, x : Int32, y : Int32) : Style
+      cell = @back[x, y]?
+      return style unless cell
+
+      style.bg @styles[cell.style].background
     end
 
     private def build_cell(grapheme : Unicode::Grapheme, source : String, style : StyleId) : Cell

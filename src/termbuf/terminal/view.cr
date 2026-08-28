@@ -105,7 +105,7 @@ module TermBuf
 
       start, text = shown
       @target.issue Commands::Write.new(@rect.x + start, @rect.y + command.y, text,
-        styled(command.style))
+        styled(command.style), command.keep_background)
     end
 
     # The part of *text* that lands inside the view when it is drawn at column
@@ -153,7 +153,7 @@ module TermBuf
       return if columns == 2 && x + 1 >= @rect.width
 
       @target.issue Commands::WriteChar.new(@rect.x + x, @rect.y + command.y,
-        command.char, styled(command.style))
+        command.char, styled(command.style), command.keep_background)
     end
 
     private def clip_fill(rect : Rect, char : Char, style : Style) : Nil

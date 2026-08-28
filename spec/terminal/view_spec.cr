@@ -287,6 +287,20 @@ Spectator.describe TermBuf::View do
       end
     end
 
+    it "lets a write keep what is behind it instead of the view's background" do
+      with_screen do |screen, buffer|
+        row = screen.view Rect.new(0, 0, 8, 1), highlight
+        row.clear
+        # A bar painted inside the row, then a label across the join.
+        row.fill Rect.new(0, 0, 3, 1), ' ', TermBuf::Style::DEFAULT.bg(TermBuf::Color::GREEN)
+        row.write 2, 0, "ab", TermBuf::Style::DEFAULT.bold, keep_background: true
+
+        expect(buffer.styles[buffer.back[2, 0].style].background).to eq TermBuf::Color::GREEN
+        expect(buffer.styles[buffer.back[3, 0].style].background).to eq TermBuf::Color::BLUE
+        expect(buffer.styles[buffer.back[2, 0].style].has?(TermBuf::Attributes::Bold)).to be_true
+      end
+    end
+
     it "leaves styles alone when it carries none" do
       with_screen do |screen, buffer|
         plain = screen.view Rect.new(0, 0, 4, 1)
@@ -319,6 +333,13 @@ Spectator.describe TermBuf::View do
 
       expect(batcher.commands.size).to eq 1
       expect({command.x, command.y, command.text}).to eq({4, 3, "abc"})
+    end
+
+    it "carries the keep-background flag through unchanged" do
+      batcher = TermBuf::Batcher.new
+      batcher.view(Rect.new(1, 0, 4, 1)).write 0, 0, "ab", keep_background: true
+
+      expect(batcher.commands.first.as(TermBuf::Commands::Write).keep_background).to be_true
     end
   end
 end

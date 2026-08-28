@@ -153,6 +153,20 @@ views layer the same way. Attributes are the exception and combine rather than r
 have no value meaning "leave the panel's alone" — a bold write inside a faint panel is both. The
 merge is `Style#merge`, usable on its own.
 
+That covers one background for a whole row. When the background varies *under* the text — a label
+across a progress bar — the cells themselves have the answer, and `keep_background` takes it from
+them per cell:
+
+```crystal
+screen.fill TermBuf::Rect.new(0, y, filled, 1), ' ', TermBuf::Style::DEFAULT.bg(bar)
+screen.write x, y, "#{percent}%", TermBuf::Style::DEFAULT.bold, keep_background: true
+```
+
+Each cell keeps the colour already behind it and the style supplies everything else; a background
+named in the style is ignored. A cluster covering two cells takes the colour of the cell its first
+half lands on. `#write_char` takes the same argument, and it survives a view's translation and
+clipping.
+
 This is clipping, not layering: nothing says a view is on top of anything. Dismissing a panel means
 the next frame does not draw it, and the paint diff then sends the cells it covered and nothing
 else — a batched full frame is the cheap way to do this, not a workaround for the lack of layers.
@@ -522,13 +536,14 @@ in TermBuf::Events::Paste   then notice.finished
 ```bash
 crystal run examples/clock.cr     # drawing, input, and resize in one small program
 crystal run examples/prompt.cr    # an input field, and nothing else
-crystal run examples/validate.cr  # ten pages checking a real terminal against the shard
+crystal run examples/validate.cr  # eleven pages checking a real terminal against the shard
 ```
 
 `validate.cr` is worth running in any terminal you intend to support: it reports what detection
 concluded, writes every cell of the screen including the bottom-right corner, checks the terminal's
 idea of grapheme widths against the tables, shows what a frame costs in bytes, decodes whatever you
-type, and gives you a pane to type into with the terminal's own cursor following along.
+type, draws clipped panels and a label across a two-colour bar, and gives you a pane to type into
+with the terminal's own cursor following along.
 
 ## Development
 

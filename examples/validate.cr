@@ -16,7 +16,7 @@ module Validate
   alias Color = TermBuf::Color
   alias Rect = TermBuf::Rect
 
-  PAGES = %w[caps edges widths colours attrs motion keys cursors measured field]
+  PAGES = %w[caps edges widths colours attrs motion keys cursors measured panels field]
 
   # One line of the width page: something to draw, and what it is.
   #
@@ -113,6 +113,7 @@ module Validate
       when "keys"     then draw_keys screen
       when "cursors"  then draw_cursors screen
       when "measured" then draw_measured screen
+      when "panels"   then draw_panels screen
       when "field"    then draw_field screen
       end
     end
@@ -715,6 +716,62 @@ module Validate
         growth: Field::Growth::Grow,
         max_rows: 8,
         placeholder: "tab completes a colour, up walks back")
+    end
+
+    # Clipping, a view's own style, and a background that varies under text.
+    # A row that reads right proves all three: the bar is painted once, the
+    # label crosses where its colour changes, and nothing reaches past the
+    # panel's border.
+    private def draw_panels(screen) : Nil
+      screen.write 2, 2, "views: clipping, a base style, backgrounds", Style::DEFAULT.bold
+
+      draw_rows screen
+      draw_overflow screen
+      draw_bar screen
+    end
+
+    # Highlighted rows drawn without naming the highlight in every column.
+    private def draw_rows(screen) : Nil
+      width = Math.min columns - 4, 46
+
+      3.times do |index|
+        style = index == 1 ? Style::DEFAULT.bg(Color.indexed(24)) : Style::DEFAULT
+        row = screen.view Rect.new(2, 4 + index, width, 1), style
+        row.clear
+        row.write 0, 0, "row #{index}", Style::DEFAULT.bold
+        row.write 10, 0, "no column names the background", Style::DEFAULT.faint
+      end
+    end
+
+    # A line far longer than the box it is written into.
+    private def draw_overflow(screen) : Nil
+      width = Math.min columns - 4, 46
+      box = Rect.new 2, 9, width // 2, 3
+      Border.new(Border::ROUNDED, title: "clipped").draw screen, box
+
+      inside = screen.view Border.inset(box)
+      inside.write 0, 0, "this line is far longer than the box holding it"
+      screen.write box.right + 2, box.y + 1, "nothing bled to here",
+        Style::DEFAULT.faint
+    end
+
+    # A label across a bar, taking each cell's colour as it goes.
+    private def draw_bar(screen) : Nil
+      width = Math.min columns - 4, 46
+      filled = width * 2 // 3
+      y = 13
+
+      screen.fill Rect.new(2, y, width, 1), ' ', Style::DEFAULT.bg(Color.indexed(28))
+      screen.fill Rect.new(2 + filled, y, width - filled, 1), ' ',
+        Style::DEFAULT.bg(Color.indexed(236))
+
+      label = " 67% of #{width} cells "
+      x = 2 + (width - label.size) // 2
+      screen.write x, y, label, Style::DEFAULT.bold, keep_background: true
+
+      screen.write 2, y + 2,
+        "the label crosses the join and keeps whichever colour is under it",
+        Style::DEFAULT.faint
     end
 
     # An input field driven from an application's own loop rather than by
