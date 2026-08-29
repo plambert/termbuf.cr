@@ -12,6 +12,15 @@ private def replies(policy : Policy, count : Int32 = TermBuf::WidthProbe::SAMPLE
   end
 end
 
+# Answers as a terminal counting a cluster's columns per code point would.
+private def per_code_point_replies : String
+  String.build do |io|
+    TermBuf::WidthProbe::SAMPLES.each do |sample|
+      io << "\e[1;" << TermBuf::Unicode.code_point_columns(sample.text) + 1 << "R"
+    end
+  end
+end
+
 private def probe(answers : String, base : Policy = Policy::DEFAULT,
                   timeout = 50.milliseconds) : {TermBuf::WidthProbe::Result, String}
   input = IO::Memory.new answers
@@ -36,6 +45,25 @@ Spectator.describe TermBuf::WidthProbe do
       TermBuf::WidthProbe::SAMPLES.each_with_index do |_, index|
         expect(written).to contain "\e[#{index + 1};1H"
       end
+    end
+
+    it "names a terminal that counts columns per code point" do
+      result, _ = probe per_code_point_replies
+
+      expect(result.per_code_point_columns?).to be_true
+    end
+
+    it "clears the suspicion when the terminal counts clusters" do
+      result, _ = probe replies(Policy::DEFAULT)
+
+      expect(result.per_code_point_columns?).to be_false
+    end
+
+    it "says nothing when the terminal did not answer" do
+      result, _ = probe ""
+
+      expect(result.answered).to be_false
+      expect(result.per_code_point_columns?).to be_nil
     end
 
     it "reads back a terminal that agrees with the tables" do

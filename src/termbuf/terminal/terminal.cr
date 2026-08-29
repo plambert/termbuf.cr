@@ -149,11 +149,13 @@ module TermBuf
                    @width_spec : String? = nil,
                    @probe_widths : Bool = false,
                    @quirks : Quirk = Quirk::None,
-                   @detect_composed_drift : Bool = true)
+                   @detect_composed_drift : Bool = true,
+                   clear_overhang : Bool = true)
       @size = size || @tty.size
       @buffer = Buffer.new @size.columns, @size.rows
       @screen = Region.new Rect.full(@size.columns, @size.rows)
       @painter = Painter.new @capabilities
+      @painter.clear_overhang = clear_overhang
       @encoder = Encoder.new @buffer.styles, @capabilities, @size.columns, @size.rows
       @meter = Meter.new @tty.output
       @commands = Channel(Command).new COMMAND_CAPACITY
@@ -243,6 +245,21 @@ module TermBuf
     # What this terminal is known to get wrong. See `Quirk`.
     getter quirks : Quirk
 
+    # Whether to write the cell after a glyph that may have painted outside its
+    # own columns. See `Painter#clear_overhang?`, which this is.
+    #
+    # On unless the application says otherwise: every terminal measured draws
+    # over a neighbouring cell without repainting it, so ink left there stays
+    # until something writes that cell again.
+    def clear_overhang? : Bool
+      @painter.clear_overhang?
+    end
+
+    # :ditto:
+    def clear_overhang=(value : Bool) : Bool
+      @painter.clear_overhang = value
+    end
+
     # Whether to give the screen back and say so on stderr the first time a
     # cluster this terminal will misplace is drawn.
     #
@@ -258,6 +275,17 @@ module TermBuf
 
       if @probe_widths && Unicode::WidthOverrides.probe?(@width_spec)
         result = WidthProbe.run @tty.input, @tty.output, measured
+
+        # The probe has just asked the question this quirk is about, so the
+        # answer replaces the guess made from the terminal's name — in both
+        # directions, since a terminal that starts counting clusters properly
+        # should stop carrying the quirk. When it says nothing, the name is
+        # still the best that can be done.
+        case result.per_code_point_columns?
+        when true  then @quirks = @quirks | Quirk::PerCodePointColumns
+        when false then @quirks = @quirks & ~Quirk::PerCodePointColumns
+        end
+
         # A terminal counting columns per code point answers the probe with
         # that count, so its answers describe its bookkeeping rather than what
         # it draws: it reports one column for a variation selector emoji and

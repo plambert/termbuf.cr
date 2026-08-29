@@ -57,6 +57,28 @@ module TermBuf
       # Whether the terminal answered at all. When it did not, *policy* is
       # whatever was passed in.
       answered : Bool do
+      # Whether the terminal counts a cluster's columns by adding its code
+      # points up, or `nil` when it did not answer the sample that tells the
+      # two apart.
+      #
+      # The samples are already the right question. One of them has a
+      # per-code-point count that no policy can reach — four faces joined by
+      # zero width joiners own eleven that way, against two collapsed and eight
+      # laid out — so its answer names the terminal's bookkeeping outright.
+      # Measuring beats matching on the terminal's name, which can neither know
+      # about a version that fixed it nor about a terminal nobody has tried.
+      def per_code_point_columns? : Bool?
+        decisive = readings.find do |reading|
+          counted = Unicode.code_point_columns reading.sample.text
+          counted != reading.sample.enabled && counted != reading.sample.disabled
+        end
+
+        return unless decisive
+        return unless measured = decisive.measured
+
+        measured == Unicode.code_point_columns(decisive.sample.text)
+      end
+
       # Samples the resulting policy still measures differently from the
       # terminal. Terminals reach conclusions this design has no flag for, and
       # naming what is left over beats modelling it wrong.

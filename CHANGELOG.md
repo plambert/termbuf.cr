@@ -8,6 +8,14 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- `Terminal#clear_overhang?` and `Painter#clear_overhang?`, on by default: the cell after a glyph
+  that may have painted outside its own columns is written again even when nothing in it changed.
+  Both terminals measured draw over a neighbouring cell without repainting it first, and a
+  cluster's ink runs past its columns often enough to matter — `ﷺ` is charged one column and
+  painted across three, an uncomposed `👨‍👩` is charged two and painted across four. Nothing predicts
+  which clusters overhang, so the rule is conservative and cheap: after anything that is not plain
+  ASCII, write the next cell. Ordinary text pays nothing. An application that knows better, or
+  would rather have the bytes, can turn it off.
 - `Unicode.emoji?`, the Emoji property, generated into the tables beside
   Extended_Pictographic. The two are different questions and the difference is visible on screen:
   `⚑` is pictographic and is not an emoji, so a variation selector after it asks for a
@@ -16,6 +24,13 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- `Quirk::PerCodePointColumns` is now measured rather than matched on the terminal's name. The
+  width probe already sends four faces joined by zero width joiners and reads the answer back, and
+  that answer settles the question outright: eleven columns is per-code-point counting, where two
+  is per-cluster and no policy can reach eleven. The answer overrides the guess in both
+  directions, so a terminal that starts counting properly stops carrying the quirk and one nobody
+  has tried is judged on what it does rather than what it is called. The `TERM_PROGRAM` match
+  stays as the fallback for a terminal that does not answer.
 - Cluster widths, against Terminal.app 470.2 and Ghostty 1.3.2 measured over the same sixty seven
   clusters. A variation selector now widens only a base with the Emoji property, so `⚑️` is one
   column and `1️⃣` is two; an indic conjunct is two columns rather than one, so `क्ष`, `ক্ষ` and `క్ష`

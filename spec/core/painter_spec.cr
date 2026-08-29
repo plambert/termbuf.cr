@@ -64,6 +64,46 @@ Spectator.describe TermBuf::Painter do
     end
   end
 
+  describe "clearing what a glyph painted over" do
+    # Both terminals measured draw over a neighbouring cell without repainting
+    # it, and a cluster's ink runs past its own columns often enough to matter,
+    # so the cell after one is written again even when nothing in it changed.
+    it "writes the cell after a glyph that may have overhung it" do
+      session = Session.new
+      session.buffer.write 0, 0, "ab"
+      session.settle
+
+      session.buffer.write 0, 0, "漢"
+      ops = session.paint
+
+      # The wide character takes both cells; without this the segment would
+      # stop there and the `b` would keep whatever ink reached it.
+      expect(texts(ops).join).to eq "漢 "
+    end
+
+    it "leaves ordinary ascii alone" do
+      session = Session.new
+      session.buffer.write 0, 0, "abcd"
+      session.settle
+
+      session.buffer.write 0, 0, "x"
+      ops = session.paint
+
+      expect(texts(ops).join).to eq "x"
+    end
+
+    it "stops when the application turns it off" do
+      session = Session.new
+      session.painter.clear_overhang = false
+      session.buffer.write 0, 0, "ab"
+      session.settle
+
+      session.buffer.write 0, 0, "漢"
+
+      expect(texts(session.paint).join).to eq "漢"
+    end
+  end
+
   describe "row diffing" do
     it "emits only the run that changed" do
       session = Session.new
