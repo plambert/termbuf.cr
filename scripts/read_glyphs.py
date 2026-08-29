@@ -154,23 +154,51 @@ def bar_column(x: float, first: float, cell: float) -> int:
 INK = 0.25
 
 
-def cells_covered(lit: np.ndarray, first: float, cell: float) -> int:
-    """How many cells a glyph's ink covers.
+# A reading is only worth trusting when the outermost inked cell is clear of
+# that floor. Between these the answer is an antialiased pixel from going the
+# other way, and the floor is a fraction of a cell whose width the font sets:
+# the same conjunct measured 0.33 of SFMono's 12 px cell and 0.21 of Menlo's
+# 14 px one, which is how three fonts appeared to disagree about clusters none
+# of them covers. Six of six differences between two runs were this, one of them
+# at 0.25 exactly. So the number is reported rather than rounded away.
+SOFT = (0.15, 0.40)
+
+
+def cell_ink(lit: np.ndarray, first: float, cell: float) -> dict:
+    """Ink per cell, as a fraction of a cell's width, keyed by column.
+
+    The staircase bars sit in the middle of their cells, so column c runs from
+    half a cell either side of where its bar was.
+    """
+    if lit.size == 0:
+        return {}
+
+    columns = np.floor((lit - (first - cell / 2)) / cell).astype(int)
+    return {int(column): float((columns == column).sum() / cell)
+            for column in set(columns.tolist())}
+
+
+def cells_covered(ink: dict) -> tuple:
+    """How many cells a glyph's ink covers, and how firmly.
 
     Counted per cell rather than from the width of the ink, because a glyph
     that reaches its own edges bleeds a pixel into the next one and the two are
     indistinguishable by extent alone.
+
+    The second number is the cell nearest the floor of those that set the
+    answer: the two the span ends on, and the two just outside it. Whichever is
+    closest to `INK` is the one a pixel either way would have moved, so it is
+    the number to look at before believing the first.
     """
-    if lit.size == 0:
-        return 0
+    painted = [column for column, fraction in ink.items() if fraction >= INK]
+    if not painted:
+        return 0, 0.0
 
-    # The staircase bars sit in the middle of their cells, so column c runs
-    # from half a cell either side of where its bar was.
-    columns = np.floor((lit - (first - cell / 2)) / cell).astype(int)
-    painted = [column for column in set(columns.tolist())
-               if (columns == column).sum() >= cell * INK]
+    low, high = min(painted), max(painted)
+    deciding = [ink[low], ink[high],
+                ink.get(low - 1, 0.0), ink.get(high + 1, 0.0)]
 
-    return max(painted) - min(painted) + 1 if painted else 0
+    return high - low + 1, min(deciding, key=lambda fraction: abs(fraction - INK))
 
 
 def main() -> int:
@@ -188,7 +216,7 @@ def main() -> int:
         page, bar_row, codepoints, group, note = line.split("\t")
         entries.setdefault(int(page), []).append((int(bar_row), codepoints, group, note))
 
-    print("codepoints\tgroup\tadvance\tdrawn\tnote")
+    print("codepoints\tgroup\tadvance\tdrawn\tedge\tnote")
 
     for page_number in sorted(entries):
         path = directory / f"page-{page_number:02d}.png"
@@ -215,14 +243,17 @@ def main() -> int:
             # Nothing follows on the bare row, so its rightmost ink is the
             # glyph's own edge — which runs past the pen, and past anything
             # drawn after it on the row above.
-            drawn = cells_covered(bare_ink, left, cell)
+            ink = cell_ink(bare_ink, left, cell)
+            drawn, edge = cells_covered(ink)
 
             note_out = note
             if advance is not None and drawn > pad:
                 note_out += " (glyph reaches the bar; raise PAD)"
+            if SOFT[0] <= edge <= SOFT[1]:
+                note_out += f" (soft: edge cell is {edge:.2f} of a cell)"
 
             print(f"{codepoints}\t{group}\t{advance if advance is not None else '?'}"
-                  f"\t{drawn}\t{note_out}")
+                  f"\t{drawn}\t{edge:.2f}\t{note_out}")
 
     return 0
 
