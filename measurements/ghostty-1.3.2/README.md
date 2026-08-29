@@ -87,7 +87,8 @@ In all five our cluster width misses, Terminal.app counted the same as Ghostty:
 
 Two independent implementations reaching the same answer is the best evidence available that the
 table is what needs changing. The three conjuncts are the same shape and the same answer three
-times. The tables are left alone pending a decision.
+times. **All five are now fixed**, along with the two counting rules Terminal.app
+needed: both models reproduce all sixty seven measurements on both terminals.
 
 ## Files
 

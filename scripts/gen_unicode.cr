@@ -71,6 +71,7 @@ module GenUnicode
   AMBIGUOUS_BIT    = 0x0040_u16
   PICTOGRAPHIC_BIT = 0x0080_u16
   INCB_SHIFT       =      8_u16
+  EMOJI_BIT        = 0x0400_u16
   INCB_MASK        = 0x0300_u16
 
   def self.run : Nil
@@ -161,6 +162,13 @@ module GenUnicode
         range.each { |codepoint| widths[codepoint] = 2_u8 }
       when "Extended_Pictographic"
         range.each { |codepoint| flags[codepoint] |= PICTOGRAPHIC_BIT }
+      when "Emoji"
+        # Narrower than Extended_Pictographic and a different question. `⚑`
+        # U+2691 is pictographic and is not an emoji, so a variation selector
+        # after it asks for a presentation it does not have; the digits are
+        # emoji and are not pictographic, which is what makes a keycap two
+        # columns wide.
+        range.each { |codepoint| flags[codepoint] |= EMOJI_BIT }
       end
     end
   end
@@ -298,6 +306,7 @@ module GenUnicode
           PICTOGRAPHIC_BIT = 0x0080_u16
           INCB_SHIFT       =      8_u16
           INCB_MASK        = 0x0300_u16
+          EMOJI_BIT        = 0x0400_u16
 
           RANGE_COUNT = #{starts.size}
 

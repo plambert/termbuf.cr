@@ -106,11 +106,15 @@ Spectator.describe TermBuf::Unicode do
       expect(Uni.string_width("\u{0E01}\u{0E33}")).to eq 2 # thai ko kai, sara am
     end
 
-    it "counts an indic conjunct as one cell until a spacing mark widens it" do
-      # The consonants of `\u{0915}\u{094D}\u{0937}` ligate into one glyph;
-      # the vowel sign that follows does not.
-      expect(Uni.string_width("\u{0915}\u{094D}\u{0937}")).to eq 1
+    it "counts an indic conjunct as two cells" do
+      # The consonants ligate into one glyph and both terminals measured give
+      # that glyph two columns, whatever the consonant it opens with is worth
+      # alone. A spacing vowel after it adds nothing, since two cells is as
+      # much as a cluster gets.
+      expect(Uni.string_width("\u{0915}\u{094D}\u{0937}")).to eq 2 # devanagari
       expect(Uni.string_width("\u{0915}\u{094D}\u{0937}\u{093F}")).to eq 2
+      expect(Uni.string_width("\u{0995}\u{09CD}\u{09B7}")).to eq 2 # bengali
+      expect(Uni.string_width("\u{0C15}\u{0C4D}\u{0C37}")).to eq 2 # telugu
     end
 
     it "keeps a cluster to a pair of cells however many marks it carries" do
@@ -142,6 +146,22 @@ Spectator.describe TermBuf::Unicode do
 
     it "leaves a pictograph alone when it has neither variation selector" do
       expect(Uni.string_width("\u{1F5FA}")).to eq 1 # world map, no default presentation
+    end
+
+    it "widens only a base that is an emoji, not merely a pictograph" do
+      # `⚑` is Extended_Pictographic and is not an emoji, so a selector asks it
+      # for a presentation it has not got. Terminal.app and Ghostty both give it
+      # one column; a selector on a base that is an emoji gets two.
+      expect(Uni.string_width("\u{2691}\u{FE0F}")).to eq 1
+      expect(Uni.string_width("\u{2764}\u{FE0F}")).to eq 2
+    end
+
+    it "counts a keycap sequence as two cells" do
+      # The digit is an emoji and is not a pictograph, which is why this needs
+      # the Emoji property rather than Extended_Pictographic. Both terminals
+      # measured give the sequence with the selector two columns.
+      expect(Uni.string_width("1\u{FE0F}\u{20E3}")).to eq 2
+      expect(Uni.string_width("1\u{20E3}")).to eq 1 # no selector, no keycap
     end
   end
 

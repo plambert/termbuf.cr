@@ -101,6 +101,17 @@ module TermBuf::Unicode
     properties(char.ord) & Tables::PICTOGRAPHIC_BIT != 0
   end
 
+  # Whether *char* has the Emoji property.
+  #
+  # Narrower than `.pictographic?` and a different question. `⚑` U+2691 is
+  # pictographic and is not an emoji, so a variation selector after it asks for
+  # a presentation it does not have and it stays one column — both terminals
+  # measured agree. The digits are the other way about: emoji, not pictographic,
+  # which is what makes `1️⃣` two columns.
+  def self.emoji?(char : Char) : Bool
+    properties(char.ord) & Tables::EMOJI_BIT != 0
+  end
+
   # Whether *char* is East Asian Ambiguous, and so rendered at a width the
   # terminal's configuration decides.
   def self.ambiguous?(char : Char) : Bool
@@ -118,6 +129,18 @@ module TermBuf::Unicode
     0x0488..0x0489, 0x1ABE..0x1ABE, 0x20DD..0x20E0, 0x20E2..0x20E4, 0xA670..0xA672,
   ]
 
+  # Tag characters, `U+E0020..U+E007F`. They carry the region of a subdivision
+  # flag and are `Cf`, so nothing draws them and `.char_width` gives them none.
+  #
+  # They matter only to `.code_point_columns`: a terminal counting per code
+  # point charges each of them a column, which is what makes `🏴󠁧󠁢󠁳󠁣󠁴󠁿` own eight.
+  TAGS = 0xE0020..0xE007F
+
+  # Whether *char* is a tag character.
+  def self.tag?(char : Char) : Bool
+    TAGS.includes? char.ord
+  end
+
   # Whether *char* is an enclosing mark.
   def self.enclosing_mark?(char : Char) : Bool
     codepoint = char.ord
@@ -131,15 +154,21 @@ module TermBuf::Unicode
   #
   # Not what any standard says a cluster is worth — what
   # `Quirk::PerCodePointColumns` terminals do. Measured against Terminal.app
-  # 470.2 across forty-four samples: `.char_width` per code point, with three
-  # departures.
+  # 470.2 across sixty-seven samples, and reproducing all of them:
+  # `.char_width` per code point, with five departures.
   #
   # * The zero width joiner takes a column, so four joined faces own eleven.
   # * So does an enclosing mark, which is what makes `1️⃣` own two.
+  # * So does a tag character, which is what makes `🏴󠁧󠁢󠁳󠁣󠁴󠁿` own eight.
   # * A regional indicator takes one rather than two, so a flag owns two and
   #   five indicators own five. That reads as if the terminal went by East
   #   Asian Width alone and never applied emoji presentation, but only the
   #   indicators were measured, so only they are named here.
+  # * Conjoining jamo are composed before counting, so the vowel and the tail
+  #   take nothing and `가` and `각` each own two, like the syllable they make.
+  #   This is the one place the terminal counts a cluster rather than its
+  #   pieces. A vowel or tail with no lead before it is not something the
+  #   samples cover, and is given nothing here.
   def self.code_point_columns(text : String, policy : WidthPolicy = Unicode.policy) : Int32
     total = 0
     text.each_char { |char| total += code_point_columns char, policy }
@@ -150,6 +179,10 @@ module TermBuf::Unicode
   def self.code_point_columns(char : Char, policy : WidthPolicy = Unicode.policy) : Int32
     return 1 if char == ZERO_WIDTH_JOINER || enclosing_mark? char
     return 1 if grapheme_class(char).regional_indicator?
+    return 1 if tag? char
+
+    klass = grapheme_class char
+    return 0 if klass.hangul_v? || klass.hangul_t?
 
     char_width char, policy.ambiguous
   end

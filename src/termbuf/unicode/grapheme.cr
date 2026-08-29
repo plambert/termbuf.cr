@@ -174,6 +174,12 @@ module TermBuf::Unicode
     @joined = false
     @regional = 0
     @presentation : Char? = nil
+    # UAX #29 GB9c in miniature, kept here rather than read off the breaker so
+    # a cluster can be measured on its own: a consonant, then a linker, then
+    # another consonant is one conjunct.
+    @after_consonant = false
+    @linked = false
+    @conjunct = false
     @policy : WidthPolicy
 
     def initialize(@policy : WidthPolicy)
@@ -193,11 +199,15 @@ module TermBuf::Unicode
       @joined = false
       @regional = 0
       @presentation = nil
+      @after_consonant = false
+      @linked = false
+      @conjunct = false
     end
 
     def add(char : Char) : Nil
       @joined = true if char == ZERO_WIDTH_JOINER
       @regional += 1 if Unicode.grapheme_class(char).regional_indicator?
+      note_conjunct char
       # What the cluster would take if the terminal laid its pieces end to end
       # rather than collapsing them, which some do.
       @laid_out += measure char
@@ -227,6 +237,22 @@ module TermBuf::Unicode
       Unicode.char_width char, @policy.ambiguous
     end
 
+    # Tracks whether the cluster has formed a conjunct.
+    private def note_conjunct(char : Char) : Nil
+      conjunct = Unicode.conjunct_class char
+
+      if conjunct.consonant?
+        @conjunct = true if @linked
+        @linked = false
+        @after_consonant = true
+      elsif conjunct.linker?
+        @linked ||= @after_consonant
+      elsif !conjunct.extend?
+        @linked = false
+        @after_consonant = false
+      end
+    end
+
     # Closes the cluster at byte offset *finish*, exclusive.
     def grapheme(finish : Int32) : Grapheme
       Grapheme.new @start, finish - @start, width, @count == 1 ? @first : nil
@@ -243,11 +269,18 @@ module TermBuf::Unicode
 
     private def collapsed : Int32
       base = @base_width
+      # A conjunct is drawn as one glyph and both terminals measured charge the
+      # whole of it two columns, whatever the consonant it opens with is worth
+      # on its own. `क्ष` is two, and so are the bengali and telugu conjuncts.
+      base = 2 if @conjunct && base < 2
       base = Math.min base + @spacing, 2 if @policy.spacing_marks? && !base.zero?
 
       case @presentation
       when EMOJI_PRESENTATION
-        @policy.emoji_presentation? && Unicode.pictographic?(@first) ? 2 : base
+        # The Emoji property, not Extended_Pictographic: a selector after `⚑`
+        # asks for a presentation it has not got, and a digit is an emoji even
+        # though it is not pictographic.
+        @policy.emoji_presentation? && Unicode.emoji?(@first) ? 2 : base
       when TEXT_PRESENTATION then base.zero? ? 0 : 1
       else                        base
       end

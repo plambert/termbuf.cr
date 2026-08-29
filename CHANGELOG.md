@@ -6,6 +6,26 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `Unicode.emoji?`, the Emoji property, generated into the tables beside
+  Extended_Pictographic. The two are different questions and the difference is visible on screen:
+  `⚑` is pictographic and is not an emoji, so a variation selector after it asks for a
+  presentation it has not got, and the digits are emoji without being pictographic, which is what
+  makes a keycap two columns.
+
+### Fixed
+
+- Cluster widths, against Terminal.app 470.2 and Ghostty 1.3.2 measured over the same sixty seven
+  clusters. A variation selector now widens only a base with the Emoji property, so `⚑️` is one
+  column and `1️⃣` is two; an indic conjunct is two columns rather than one, so `क्ष`, `ক্ষ` and `క్ష`
+  match what both terminals count. `Unicode.string_width` now reproduces all sixty seven of
+  Ghostty's counts, where it reproduced sixty two.
+- `Unicode.code_point_columns` charges a tag character a column, so `🏴󠁧󠁢󠁳󠁣󠁴󠁿` owns eight, and composes
+  conjoining jamo before counting, so `가` and `각` each own two. It now reproduces all sixty seven
+  of Terminal.app's counts, where it reproduced sixty four. Both departures came from widening the
+  sample set from forty-four clusters; neither shape was in the original set.
+
 ### Changed
 
 - `examples/validate.cr`: tab and shift-tab move between pages everywhere, ctrl-r redraws
