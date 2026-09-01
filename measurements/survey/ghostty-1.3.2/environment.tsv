@@ -1,0 +1,14 @@
+key	value
+date	2026-09-01 16:39:35
+term	xterm-ghostty
+term_program	ghostty
+term_program_version	1.3.2-main-+55a3e33ab
+columns	265
+rows	70
+multiplexer	none
+multiplexer_binary	
+multiplexer_version	
+grapheme_mode_2027	set
+corpus	/Users/plambert/Documents/src/termbuf.cr/measurements/corpus.tsv
+samples	5274
+unanswered	0

@@ -104,6 +104,11 @@ def environment(tty : TermBuf::Tty) : Hash(String, String)
   # A multiplexer names itself in the environment, and its version matters as
   # much as the terminal's: two builds of GNU screen twenty years apart are two
   # different answers.
+  #
+  # Asking the one on the `PATH` is not good enough to tell them apart — it
+  # answered "5.0.2" for a run made by `/usr/bin/screen`, which is 4.00.03 — so
+  # a caller that knows which binary it launched says so, and that is believed
+  # over anything discovered here.
   if tmux = ENV["TMUX"]?
     found["multiplexer"] = "tmux"
     found["multiplexer_socket"] = tmux.split(',').first
@@ -112,6 +117,14 @@ def environment(tty : TermBuf::Tty) : Hash(String, String)
     found["multiplexer"] = "screen"
     found["multiplexer_session"] = session
     found["multiplexer_version"] = version_of "screen --version"
+  end
+
+  if layer = ENV["TERMBUF_LAYER"]?
+    found["multiplexer"] = layer
+  end
+  if binary = ENV["TERMBUF_LAYER_BIN"]?
+    found["multiplexer_binary"] = binary
+    found["multiplexer_version"] = version_of "#{binary} --version"
   end
 
   found

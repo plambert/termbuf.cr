@@ -252,6 +252,15 @@ The analysis asks three questions.
 3. **What is the residual?** Clusters no model predicts anywhere, the count of what is still
    unexplained, which belongs in the notes rather than in a table.
 
+## What it found
+
+Phases 1 to 4 are done; the readings and what they say are in
+`measurements/survey/README.md`. In short: a multiplexer decides the answer completely, so the
+sixteen environments give seven distinct answers; GNU `screen` 5.0.2 carries
+`Quirk::PerCodePointColumns` and no list of terminal names could have found it; and the terminals
+agree against our tables on a format character taking a column and on a joined emoji sequence
+being two columns whatever it opens with.
+
 ## Phases
 
 Ordered so a failure wastes as little as possible.
