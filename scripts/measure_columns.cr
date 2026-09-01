@@ -37,17 +37,15 @@ def cursor_column(tty : TermBuf::Tty) : Int32?
 
   previous = input.read_timeout
   reply = String.build do |io|
-    begin
-      input.read_timeout = TIMEOUT
-      while byte = input.read_byte
-        io << byte.unsafe_chr
-        break if byte === 'R'.ord
-      end
-    rescue IO::TimeoutError
-      return
-    ensure
-      input.read_timeout = previous
+    input.read_timeout = TIMEOUT
+    while byte = input.read_byte
+      io << byte.unsafe_chr
+      break if byte === 'R'.ord
     end
+  rescue IO::TimeoutError
+    return
+  ensure
+    input.read_timeout = previous
   end
 
   # `ESC [ row ; column R`, and nothing else is worth reading.

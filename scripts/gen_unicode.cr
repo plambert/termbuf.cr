@@ -13,13 +13,16 @@ require "file_utils"
 
 module GenUnicode
   UNICODE_VERSION = "16.0.0"
-  BASE_URL        = "https://www.unicode.org/Public/#{UNICODE_VERSION}/ucd"
-  CACHE_DIR       = "tmp/ucd-#{UNICODE_VERSION}"
-  TABLES_PATH     = "src/termbuf/unicode/tables.cr"
-  FIXTURE_PATH    = "spec/fixtures/GraphemeBreakTest.txt"
-  MAX_CODEPOINT   = 0x10FFFF
+  # The emoji files ship on their own release schedule and their own path.
+  EMOJI_VERSION = "16.0"
+  BASE_URL      = "https://www.unicode.org/Public/#{UNICODE_VERSION}/ucd"
+  CACHE_DIR     = "tmp/ucd-#{UNICODE_VERSION}"
+  TABLES_PATH   = "src/termbuf/unicode/tables.cr"
+  FIXTURE_PATH  = "spec/fixtures/GraphemeBreakTest.txt"
+  MAX_CODEPOINT = 0x10FFFF
 
-  # Local name => path below `BASE_URL`.
+  # Local name => path below `BASE_URL`, or a whole URL for a file that does
+  # not live under the UCD tree.
   SOURCES = {
     "UnicodeData.txt"           => "UnicodeData.txt",
     "EastAsianWidth.txt"        => "EastAsianWidth.txt",
@@ -27,6 +30,10 @@ module GenUnicode
     "emoji-data.txt"            => "emoji/emoji-data.txt",
     "GraphemeBreakProperty.txt" => "auxiliary/GraphemeBreakProperty.txt",
     "GraphemeBreakTest.txt"     => "auxiliary/GraphemeBreakTest.txt",
+    # Every emoji sequence Unicode considers well formed, which is the bulk of
+    # the survey corpus. `scripts/gen_corpus.cr` reads it; nothing in the
+    # tables comes from it.
+    "emoji-test.txt" => "https://www.unicode.org/Public/emoji/#{EMOJI_VERSION}/emoji-test.txt",
   }
 
   # Grapheme cluster break classes, in the order they are emitted into the
@@ -101,7 +108,8 @@ module GenUnicode
     path = File.join CACHE_DIR, name
     return path if File.exists? path
 
-    url = "#{BASE_URL}/#{SOURCES[name]}"
+    source = SOURCES[name]
+    url = source.starts_with?("https://") ? source : "#{BASE_URL}/#{source}"
     puts "fetching #{url}"
     response = HTTP::Client.get url
     raise "GET #{url} failed: #{response.status_code}" unless response.success?

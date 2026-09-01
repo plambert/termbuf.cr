@@ -34,20 +34,31 @@ phase skips them.
 
 ## The matrix
 
-Four hosts, three layers, twelve combinations for counted width:
+Four hosts, four layers, sixteen combinations for counted width:
 
-| host | version | bare | under `tmux` | under `screen` |
-|---|---|---|---|---|
-| Terminal.app | 2.15 (build 470.2) | yes | yes | yes |
-| Ghostty | 1.3.2 | yes | yes | yes |
-| iTerm2 | 3.6.11 | yes | yes | yes |
-| kitty | 0.48.2 | yes | yes | yes |
+| host | version | bare | `tmux` | `screen` 4 | `screen` 5 |
+|---|---|---|---|---|---|
+| Terminal.app | 2.15 (build 470.2) | yes | yes | yes | yes |
+| Ghostty | 1.3.2 | yes | yes | yes | yes |
+| iTerm2 | 3.6.11 | yes | yes | yes | yes |
+| kitty | 0.48.2 | yes | yes | yes | yes |
 
-The multiplexers are the interesting half. Both do their own width accounting, both sit between the
-application and the terminal, and both can therefore introduce the fault the host does not have or
-mask the one it does. `tmux` 3.7c is current. **Apple's `screen` is 4.00.03, dated 2006**, and there
-is no newer one installed — expect width tables from that era, which is a legitimate finding as long
-as the result is labelled as Apple's build rather than as GNU `screen` generally.
+The multiplexers are the interesting half. Each does its own width accounting and sits between the
+application and the terminal, so each can introduce the fault the host does not have or mask the one
+it does.
+
+Both `screen` builds are tested and they are twenty years apart, which makes the pair worth more
+than either alone: any difference between them is `screen` changing its mind rather than a terminal
+disagreeing.
+
+| multiplexer | version | path |
+|---|---|---|
+| `tmux` | 3.7c | `/opt/homebrew/bin/tmux` |
+| `screen` (Apple) | 4.00.03, dated 2006 | `/usr/bin/screen` |
+| `screen` (GNU) | 5.0.2, built 2026-07-11 | `/opt/homebrew/bin/screen` |
+
+Label the old one as Apple's build rather than as GNU `screen` generally, and expect width tables
+from its era.
 
 ### The grapheme-mode axis
 
@@ -86,6 +97,40 @@ predicted width exceeds the row.
 Write it to `measurements/corpus.tsv` and commit it. `scripts/measure_columns.cr` grows an optional
 argument naming a corpus file, falling back to `scripts/glyph_samples.cr` as now.
 
+### The corpus as built
+
+`scripts/gen_corpus.cr` produces 5,274 clusters, 362 KB, from Unicode 16.0.0.
+
+| group | clusters | tell the two models apart |
+|---|---|---|
+| `emoji-fully-qualified` | 3,761 | 2,312 |
+| `emoji-minimally-qualified` | 1,009 | 1,009 |
+| `emoji-unqualified` | 239 | 35 |
+| `property` | 83 | 5 |
+| `control` (the original 67) | 67 | 26 |
+| `conjunct` | 36 | 6 |
+| `enclosing` | 35 | 23 |
+| `presentation` | 25 | 3 |
+| `emoji-component` | 9 | 0 |
+| `jamo` | 6 | 2 |
+| `regional` | 4 | 2 |
+| **total** | **5,274** | **3,423** |
+
+Three thousand four hundred clusters where our cluster width and our per-code-point count disagree
+is what makes this worth running: each one is a place a terminal can come down on a side. The
+minimally-qualified emoji are the richest seam — all 1,009 of them differ, because that is what
+missing a variation selector does.
+
+Two properties of the corpus to know before reading any result from it.
+
+* **Nineteen clusters our own segmenter splits into two or three.** Some are correct — a letter,
+  a joiner and a letter is two clusters under GB11, and three regional indicators is two under
+  GB12. Others are the Indic conjunct rule not reaching every script: `InCB` does not cover
+  gurmukhi or tamil, so their virama sequences come apart. They stay in, since a cluster we split
+  and the terminal does not is worth knowing about.
+* **Only four tag sequences exist**, because Unicode defines only three RGI subdivision flags.
+  That corner is as covered as it can be.
+
 ## Protocol
 
 Per cluster the current instrument does home, erase line, `CPR`, write, `CPR` — two round trips.
@@ -104,8 +149,8 @@ At 10,000 clusters that is 20,000 replies, so the round trips have to be amortis
   mode 2027 state, iTerm2 Unicode version, font and size, window size. Font does not affect this
   measurement, but recording it is what proved that.
 
-Expect roughly a minute per environment once batched, so the twelve counted-width runs are about
-twenty minutes including launch overhead.
+Expect roughly a minute per environment once batched, so the sixteen counted-width runs are about
+twenty-five minutes including launch overhead.
 
 ## Launching each environment
 
@@ -160,7 +205,8 @@ tmux -L termbuf -f /dev/null new-session -- <instrument> <corpus> <output>
 Same shape, its own session name, and no config:
 
 ```bash
-screen -c /dev/null -S termbuf-survey <instrument> <corpus> <output>
+/usr/bin/screen        -c /dev/null -S termbuf-survey <instrument> <corpus> <output>
+/opt/homebrew/bin/screen -c /dev/null -S termbuf-survey <instrument> <corpus> <output>
 ```
 
 Apple's build is old enough that it may mangle or swallow sequences the others pass through. If it
@@ -205,11 +251,11 @@ Ordered so a failure wastes as little as possible.
 
 1. **Build and validate the corpus offline.** Generate it, check nothing contains a control
    character, score it against the current model. No terminal involved.
-2. **Dry run.** The existing 67 clusters through all twelve combinations. Every environment must
+2. **Dry run.** The existing 67 clusters through all sixteen combinations. Every environment must
    reproduce the numbers already committed for Terminal.app and Ghostty, and the harness must
    survive `screen`. Fix the harness here, where a mistake costs a minute.
 3. **Full corpus, bare hosts**, including the mode 2027 variants.
-4. **Full corpus under `tmux` and `screen`.**
+4. **Full corpus under `tmux` and both `screen` builds.**
 5. **Photographic phase.** The most interesting hundred or so clusters, bare hosts only, console
    required. Choose them from what phases 3 and 4 disagreed about, and carry the `edge` column so
    soft readings stay visible.
@@ -231,5 +277,5 @@ Ordered so a failure wastes as little as possible.
 Nothing structural is expected. The likely outcomes are more entries in the width tables, more
 departures in `Unicode.code_point_columns` if another terminal counts per code point differently,
 possibly a second quirk if a multiplexer is wrong in a new way, and a longer fixture. If the counted
-width turns out to be predictable across twelve environments at ten thousand clusters, that is the
+width turns out to be predictable across sixteen environments at ten thousand clusters, that is the
 strongest statement this project can make about the one number it has to get right.
