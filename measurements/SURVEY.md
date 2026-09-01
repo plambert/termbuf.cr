@@ -140,11 +140,18 @@ At 10,000 clusters that is 20,000 replies, so the round trips have to be amortis
   This is what `WidthProbe` already does for its seven.
 * **Resynchronise on a short batch.** A dropped reply desynchronises everything after it, so a batch
   that returns fewer replies than expected is discarded and re-run one cluster at a time. Never
-  interpret a short batch positionally.
+  interpret a short batch positionally. Tested by dropping every 137th reply from a fake terminal:
+  69 lost replies cost 26 samples and misattributed none.
+* **Wait for a gap, not for a total.** A terminal answers a batch back to back, so a quarter second
+  of silence means the rest is not coming. Waiting a whole batch's worth of timeout instead made a
+  batch that lost one reply cost twenty-five seconds, and a run with scattered losses took longer
+  than the patience for it.
 * **Autowrap off** (`DECAWM`), so a cluster the terminal counts generously cannot wrap and take the
   next reading with it. Each sample still starts at column 1 of its own row.
-* **Abort loudly** if the first batch draws no reply at all. A terminal that does not answer `CPR`
-  cannot be surveyed, and a run of 10,000 empty readings should not look like data.
+* **Abort loudly** if the first batch draws no reply at all, and do it there rather than at the end.
+  A terminal that does not answer `CPR` cannot be surveyed, a run of empty readings should not look
+  like data, and asking the remaining five thousand one at a time to reach the same conclusion takes
+  twenty minutes. It now takes under a second and writes nothing.
 * **Record the environment**: terminal and version, `TERM`, `TERM_PROGRAM`, multiplexer and version,
   mode 2027 state, iTerm2 Unicode version, font and size, window size. Font does not affect this
   measurement, but recording it is what proved that.
