@@ -6,8 +6,22 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `Unicode::WidthPolicy#conjunct_wide?`, on by default, and a `WidthProbe` sample that settles it:
+  whether a consonant conjunct joined by a virama is two columns whatever it opens with. A conjunct
+  ligates into one glyph and what a terminal charges for that glyph is its own decision — ghostty
+  and Terminal.app take two, kitty 0.48.2 takes one. The floor used to be unconditional, which put
+  `क्ष` and `क्षि` at two on a terminal drawing them in one and left everything after them on that
+  row a cell to the left. With the rule measured, the model reproduces all nine of kitty's readings
+  for the Indic corpus where it previously matched two.
+
 ### Changed
 
+- Kitty no longer claims `Capability::Overline`. Measured against 0.48.2: SGR 53 leaves the text
+  unmarked where SGR 4 underlines it, and kitty's own terminfo declares `blink` and `smxx` and
+  nothing for an overline. Ghostty, WezTerm and foot do draw one, so it stays in
+  `Capabilities::MODERN` and comes off the one terminal by name.
 - `Capabilities::MODERN` no longer claims `Capability::RapidBlink`, and the encoder steps a rapid
   blink down to an ordinary one rather than dropping it. SGR 6 is among the least implemented codes
   there is — kitty draws nothing at all for it where SGR 5 blinks — and this shard assumes a

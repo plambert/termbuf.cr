@@ -37,6 +37,18 @@ module TermBuf
     # has exited.
     COLOR_STACK = Capability::KittyColorStack
 
+    # Overline, which kitty does not draw.
+    #
+    # Measured against kitty 0.48.2: SGR 53 leaves the text unmarked where SGR
+    # 4 underlines it, and kitty's own terminfo declares `blink` and `smxx` and
+    # nothing for an overline. Ghostty, WezTerm and foot do draw it, so it
+    # stays in `Capabilities::MODERN` and comes off the one terminal by name.
+    OVERLINE = Capability::Overline
+
+    # kitty, whose protocols the other current terminals borrowed, less the one
+    # attribute it does not draw.
+    KITTY = (Capabilities::MODERN.flags | KITTY_EXTRAS) & ~OVERLINE
+
     # A current terminal that neither blinks nor keeps colours for you.
     # `Capabilities.normalize` drops the rapid variant along with the slow one,
     # so taking both off here is belt and braces.
@@ -45,7 +57,7 @@ module TermBuf
     # Matched against `TERM`, most specific first.
     TERM_PATTERNS = [
       {/\Adumb/, Capability::None},
-      {/kitty/, Capabilities::MODERN.flags | KITTY_EXTRAS},
+      {/kitty/, KITTY},
       {/ghostty/, GHOSTTY},
       {/wezterm/, Capabilities::MODERN.flags | Capability::KittyGraphics},
       {/alacritty/, Capabilities::MODERN.flags},
@@ -82,7 +94,7 @@ module TermBuf
     # inherited from whatever opened the window can be told from one the
     # terminal reading the output set itself.
     MARKER_VARIABLES = [
-      {"KITTY_WINDOW_ID", "kitty", Capabilities::MODERN.flags | KITTY_EXTRAS},
+      {"KITTY_WINDOW_ID", "kitty", KITTY},
       {"GHOSTTY_RESOURCES_DIR", "ghostty", GHOSTTY},
       {"WEZTERM_PANE", "wezterm", Capabilities::MODERN.flags | Capability::KittyGraphics},
       {"WEZTERM_EXECUTABLE", "wezterm", Capabilities::MODERN.flags | Capability::KittyGraphics},
@@ -129,6 +141,8 @@ module TermBuf
     # the terminal outranks one that only describes a family.
     DENIALS = [
       {"ghostty", BLINKING | COLOR_STACK},
+      # kitty takes SGR 53 and draws the text unchanged.
+      {"kitty", OVERLINE},
       # Terminal.app takes SGR 9 and draws the text unchanged.
       {"apple_terminal", Capability::Strike},
     ]

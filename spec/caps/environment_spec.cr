@@ -103,6 +103,27 @@ Spectator.describe TermBuf::EnvironmentDetector do
       expect(caps.includes?(Cap::KittyColorStack)).to be_false
     end
 
+    # Measured against kitty 0.48.2: SGR 53 leaves the text unmarked where SGR 4
+    # underlines it, and kitty's terminfo declares no overline capability.
+    it "leaves the overline off kitty, which does not draw one" do
+      caps = detect({"TERM" => "xterm-kitty"})
+
+      expect(caps.includes?(Cap::Overline)).to be_false
+      expect(caps.includes?(Cap::Underline)).to be_true
+    end
+
+    it "keeps the overline off kitty however vague TERM is" do
+      caps = detect({"TERM" => "xterm-256color", "KITTY_WINDOW_ID" => "1"})
+
+      expect(caps.includes?(Cap::Overline)).to be_false
+    end
+
+    it "still draws an overline on ghostty, which has one" do
+      caps = detect({"TERM" => "xterm-ghostty"})
+
+      expect(caps.includes?(Cap::Overline)).to be_true
+    end
+
     it "still keeps the colour stack for kitty, whose protocol it is" do
       caps = detect({"TERM" => "xterm-kitty"})
 
