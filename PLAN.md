@@ -514,8 +514,15 @@ different opinion about:
 | `☺` then `☺️` | Whether U+FE0F widens a text pictograph |
 | `👨‍👩‍👧‍👦` | Whether ZWJ sequences collapse to one emoji |
 | `🇺🇸` | Whether a regional indicator pair collapses |
+| `🏋‍♀` | Whether a collapsed sequence is two columns whatever it opens with |
 | `நி` | Whether a spacing mark takes a cell of its own |
-| `क्षि` | Whether a conjunct collapses before its vowel sign |
+| `क्ष` | Whether a conjunct is two columns whatever it opens with |
+
+The conjunct sample is the bare conjunct rather than the conjunct plus its vowel sign, so that it
+settles one rule and not two: `क्षि` is the composite of this rule and the spacing mark one, and a
+terminal can answer them differently. Kitty 0.48.2 does — one column for both, where ghostty takes
+two — and with only the spacing mark sample the composite came out a column wide on kitty and took
+the rest of its row with it.
 
 ### Applying it
 
