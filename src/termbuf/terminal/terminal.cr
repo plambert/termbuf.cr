@@ -419,6 +419,12 @@ module TermBuf
     getter images : ImageStore { build_image_store }
 
     private def build_image_store : ImageStore
+      # A graphics reply is an escape sequence the application did not ask for,
+      # and without a pattern registered the decoder would hand it over as
+      # keystrokes. Registered here rather than at startup, since a terminal
+      # never asked for a picture never sends one. See `ImageStore::QUIET` for
+      # what is left unsuppressed and why.
+      expect_response ImageStore::APC, ImageStore::ST
       ImageStore.new @capabilities
     end
 

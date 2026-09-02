@@ -17,13 +17,27 @@ module TermBuf
     # protocol. Anything longer is split across continuation chunks.
     CHUNK = 4096
 
-    # Suppresses the terminal's replies. Without it every image draws an
-    # acknowledgement that the input decoder would deliver as a keystroke
-    # nobody pressed.
-    QUIET = "q=2"
+    # Suppresses the terminal's acknowledgements but not its complaints.
+    #
+    # `q=2` would silence both, and did: a path a terminal refused to read cost
+    # an afternoon because the `EINVAL` explaining exactly why was thrown away.
+    # An error is worth hearing, and `Terminal#images` registers a response
+    # pattern for these so one arrives as an `Events::Response` rather than as
+    # a burst of keystrokes nobody pressed.
+    QUIET = "q=1"
 
     APC = "\e_G"
     ST  = "\e\\"
+
+    # What a temporary file has to be called before a terminal will read it.
+    #
+    # The protocol says the file must be a temporary one, and terminals check
+    # that rather than take the caller's word. Measured against ghostty 1.3.2,
+    # which answers `EINVAL: temporary file not named correctly` for a path
+    # with this string nowhere in it, and `EINVAL: temporary file not in temp
+    # dir` for one outside the directory `TMPDIR` names — `/tmp` included,
+    # which is not the temporary directory on a Mac.
+    TEMP_MARKER = "tty-graphics-protocol"
 
     # What the terminal can do, which decides whether anything is sent at all
     # and which transport carries it.
@@ -41,6 +55,13 @@ module TermBuf
       @sent = Set(UInt32).new
       @files = [] of String
       @pending = [] of String
+    end
+
+    # A path in the system temporary directory named so that a terminal will
+    # read it. See `TEMP_MARKER`. Used by `Prober#probe_temp_file` too, so that
+    # what is asked about and what is later sent are named the same way.
+    def self.temp_path : String
+      File.tempname "#{TEMP_MARKER}-termbuf", ".img"
     end
 
     # Everything queued since the last time this was asked, and empties the
@@ -172,7 +193,7 @@ module TermBuf
     # The pixels go through a file the terminal reads and then deletes itself,
     # which is what `t=t` means and why the path has to be a temporary one.
     private def transmit_file(image : Image, keys : String) : Nil
-      path = File.tempname "termbuf", ".img"
+      path = ImageStore.temp_path
       File.write path, image.pixels
       @files << path
 

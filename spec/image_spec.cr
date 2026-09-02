@@ -59,7 +59,7 @@ Spectator.describe TermBuf::ImageStore do
       made = store
       made.place swatch, TermBuf::Rect.new(0, 0, 2, 1)
 
-      expect(made.take_pending.join).to contain "C=1,q=2"
+      expect(made.take_pending.join).to contain "C=1,q=1"
     end
 
     # A reply would reach the input decoder as a keystroke nobody pressed.
@@ -72,7 +72,7 @@ Spectator.describe TermBuf::ImageStore do
       made.take_pending.each do |text|
         next unless text.starts_with? "\e_G"
 
-        expect(text).to contain "q=2"
+        expect(text).to contain "q=1"
       end
     end
 
@@ -122,6 +122,24 @@ Spectator.describe TermBuf::ImageStore do
       expect(sent).to contain "t=t"
       expect(sent).not_to contain "m=1"
     end
+
+    # A terminal checks the path rather than taking the caller's word for it.
+    # Ghostty 1.3.2 answers `EINVAL: temporary file not named correctly` for a
+    # path without the marker and `EINVAL: temporary file not in temp dir` for
+    # one outside what `TMPDIR` names, and `q=1` meant neither was ever seen.
+    it "names the file so that a terminal will read it" do
+      made = store graphics(temp_file: true)
+      made.place swatch, TermBuf::Rect.new(0, 0, 2, 1)
+
+      sent = made.take_pending.find &.starts_with? "\e_G"
+      fail "nothing was sent" unless sent
+
+      encoded = sent.partition(';')[2].rchop("\e\\")
+      path = String.new Base64.decode(encoded)
+
+      expect(path).to contain TermBuf::ImageStore::TEMP_MARKER
+      expect(path).to start_with Dir.tempdir
+    end
   end
 
   describe "managing" do
@@ -132,7 +150,7 @@ Spectator.describe TermBuf::ImageStore do
       made.delete placement
 
       expect(made.take_pending.join)
-        .to eq "\e_Ga=d,d=i,i=#{placement.image},p=#{placement.id},q=2\e\\"
+        .to eq "\e_Ga=d,d=i,i=#{placement.image},p=#{placement.id},q=1\e\\"
     end
 
     it "deletes everything at once" do

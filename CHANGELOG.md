@@ -22,6 +22,19 @@ All notable changes to this project are documented here. The format follows
   wrongly is worse than not having it — `Terminal#colors` was recolouring the terminal permanently
   and leaving it that way after the program had exited. There is no query for this, so it is denied
   by name, the way blinking is.
+- A temporary file carrying pixels is named so that a terminal will read it. The protocol says the
+  file must be a temporary one and terminals check rather than take the caller's word: ghostty
+  wants the path under what `TMPDIR` names — `/tmp` is not that on a Mac — and the string
+  `tty-graphics-protocol` somewhere in it. Every temp-file transmission was being refused with
+  `EINVAL`, and `Prober#probe_temp_file` now asks about a path named the same way as the ones it
+  is deciding for.
+- Graphics replies use `q=1` rather than `q=2`, so a terminal's complaint survives while its
+  acknowledgements are still suppressed. `Terminal#images` registers a response pattern for them,
+  which is what stops one arriving as a burst of keystrokes nobody pressed — the reason they were
+  silenced outright before. The `EINVAL` above was thrown away by the old setting.
+
+## [0.2.0] - 2026-09-02
+
 ### Added
 
 - **Hyperlinks.** `Link` and `LinkTable` intern a URI and the OSC 8 grouping parameter, `Buffer#link`

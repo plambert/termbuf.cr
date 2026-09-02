@@ -1,5 +1,6 @@
 require "base64"
 
+require "../image_store"
 require "./capability"
 require "./environment"
 require "./response_scanner"
@@ -247,7 +248,9 @@ module TermBuf
     # be there, and it needs somewhere to write, so it is separate from the
     # main batch.
     def probe_temp_file : Bool
-      path = File.tempname "termbuf", ".rgb"
+      # Named the way a real transmission will be, or the answer describes a
+      # path the terminal would go on to refuse. See `ImageStore::TEMP_MARKER`.
+      path = ImageStore.temp_path
       File.write path, Bytes[0, 0, 0]
 
       @output << "\e_Gi=32,s=1,v=1,a=q,t=f,f=24;" << Base64.strict_encode(path) << "\e\\"
