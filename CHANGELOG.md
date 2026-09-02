@@ -12,6 +12,9 @@ All notable changes to this project are documented here. The format follows
   documented in the page's own footer, and never dispatched — the handler was defined and nothing
   called it, so the page that demonstrates links, images, and the colour stack demonstrated only
   the links.
+- `examples/validate.cr`: tab and shift-tab go round rather than stopping at the ends, so the last
+  page is one shift-tab from the first instead of eleven tabs away. The arrow keys still stop,
+  which is what leaves a way to tell which end you are at.
 
 ## [0.2.0] - 2026-09-02
 

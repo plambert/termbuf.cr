@@ -1140,8 +1140,8 @@ module Validate
     # What the keys mean on a page that has not been entered, which is every
     # page until enter is pressed on one of the two that take typing.
     private def browsing_key(key : Key) : Nil
-      return force_repaint if key.ctrl? && key.character? && key.char == 'r'
-      return go_to(key.shift? ? @page - 1 : @page + 1) if key.is? Key::Name::Tab
+      return force_repaint if redraw? key
+      return step_page(key) if key.is? Key::Name::Tab
       return @running = false if key.is? 'q'
       return enter_page if key.is?(Key::Name::Enter) && typeable?
 
@@ -1239,6 +1239,17 @@ module Validate
 
     private def arriving(bytes : Int32) : Nil
       @arriving = bytes
+    end
+
+    private def redraw?(key : Key) : Bool
+      key.ctrl? && key.character? && key.char == 'r'
+    end
+
+    # Tab goes round rather than stopping at the ends, so the last page is one
+    # shift-tab from the first instead of eleven tabs away. The arrow keys
+    # still stop, which is what leaves a way to tell which end you are at.
+    private def step_page(key : Key) : Nil
+      go_to (key.shift? ? @page - 1 : @page + 1) % PAGES.size
     end
 
     private def go_to(page : Int32) : Nil
