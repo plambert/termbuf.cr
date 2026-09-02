@@ -4,7 +4,13 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.1] - 2026-09-02
+
+### Added
+
+- `ImageStore::TEMP_MARKER` and `ImageStore.temp_path`, which name a file the way a terminal will
+  accept before reading it. Public because the prober shares them; an application has no reason to
+  reach for either.
 
 ### Fixed
 
@@ -283,7 +289,8 @@ First release. Everything below is new.
 - OSC 8 links, kitty graphics, and the kitty colour stack are detected but not emitted.
 - Mouse reporting is not enabled or decoded.
 
-[Unreleased]: https://github.com/plambert/termbuf.cr/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/plambert/termbuf.cr/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/plambert/termbuf.cr/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/plambert/termbuf.cr/compare/v0.1.6...v0.2.0
 [0.1.6]: https://github.com/plambert/termbuf.cr/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/plambert/termbuf.cr/compare/v0.1.4...v0.1.5
