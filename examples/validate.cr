@@ -77,6 +77,8 @@ module Validate
       @focused = false
       @presses = [] of String
       @arriving = nil.as(Int32?)
+      # The swatch, registered the first time it is wanted and reused after.
+      @swatch = nil.as(UInt32?)
       @entered = [] of String
       @field = self.class.build_field
       @typed = ""
@@ -791,7 +793,8 @@ module Validate
       draw_escape_samples screen, pane.bottom + 2
 
       screen.write 2, rows - 3,
-        "everything but tab and q is typed   [tab] next page   [q] quit",
+        "everything but tab and q is typed, pasted text included   " \
+        "[tab] next page   [q] quit",
         Style::DEFAULT.faint
     end
 
@@ -1024,7 +1027,7 @@ module Validate
       draw_rich_image screen, caps
 
       screen.write 2, rows - 2,
-        "[c] push a colour  [C] pop  [i] place an image  [x] clear the images",
+        "[c] push a tint  [C] pop  [i] place images, then cascade  [x] clear them",
         Style::DEFAULT.faint
     end
 
@@ -1093,10 +1096,63 @@ module Validate
       screen.write 40, 8, "#{@terminal.images.placements.size} placed", Style::DEFAULT.faint
       return unless supported
 
-      screen.write 2, 10, "the box below is where the image goes; text under it stays put",
+      screen.write 2, 10,
+        "left: the picture is over the text. right: the text is over the picture.",
         Style::DEFAULT.faint
-      Border.plain(Style::DEFAULT.faint).draw screen, Rect.new(2, 11, 22, 6)
-      screen.write 4, 13, "under the picture", Style::DEFAULT.faint
+
+      Border.plain(Style::DEFAULT.faint).draw screen, OVER_BOX
+      Border.plain(Style::DEFAULT.faint).draw screen, UNDER_BOX
+
+      # Both boxes carry the same words, so which one wins is the only
+      # difference to look at.
+      3.times do |row|
+        screen.write OVER_BOX.x + 2, OVER_BOX.y + 1 + row, "text in the box", Style::DEFAULT.faint
+        screen.write UNDER_BOX.x + 2, UNDER_BOX.y + 1 + row, "text in the box", Style::DEFAULT.faint
+      end
+    end
+
+    # The two boxes the page opens with, and where a cascade starts from.
+    OVER_BOX  = Rect.new 2, 11, 22, 6
+    UNDER_BOX = Rect.new 28, 11, 22, 6
+
+    # How far each added placement steps, so a cascade shows how many there are.
+    CASCADE = {3, 1}
+
+    # The most that fit on the page before they walk off the bottom.
+    CASCADE_LIMIT = 6
+
+    # An image over the text, one under it, and then one per press stepping
+    # down and to the right so that each is visibly its own.
+    private def place_images : Nil
+      images = @terminal.images
+      return unless @terminal.capabilities.includes? Capability::KittyGraphics
+
+      # Registered once and placed as often as wanted: the pixels go out with
+      # the first placement and every one after it costs a short sequence. The
+      # cascade would otherwise send the same three kilobytes six times.
+      id = (@swatch ||= images.add swatch)
+
+      if images.placements.empty?
+        images.place id, inset(OVER_BOX), z: 1
+        images.place id, inset(UNDER_BOX), z: -1
+        return
+      end
+
+      return if images.placements.size >= 2 + CASCADE_LIMIT
+
+      step = images.placements.size - 1
+      bounds = inset OVER_BOX
+      offset = Rect.new bounds.x + step * CASCADE[0], bounds.y + step * CASCADE[1],
+        bounds.width, bounds.height
+      return unless Rect.full(columns, rows).contains? offset
+
+      # Each one above the last, so the newest is on top and the pile reads in
+      # the order it was made.
+      images.place id, offset, z: 1 + step
+    end
+
+    private def inset(box : Rect) : Rect
+      Rect.new box.x + 1, box.y + 1, box.width - 2, box.height - 2
     end
 
     private def mark(on : Bool) : Style
@@ -1134,7 +1190,7 @@ module Validate
         # The pop restores what the matching push saved, which is the tint one
         # level down — or the terminal's own colour at the bottom. Nothing to
         # set here; that is the point of the stack.
-      when 'i' then @terminal.images.place swatch, Rect.new(3, 12, 20, 4)
+      when 'i' then place_images
       when 'x' then @terminal.images.clear
       else          return false
       end
@@ -1236,10 +1292,19 @@ module Validate
 
     private def type(key : Key) : Nil
       case key.name
-      when .enter?     then @typed += "\n"
+      when .enter?     then type_text "\n"
       when .backspace? then @typed = @typed[0, Math.max(@typed.size - 1, 0)]
-      when .character? then @typed += key.char
+      when .character? then type_text key.char.to_s
       end
+    end
+
+    # Typed and pasted text arrive the same way here, which is the point: a
+    # paste is not typing, and the application is the one that gets to decide
+    # they mean the same thing in this pane.
+    private def type_text(text : String) : Nil
+      @typed += text
+      @typed = @typed[(@typed.size - TYPED_LIMIT)..] if @typed.size > TYPED_LIMIT
+      @rebuild = true
     end
 
     # Only what was pressed while the keys page is showing. Recording
@@ -1268,10 +1333,18 @@ module Validate
       end
     end
 
+    # The most of a paste the typing pane keeps.
+    #
+    # A person cannot type enough for this to matter and a clipboard easily
+    # can, and the pane is redrawn from the whole string every frame. The tail
+    # is the half kept, since that is the end the region was showing anyway.
+    TYPED_LIMIT = 4096
+
     private def pasted(text : String, complete : Bool) : Nil
       preview = text.size > 40 ? "#{text[0, 40]}…" : text
       tail = complete ? "" : ", never closed"
       return @field.paste text if field? && @focused
+      return type_text text if cursors? && @focused
 
       # Logged on the keys page for the same reason keystrokes are: that is the
       # page showing what arrived.
