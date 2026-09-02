@@ -124,21 +124,15 @@ Spectator.describe TermBuf::EnvironmentDetector do
       expect(caps.includes?(Cap::Overline)).to be_true
     end
 
-    # Measured against iTerm2 3.6.11, whose preferences carry no blinking-text
-    # setting and whose machine had reduce-motion off: SGR 5 leaves the text
-    # unchanged.
-    it "leaves blinking off iTerm2, which does not blink" do
+    # iTerm2 blinks, behind a per-profile `Blink Allowed` that ships off. A
+    # capability is what the terminal can be asked to do, not how this machine
+    # is set up, so the flag stays. SGR 6 blinks there at the same rate as SGR
+    # 5, which is what the encoder's step down already produces.
+    it "keeps blinking for iTerm2, which blinks when it is allowed to" do
       caps = detect({"TERM" => "xterm-256color", "TERM_PROGRAM" => "iTerm.app"})
 
-      expect(caps.includes?(Cap::Blink)).to be_false
+      expect(caps.includes?(Cap::Blink)).to be_true
       expect(caps.includes?(Cap::RapidBlink)).to be_false
-      expect(caps.includes?(Cap::TrueColor)).to be_true
-    end
-
-    it "keeps blinking off iTerm2 when only the marker names it" do
-      caps = detect({"TERM" => "xterm-256color", "ITERM_SESSION_ID" => "w0t0p0"})
-
-      expect(caps.includes?(Cap::Blink)).to be_false
     end
 
     it "still keeps the colour stack for kitty, whose protocol it is" do

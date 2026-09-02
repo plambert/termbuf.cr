@@ -26,10 +26,6 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
-- iTerm2 no longer claims `Capability::Blink`, and `Capability::RapidBlink` follows it off.
-  Measured against 3.6.11: SGR 5 leaves the text unchanged. Its preferences carry no blinking-text
-  setting to explain it away — `Blinking Cursor` is the only blink of any kind in them — and macOS
-  reduce-motion was off, so this is the terminal rather than the machine it was on.
 - Kitty no longer claims `Capability::Overline`. Measured against 0.48.2: SGR 53 leaves the text
   unmarked where SGR 4 underlines it, and kitty's own terminfo declares `blink` and `smxx` and
   nothing for an overline. Ghostty, WezTerm and foot do draw one, so it stays in
