@@ -4,6 +4,15 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- `examples/validate.cr`: the rich page's keys do something. `c`, `C`, `i`, and `x` were written,
+  documented in the page's own footer, and never dispatched — the handler was defined and nothing
+  called it, so the page that demonstrates links, images, and the colour stack demonstrated only
+  the links.
+
 ## [0.2.0] - 2026-09-02
 
 ### Added

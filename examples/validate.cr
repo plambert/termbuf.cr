@@ -1149,6 +1149,9 @@ module Validate
       # above have not claimed is left alone for it to draw.
       return if keys?
 
+      # The rich page has keys of its own, and says so whether it took one.
+      return if rich? && rich_key(key)
+
       case key.name
       when .right? then go_to @page + 1
       when .left?  then go_to @page - 1
