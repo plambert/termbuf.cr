@@ -98,6 +98,35 @@ Spectator.describe TermBuf::WidthProbe do
       expect(result.policy.emoji_presentation?).to be_false
     end
 
+    it "notices a terminal that does not widen a conjunct" do
+      wanted = Policy::DEFAULT.with "conjunct_wide", false
+      result, _ = probe replies(wanted)
+
+      expect(result.policy.conjunct_wide?).to be_false
+      expect(result.disagreements).to be_empty
+    end
+
+    # iTerm2 3.6.11 adds the conjunct and the vowel sign up to three, where
+    # every rule in this design tops out at two — a cluster occupies a cell or
+    # a pair of them and there is no third to put anything in. Naming the
+    # cluster is what can be done about it; modelling it wrong is not.
+    it "reports a cluster the terminal charges more than a cell pair can hold" do
+      answers = String.build do |io|
+        TermBuf::WidthProbe::SAMPLES.each do |sample|
+          columns = sample.text == "क्षि" ? 3 : TermBuf::Unicode.string_width(sample.text)
+          io << "\e[1;" << columns + 1 << "R"
+        end
+      end
+
+      result, _ = probe answers
+      left = result.disagreements
+
+      expect(left.size).to eq 1
+      expect(left.first.measured).to eq 3
+      expect(left.first.sample.text).to eq "क्षि"
+      expect(left.first.sample.rule).to be_nil
+    end
+
     it "notices a terminal that gives a spacing mark no cell of its own" do
       wanted = Policy::DEFAULT.with "spacing_marks", false
       result, _ = probe replies(wanted)

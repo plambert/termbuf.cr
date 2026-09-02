@@ -43,6 +43,12 @@ module TermBuf
         "joined sequence opening with a narrow pictograph"),
       Sample.new("நி", "spacing_marks", 2, 1, "tamil na with a spacing vowel sign"),
       Sample.new("क्ष", "conjunct_wide", 2, 1, "devanagari consonants joined by a virama"),
+      # No rule of its own: this is the composite of the two above it, and it
+      # is here to catch a terminal that adds them up past what a cell pair can
+      # hold. iTerm2 3.6.11 charges three, where every rule in this design tops
+      # out at two, so it comes back as a disagreement — named rather than
+      # modelled wrong. See `Result#disagreements`.
+      Sample.new("क्षि", nil, 2, 2, "devanagari conjunct with a spacing vowel sign"),
     ]
 
     # What one sample turned into.
