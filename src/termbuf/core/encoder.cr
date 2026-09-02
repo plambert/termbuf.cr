@@ -339,7 +339,7 @@ module TermBuf
       # nothing to repaint.
       style = style.linked LinkTable::NONE unless @capabilities.includes? Capability::Osc8Links
 
-      attributes = style.attributes & supported_attributes
+      attributes = capped style.attributes
       underline = supported_underline style.underline
       foreground = narrow style.foreground
       background = narrow style.background
@@ -379,6 +379,25 @@ module TermBuf
       return color if @capabilities.includes? Capability::Color256
 
       color.to_indexed16
+    end
+
+    # *attributes* less what this terminal cannot do, with rapid blink stepped
+    # down to the ordinary kind rather than dropped.
+    #
+    # Capped rather than limited, the way colour is: a terminal without SGR 6
+    # that has SGR 5 should blink the text somewhat rather than leave it still,
+    # since blinking slowly is what asking for rapid blink was nearly after.
+    # Kitty ignores SGR 6 outright, which is what this was found by.
+    private def capped(attributes : Attributes) : Attributes
+      supported = supported_attributes
+
+      if attributes.includes?(Attributes::RapidBlink) &&
+         !supported.includes?(Attributes::RapidBlink) &&
+         supported.includes?(Attributes::SlowBlink)
+        attributes = (attributes & ~Attributes::RapidBlink) | Attributes::SlowBlink
+      end
+
+      attributes & supported
     end
 
     private def supported_attributes : Attributes

@@ -144,9 +144,16 @@ module TermBuf
                 Capability::Conceal | Capability::EraseChars
 
     # A current terminal such as kitty, ghostty, or WezTerm.
+    #
+    # No `RapidBlink`. SGR 6 is one of the least implemented codes there is —
+    # kitty draws nothing at all for it, where SGR 5 blinks — and this shard
+    # assumes a capability absent without a reason to believe otherwise. The
+    # encoder steps a rapid blink down to an ordinary one rather than dropping
+    # it, so asking for it still blinks; a terminal measured doing better can
+    # be given the flag by name.
     MODERN = new XTERM.flags | Capability::TrueColor | Capability::ExtendedUnderline |
                  Capability::UnderlineColor | Capability::Overline |
-                 Capability::RapidBlink | Capability::SynchronizedOutput |
+                 Capability::SynchronizedOutput |
                  Capability::BracketedPaste | Capability::FocusEvents |
                  Capability::MouseSgr | Capability::Osc8Links | Capability::Titles |
                  Capability::CursorShape

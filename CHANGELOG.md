@@ -4,6 +4,23 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- `Capabilities::MODERN` no longer claims `Capability::RapidBlink`, and the encoder steps a rapid
+  blink down to an ordinary one rather than dropping it. SGR 6 is among the least implemented codes
+  there is — kitty draws nothing at all for it where SGR 5 blinks — and this shard assumes a
+  capability absent without a reason to believe otherwise. Text asked to blink rapidly now blinks
+  slowly instead of sitting still, which is the same capping colour has always had. A terminal
+  measured doing better can be given the flag by name.
+- `examples/validate.cr`: the rich page pushes a different tint for each `c`, and draws what each
+  level of the stack is holding. One tint cannot show a stack — popping from it looked identical to
+  popping from nothing.
+- `examples/validate.cr`: the cursors page says what its two escape-sequence rows are for. They are
+  the same string down two cursors, one scanning it into attributes and one printing the bytes; the
+  labels `scanned` and `raw` conveyed neither.
+
 ## [0.2.1] - 2026-09-02
 
 ### Added

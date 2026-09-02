@@ -258,6 +258,40 @@ Spectator.describe TermBuf::Encoder do
     end
   end
 
+  describe "attributes under a narrower terminal" do
+    # SGR 6 is one of the least implemented codes there is: kitty draws nothing
+    # for it where SGR 5 blinks. Dropping it leaves text that was asked to
+    # blink sitting still, which is further from what was asked for than
+    # blinking slowly is.
+    it "steps a rapid blink down to an ordinary one" do
+      styles = TermBuf::StyleTable.new
+      id = styles.id TermBuf::Style::DEFAULT.blink rapid: true
+
+      expect(emit(encoder(TermBuf::Capabilities::MODERN, styles), TermBuf::Ops::SetStyle.new(id)))
+        .to eq "\e[0;5m"
+    end
+
+    it "drops it outright when the terminal does not blink either way" do
+      styles = TermBuf::StyleTable.new
+      id = styles.id TermBuf::Style::DEFAULT.blink rapid: true
+      capabilities = TermBuf::Capabilities.new(
+        TermBuf::Capabilities::MODERN.flags & ~TermBuf::Capability::Blink)
+
+      expect(emit(encoder(capabilities, styles), TermBuf::Ops::SetStyle.new(id)))
+        .to eq "\e[0m"
+    end
+
+    it "leaves a rapid blink alone on a terminal that has one" do
+      styles = TermBuf::StyleTable.new
+      id = styles.id TermBuf::Style::DEFAULT.blink rapid: true
+      capabilities = TermBuf::Capabilities.new(
+        TermBuf::Capabilities::MODERN.flags | TermBuf::Capability::RapidBlink)
+
+      expect(emit(encoder(capabilities, styles), TermBuf::Ops::SetStyle.new(id)))
+        .to eq "\e[0;6m"
+    end
+  end
+
   describe "colour under a narrower terminal" do
     it "keeps 24 bit colour when the terminal has it" do
       styles = TermBuf::StyleTable.new
