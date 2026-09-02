@@ -112,6 +112,21 @@ Spectator.describe TermBuf::EnvironmentDetector do
       expect(caps.includes?(Cap::Underline)).to be_true
     end
 
+    # SGR 8 leaves the text visible on kitty 0.48.2, and its terminfo declares
+    # no `invis` where ghostty's declares one.
+    it "leaves conceal off kitty, which shows the text anyway" do
+      caps = detect({"TERM" => "xterm-kitty"})
+
+      expect(caps.includes?(Cap::Conceal)).to be_false
+      expect(caps.includes?(Cap::Strike)).to be_true
+    end
+
+    it "still conceals on ghostty, which hides the text" do
+      caps = detect({"TERM" => "xterm-ghostty"})
+
+      expect(caps.includes?(Cap::Conceal)).to be_true
+    end
+
     it "keeps the overline off kitty however vague TERM is" do
       caps = detect({"TERM" => "xterm-256color", "KITTY_WINDOW_ID" => "1"})
 

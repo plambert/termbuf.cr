@@ -37,17 +37,18 @@ module TermBuf
     # has exited.
     COLOR_STACK = Capability::KittyColorStack
 
-    # Overline, which kitty does not draw.
+    # What kitty does not draw.
     #
-    # Measured against kitty 0.48.2: SGR 53 leaves the text unmarked where SGR
-    # 4 underlines it, and kitty's own terminfo declares `blink` and `smxx` and
-    # nothing for an overline. Ghostty, WezTerm and foot do draw it, so it
-    # stays in `Capabilities::MODERN` and comes off the one terminal by name.
-    OVERLINE = Capability::Overline
+    # Measured against 0.48.2: SGR 53 leaves the text unmarked where SGR 4
+    # underlines it, and SGR 8 leaves it visible. Kitty's own terminfo agrees,
+    # declaring `blink` and `smxx` and neither an overline nor `invis` — where
+    # ghostty's declares `invis=\E[8m`. Ghostty, WezTerm and foot draw both, so
+    # they stay in `Capabilities::MODERN` and come off the one terminal by name.
+    KITTY_MISSING = Capability::Overline | Capability::Conceal
 
-    # kitty, whose protocols the other current terminals borrowed, less the one
-    # attribute it does not draw.
-    KITTY = (Capabilities::MODERN.flags | KITTY_EXTRAS) & ~OVERLINE
+    # kitty, whose protocols the other current terminals borrowed, less the two
+    # attributes it does not draw.
+    KITTY = (Capabilities::MODERN.flags | KITTY_EXTRAS) & ~KITTY_MISSING
 
     # A current terminal that neither blinks nor keeps colours for you.
     # `Capabilities.normalize` drops the rapid variant along with the slow one,
@@ -144,8 +145,8 @@ module TermBuf
     # the terminal outranks one that only describes a family.
     DENIALS = [
       {"ghostty", BLINKING | COLOR_STACK},
-      # kitty takes SGR 53 and draws the text unchanged.
-      {"kitty", OVERLINE},
+      # kitty takes SGR 53 and SGR 8 and draws the text unchanged.
+      {"kitty", KITTY_MISSING},
       # Terminal.app takes SGR 9 and draws the text unchanged.
       {"apple_terminal", Capability::Strike},
     ]

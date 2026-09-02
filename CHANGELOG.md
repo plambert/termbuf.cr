@@ -16,6 +16,12 @@ All notable changes to this project are documented here. The format follows
   row a cell to the left. With the rule measured, the model reproduces all nine of kitty's readings
   for the Indic corpus where it previously matched two.
 
+- `Placement#z` and a `z:` argument to `ImageStore#place`: where a picture sits against the text and
+  against the other placements. Zero and above covers the text, which is the default and what an
+  image drawn to be looked at wants; negative sits beneath it, so the cells keep their glyphs and
+  the picture shows through wherever they are blank — a chart behind a table, a watermark. Higher
+  covers lower among placements, so a cascade is a rising `z` and nothing else. Nothing is emitted
+  at zero, which is what the protocol defaults to.
 - A `WidthProbe` sample for `क्षि`, a conjunct carrying a spacing vowel sign, with no rule of its
   own. It is the composite of the two rules before it and it is there to catch a terminal that adds
   them up past what a cell pair can hold: iTerm2 3.6.11 charges three columns for it, where every
@@ -26,10 +32,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
-- Kitty no longer claims `Capability::Overline`. Measured against 0.48.2: SGR 53 leaves the text
-  unmarked where SGR 4 underlines it, and kitty's own terminfo declares `blink` and `smxx` and
-  nothing for an overline. Ghostty, WezTerm and foot do draw one, so it stays in
-  `Capabilities::MODERN` and comes off the one terminal by name.
+- Kitty no longer claims `Capability::Overline` or `Capability::Conceal`. Measured against 0.48.2:
+  SGR 53 leaves the text unmarked where SGR 4 underlines it, and SGR 8 leaves it visible. Kitty's
+  own terminfo agrees, declaring `blink` and `smxx` and neither an overline nor `invis` — where
+  ghostty's declares `invis=\E[8m`. Ghostty, WezTerm and foot draw both, so they stay in
+  `Capabilities::MODERN` and come off the one terminal by name.
 - `Capabilities::MODERN` no longer claims `Capability::RapidBlink`, and the encoder steps a rapid
   blink down to an ordinary one rather than dropping it. SGR 6 is among the least implemented codes
   there is — kitty draws nothing at all for it where SGR 5 blinks — and this shard assumes a
@@ -39,6 +46,13 @@ All notable changes to this project are documented here. The format follows
 - `examples/validate.cr`: the rich page pushes a different tint for each `c`, and draws what each
   level of the stack is holding. One tint cannot show a stack — popping from it looked identical to
   popping from nothing.
+- `examples/validate.cr`: the cursors page accepts pasted text into its typing pane. It was arriving
+  and being dropped, since only the field page had somewhere to put it. Typed and pasted text go the
+  same way here, which is the application's decision to make rather than the shard's.
+- `examples/validate.cr`: the rich page opens with one picture over the text and one under it, in
+  boxes carrying the same words so the difference is the only thing to look at, and each `i` after
+  that cascades another down and to the right on a rising `z`. The swatch is registered once and
+  placed repeatedly, so the pixels cross the wire once rather than per press.
 - `examples/validate.cr`: the cursors page says what its two escape-sequence rows are for. They are
   the same string down two cursors, one scanning it into attributes and one printing the bytes; the
   labels `scanned` and `raw` conveyed neither.
