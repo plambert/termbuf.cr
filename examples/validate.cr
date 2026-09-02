@@ -16,7 +16,7 @@ module Validate
   alias Color = TermBuf::Color
   alias Rect = TermBuf::Rect
 
-  PAGES = %w[caps edges widths colours attrs motion keys cursors measured panels field]
+  PAGES = %w[caps edges widths colours attrs motion keys cursors measured panels field rich]
 
   # One line of the width page: something to draw, and what it is.
   #
@@ -127,6 +127,7 @@ module Validate
       when "measured" then draw_measured screen
       when "panels"   then draw_panels screen
       when "field"    then draw_field screen
+      when "rich"     then draw_rich screen
       end
     end
 
@@ -136,6 +137,10 @@ module Validate
 
     private def keys? : Bool
       PAGES[@page] == "keys"
+    end
+
+    private def rich? : Bool
+      PAGES[@page] == "rich"
     end
 
     private def field? : Bool
@@ -993,6 +998,102 @@ module Validate
       @entered.last(Math.max(rows - row - 2, 0)).each_with_index do |line, offset|
         screen.write 4, row + offset, line.inspect, Style::DEFAULT.faint
       end
+    end
+
+    # --------------------------------------------------------------- page 12
+
+    # The three things a modern terminal will do that a cell grid cannot say on
+    # its own. Each is behind the capability that decides whether asking is
+    # safe, so this page reads differently on every terminal — which is the
+    # point of it.
+    private def draw_rich(screen) : Nil
+      caps = @terminal.capabilities
+      screen.write 2, 2, "beyond the cell grid", Style::DEFAULT.bold
+
+      draw_rich_links screen, caps
+      draw_rich_colors screen, caps
+      draw_rich_image screen, caps
+
+      screen.write 2, rows - 2,
+        "[c] push a colour  [C] pop  [i] place an image  [x] clear the images",
+        Style::DEFAULT.faint
+    end
+
+    private def draw_rich_links(screen, caps) : Nil
+      supported = caps.includes? Capability::Osc8Links
+      screen.write 2, 4, "OSC 8 links".ljust(16), Style::DEFAULT.faint
+      screen.write 20, 4, supported ? "yes" : "no", mark(supported)
+      return unless supported
+
+      link = @terminal.link "https://plambert.github.io/termbuf.cr/latest/", "docs"
+      underlined = Style::DEFAULT.fg(Color.indexed(4)).underlined.linked(link)
+      screen.write 26, 4, "termbuf documentation", underlined
+      screen.write 50, 4, "(same link, one group)", underlined
+    end
+
+    private def draw_rich_colors(screen, caps) : Nil
+      supported = caps.includes? Capability::KittyColorStack
+      screen.write 2, 6, "colour stack".ljust(16), Style::DEFAULT.faint
+      screen.write 20, 6, supported ? "yes" : "no", mark(supported)
+      screen.write 26, 6, "depth #{@terminal.colors.depth}", Style::DEFAULT.faint
+      return unless supported
+
+      screen.write 40, 6, "press c to tint the whole terminal, C to put it back",
+        Style::DEFAULT.faint
+    end
+
+    private def draw_rich_image(screen, caps) : Nil
+      supported = caps.includes? Capability::KittyGraphics
+      transport = caps.includes?(Capability::KittyGraphicsTempFile) ? "temp file" : "inline"
+      screen.write 2, 8, "kitty graphics".ljust(16), Style::DEFAULT.faint
+      screen.write 20, 8, supported ? "yes" : "no", mark(supported)
+      screen.write 26, 8, supported ? transport : "", Style::DEFAULT.faint
+      screen.write 40, 8, "#{@terminal.images.placements.size} placed", Style::DEFAULT.faint
+      return unless supported
+
+      screen.write 2, 10, "the box below is where the image goes; text under it stays put",
+        Style::DEFAULT.faint
+      Border.plain(Style::DEFAULT.faint).draw screen, Rect.new(2, 11, 22, 6)
+      screen.write 4, 13, "under the picture", Style::DEFAULT.faint
+    end
+
+    private def mark(on : Bool) : Style
+      on ? Style::DEFAULT.fg(Color.indexed(2)) : Style::DEFAULT.fg(Color.indexed(1))
+    end
+
+    # A gradient, so that a wrong stride or a swapped channel is visible rather
+    # than merely wrong.
+    private def swatch : Image
+      width = 32
+      height = 32
+      pixels = Bytes.new width * height * 3
+
+      height.times do |row|
+        width.times do |column|
+          at = (row * width + column) * 3
+          pixels[at] = (column * 8).to_u8
+          pixels[at + 1] = (row * 8).to_u8
+          pixels[at + 2] = 160_u8
+        end
+      end
+
+      Image.rgb pixels, width, height
+    end
+
+    private def rich_key(key : Key) : Bool
+      return false unless key.character?
+
+      case key.char
+      when 'c'
+        @terminal.colors.push
+        @terminal.colors.background = Color.rgb(30, 20, 45)
+      when 'C' then @terminal.colors.pop
+      when 'i' then @terminal.images.place swatch, Rect.new(3, 12, 20, 4)
+      when 'x' then @terminal.images.clear
+      else          return false
+      end
+
+      true
     end
 
     # ---------------------------------------------------------------- input

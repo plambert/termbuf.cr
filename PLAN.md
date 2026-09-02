@@ -797,6 +797,20 @@ OSC 8 link ids threaded through `Style` and emitted as ranges; kitty graphics wi
 by the Phase 5 probe, image placement, deletion, and re-emission on forced repaint; kitty colour
 stack push/pop.
 
+Done. Three decisions worth recording:
+
+* **A link is not an SGR attribute.** `SGR 0` does not close one, so it is tracked apart from the
+  rest of the style rather than folded into the delta. Without `Osc8Links` it is stripped from the
+  effective style, so two runs differing only by a link become one run and cost nothing.
+* **The colour stack gates the colour setters too.** OSC 4 and OSC 10 are older and more widely
+  supported than the stack, but without somewhere to put the old values there is no way to give
+  them back. A shard that leaves a terminal a different colour than it found it is worse than one
+  that leaves the colours alone.
+* **Images are not cells.** They are drawn over the screen after each frame rather than into the
+  buffer, so the core is untouched and an application that writes text where one sits gets both.
+  Compositing images with text would mean a per-cell owner and a painter that understands
+  occlusion, which is well past what `CLAUDE.md` asks for.
+
 ### Phase 12 — Documentation and release
 
 README with worked examples, `examples/`, API docs, the versioned GitHub Pages docs workflow,

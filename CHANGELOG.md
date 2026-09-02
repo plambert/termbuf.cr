@@ -8,6 +8,24 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Hyperlinks.** `Link` and `LinkTable` intern a URI and the OSC 8 grouping parameter, `Buffer#link`
+  and `Terminal#link` hand back the id a `Style` carries, and the encoder emits the sequence when
+  the id changes from one run to the next. A link is not an SGR attribute and `SGR 0` does not close
+  one, so it is tracked apart from the rest of the style. Without `Capability::Osc8Links` it is
+  stripped from the effective style, so two runs differing only by a link are one run and an
+  application that sets links pays nothing on a terminal that has none.
+- **The terminal's own colours.** `Terminal#colors` pushes and pops the Kitty colour stack and sets
+  the defaults, the cursor, the selection, and palette entries. All of it needs
+  `Capability::KittyColorStack`, the setters included: the stack is what makes a change reversible,
+  and without somewhere to put the old values there is no way to give them back. `Terminal#close`
+  pops whatever is still pushed, so an application that forgets — or that stops on a signal — still
+  gives the terminal back the colours it was found with.
+- **Images.** `Image`, `Placement`, and `Terminal#images` transmit pixels once and place them as
+  often as wanted, over the cells of each frame rather than into the buffer. The transport is the
+  probe's: a temp file where the terminal reads one, base64 in chunks where it does not, asked on
+  the alternate screen so a terminal that cannot parse the query does not print it on the screen the
+  person was looking at. Placements that no longer fit are dropped on a resize, everything is sent
+  again on a forced repaint, and the pictures come down when the terminal is given back.
 - `Unicode::WidthPolicy#joined_emoji_wide?`, on by default: whether a collapsed joined sequence is
   two columns whatever it opens with, rather than as wide as the code point it starts from. iTerm2
   3.6.11 is the one terminal of seven surveyed that does the latter. `WidthProbe` measures it from
