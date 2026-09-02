@@ -788,7 +788,7 @@ module Validate
 
       draw_pane_border screen, pane
       stream screen, pane
-      draw_escape_samples screen, pane.bottom + 3
+      draw_escape_samples screen, pane.bottom + 2
 
       screen.write 2, rows - 3,
         "everything but tab and q is typed   [tab] next page   [q] quit",
@@ -819,22 +819,31 @@ module Validate
 
     SAMPLE = "plain \e[1mbold\e[0m \e[3;38;5;208mitalic\e[0m \e[4:3mcurly\e[0m"
 
+    # The same bytes down two cursors, which is the whole point of `Cursor#raw?`
+    # and hard to see without both in front of you. The string carries `SGR 1`,
+    # `SGR 3;38;5;208` and `SGR 4:3`: a scanning cursor turns them into the
+    # attributes of the cells that follow, a raw one never looks, so they stay
+    # as the text they are.
     private def draw_escape_samples(screen, row : Int32) : Nil
-      return if row >= rows - 1
+      return if row + 2 >= rows - 1
 
-      screen.write 2, row, "scanned", Style::DEFAULT.faint
-      sample(screen, row, raw: false).print SAMPLE
+      screen.write 2, row,
+        "the same string down two cursors, one scanning it and one not",
+        Style::DEFAULT.bold
 
-      return if row + 1 >= rows - 1
+      screen.write 2, row + 1, "scanned", Style::DEFAULT.faint
+      screen.write 12, row + 1, "styles the text", Style::DEFAULT.faint
+      sample(screen, row + 1, raw: false).print SAMPLE
 
-      screen.write 2, row + 1, "raw", Style::DEFAULT.faint
-      sample(screen, row + 1, raw: true).print SAMPLE
+      screen.write 2, row + 2, "raw", Style::DEFAULT.faint
+      screen.write 12, row + 2, "prints the bytes", Style::DEFAULT.faint
+      sample(screen, row + 2, raw: true).print SAMPLE
     end
 
     # One row, so autowrap comes off: a single row region has nowhere to wrap
     # to and would scroll away what it was showing.
     private def sample(screen, row : Int32, raw : Bool) : Cursor
-      bounds = Rect.new 12, row, Math.max(columns - 14, 4), 1
+      bounds = Rect.new 30, row, Math.max(columns - 32, 4), 1
       Cursor.new screen, Region.new(bounds), raw: raw, autowrap: false
     end
 
@@ -1031,14 +1040,47 @@ module Validate
       screen.write 50, 4, "(same link, one group)", underlined
     end
 
+    # A different tint for each push, because one tint cannot show a stack. Pop
+    # from the third and the second has to come back; pop from the first and
+    # the terminal's own colour does. Five is more than anyone will press.
+    TINTS = [
+      {30, 20, 45},
+      {20, 45, 30},
+      {50, 30, 20},
+      {20, 30, 55},
+      {45, 20, 40},
+    ]
+
+    private def tint(depth : Int32) : Color
+      red, green, blue = TINTS[(depth - 1) % TINTS.size]
+      Color.rgb red, green, blue
+    end
+
     private def draw_rich_colors(screen, caps) : Nil
       supported = caps.includes? Capability::KittyColorStack
+      depth = @terminal.colors.depth
       screen.write 2, 6, "colour stack".ljust(16), Style::DEFAULT.faint
       screen.write 20, 6, supported ? "yes" : "no", mark(supported)
-      screen.write 26, 6, "depth #{@terminal.colors.depth}", Style::DEFAULT.faint
+      screen.write 26, 6, "depth #{depth}", Style::DEFAULT.faint
       return unless supported
 
-      screen.write 40, 6, "press c to tint the whole terminal, C to put it back",
+      screen.write 40, 6,
+        "c pushes the next tint, C pops back to the one under it",
+        Style::DEFAULT.faint
+      draw_tints screen, depth
+    end
+
+    # What each level of the stack is holding, so a pop can be watched going
+    # back to the level below rather than merely to something.
+    private def draw_tints(screen, depth : Int32) : Nil
+      TINTS.each_with_index do |_, index|
+        pushed = index < depth
+        style = Style::DEFAULT.bg tint(index + 1)
+        screen.write 40 + index * 4, 7, pushed ? " ## " : "    ", style
+      end
+
+      screen.write 40 + TINTS.size * 4 + 2, 7,
+        depth.zero? ? "nothing pushed" : "showing tint #{(depth - 1) % TINTS.size + 1}",
         Style::DEFAULT.faint
     end
 
@@ -1086,8 +1128,12 @@ module Validate
       case key.char
       when 'c'
         @terminal.colors.push
-        @terminal.colors.background = Color.rgb(30, 20, 45)
-      when 'C' then @terminal.colors.pop
+        @terminal.colors.background = tint @terminal.colors.depth
+      when 'C'
+        @terminal.colors.pop
+        # The pop restores what the matching push saved, which is the tint one
+        # level down — or the terminal's own colour at the bottom. Nothing to
+        # set here; that is the point of the stack.
       when 'i' then @terminal.images.place swatch, Rect.new(3, 12, 20, 4)
       when 'x' then @terminal.images.clear
       else          return false
