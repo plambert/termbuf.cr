@@ -1190,6 +1190,67 @@ Spectator.describe TermBuf::Tty do
     end
   end
 
+  # A terminal that does not recognise a query prints its payload, so the probe
+  # is asked on the alternate screen where nobody sees the echo and leaving
+  # takes it away. See issue #7.
+  describe "#enter_alternate" do
+    it "switches to the alternate screen and nothing else" do
+      output = IO::Memory.new
+      tty = TermBuf::Tty.new IO::Memory.new, output, managed: false
+
+      expect(tty.enter_alternate(TermBuf::Capabilities::XTERM)).to be_true
+      expect(tty.alternate?).to be_true
+      expect(tty.entered?).to be_false
+      expect(output.to_s).to eq "\e[?1049h"
+    end
+
+    it "says so when there is no alternate screen to switch to" do
+      output = IO::Memory.new
+      tty = TermBuf::Tty.new IO::Memory.new, output, managed: false
+
+      expect(tty.enter_alternate(TermBuf::Capabilities::NONE)).to be_false
+      expect(tty.alternate?).to be_false
+      expect(output.to_s).to eq ""
+    end
+
+    it "leaves the screen it switched to even though it never entered" do
+      output = IO::Memory.new
+      tty = TermBuf::Tty.new IO::Memory.new, output, managed: false
+
+      tty.enter_alternate TermBuf::Capabilities::XTERM
+      tty.leave TermBuf::Capabilities::XTERM
+
+      expect(output.to_s).to eq "\e[?1049h\e[?1049l"
+      expect(tty.alternate?).to be_false
+    end
+
+    it "does not switch a second time when the takeover follows" do
+      output = IO::Memory.new
+      tty = TermBuf::Tty.new IO::Memory.new, output, managed: false
+
+      tty.enter_alternate TermBuf::Capabilities::XTERM
+      tty.enter TermBuf::Capabilities::XTERM
+      tty.leave TermBuf::Capabilities::XTERM
+      written = output.to_s
+
+      expect(written.scan("\e[?1049h").size).to eq 1
+      expect(written.scan("\e[?1049l").size).to eq 1
+    end
+
+    # The probe settles the capability set after the screen has been switched,
+    # so popping it has to go by what was pushed rather than by what the set
+    # says.
+    it "pops the screen it pushed however the capabilities ended up" do
+      output = IO::Memory.new
+      tty = TermBuf::Tty.new IO::Memory.new, output, managed: false
+
+      tty.enter_alternate TermBuf::Capabilities::XTERM
+      tty.leave TermBuf::Capabilities::NONE
+
+      expect(output.to_s).to contain "\e[?1049l"
+    end
+  end
+
   it "writes nothing when leaving a terminal it never entered" do
     output = IO::Memory.new
     tty = TermBuf::Tty.new IO::Memory.new, output, managed: false

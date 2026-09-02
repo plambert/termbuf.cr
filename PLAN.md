@@ -343,6 +343,15 @@ than the full timeout. The timeout is only a backstop for terminals that answer 
 Probing writes to a raw, non-echoing tty and consumes only the replies it recognizes; anything else
 read during the probe window is pushed back into the input decoder rather than discarded.
 
+It also writes to the *alternate* screen, entered before the first query rather than with the rest
+of the takeover. A terminal that does not recognize a query prints its payload instead of swallowing
+it, and three of these — `XTGETTCAP`, `DECRPM`, and the kitty graphics query — come back as visible
+text on Terminal.app. On the screen the person was looking at that rubbish outlives the program; on
+the alternate screen nobody sees it and leaving takes it away. Which is why `Tty` tracks the
+alternate screen apart from the takeover and pops what it pushed, rather than deciding from a
+capability set the probe had not yet settled when the screen was switched. A terminal with no
+alternate screen has no such place, and falls back to wiping the line the echo landed on.
+
 ### `TERMBUF_CAPS`
 
 ```bash

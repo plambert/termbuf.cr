@@ -49,6 +49,13 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- Probe queries are asked on the alternate screen. A terminal that does not recognise a query
+  prints its payload instead of swallowing it, so asking on the screen the person was looking at
+  left about forty five characters of rubbish there — `+q5463;524742pGi=31,s=1,v=1,a=q,t=d,f=24;AAAA`
+  under Terminal.app — and it was still there after the program had given the screen back. The
+  screen is now switched before the first query and switched back on the way out, so the echo goes
+  where nobody sees it and leaves with the screen. A terminal with no alternate screen still has
+  the line it landed on wiped, which is all that can be done for one.
 - `Unicode.code_point_columns` charges an **ignorable** character what East Asian Width says
   rather than nothing, which is one rule where the zero width joiner and the tag character had
   been two, and which also gives the hangul fillers the two columns they are due. Measured over

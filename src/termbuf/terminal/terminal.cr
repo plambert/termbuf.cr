@@ -185,16 +185,21 @@ module TermBuf
       resolved = begin
         if probe && tty.managed?
           tty.raw!
+          # Ask on the alternate screen. A terminal that does not recognise a
+          # query prints its payload, and the screen the person was looking at
+          # is not the place for that; here it goes away with the screen. Which
+          # terminals have one is settled from the environment, since the probe
+          # that would settle it properly is the thing being hidden.
+          hidden = tty.enter_alternate preliminary(env)
           asked = CapabilityResolver.resolve env, input, output
-          # Whatever the terminal made of the queries it did not recognise is
-          # sitting on the screen the person was looking at. See `Tty#scrub_line`.
-          tty.scrub_line
+          # Nowhere to hide it, so wipe the line it landed on instead.
+          tty.scrub_line unless hidden
           asked
         else
           CapabilityResolver.resolve env
         end
       rescue error
-        tty.restore_modes
+        tty.leave
         raise error
       end
 
@@ -221,6 +226,14 @@ module TermBuf
       end
     end
 
+    # What the environment alone says the terminal can do, `TERMBUF_CAPS`
+    # included, which is everything there is to go on before the probe runs.
+    # Only the alternate screen is read out of it, and only to decide where the
+    # probe's questions are safe to ask.
+    private def self.preliminary(env : Hash(String, String)) : Capabilities
+      CapabilityOverrides.apply(EnvironmentDetector.detect(env), env).capabilities
+    end
+
     # Takes the terminal over and starts the fibres that run it.
     def start : Nil
       return if @started
@@ -238,12 +251,6 @@ module TermBuf
       @initial_warnings.each { |message| emit Events::Warning.new(message) }
     end
 
-    # Works out how this terminal measures a cluster.
-    #
-    # After the alternate screen is entered and before anything is drawn on it,
-    # because the samples have to go somewhere and the screen the person was
-    # looking at is not it. Before the reader starts, because the replies would
-    # otherwise arrive as keystrokes.
     # What this terminal is known to get wrong. See `Quirk`.
     getter quirks : Quirk
 
@@ -291,6 +298,12 @@ module TermBuf
       # about soon enough; the inline transport works regardless.
     end
 
+    # Works out how this terminal measures a cluster.
+    #
+    # On the alternate screen and before anything is drawn on it, because the
+    # samples have to go somewhere and the screen the person was looking at is
+    # not it. Before the reader starts, because the replies would otherwise
+    # arrive as keystrokes.
     private def measure_widths : Nil
       measured = Unicode::WidthPolicy::DEFAULT
 

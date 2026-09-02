@@ -30,6 +30,12 @@ module TermBuf
     # the terminal is about to be probed.
     getter? raw : Bool = false
 
+    # Whether the alternate screen has been switched to. Tracked apart from
+    # `#entered?` because the probe switches to it before the takeover, and
+    # tracked at all so that `#leave` pops what was pushed rather than what a
+    # capability set settled afterwards says should have been.
+    getter? alternate : Bool = false
+
     # Crystal's bindings carry `VMIN` but not `VTIME` on every platform, so the
     # index is filled in here when it is missing.
     {% if LibC.has_constant?(:VTIME) %}
@@ -82,15 +88,39 @@ module TermBuf
     # graphics query, between them putting about forty five characters on the
     # line the program started on.
     #
-    # Two carriage returns and a line of spaces is as much as a terminal that
-    # has just demonstrated it cannot parse an escape sequence can be asked to
-    # understand. An echo long enough to have wrapped would leave its earlier
-    # lines behind; nothing seen so far comes close to a line.
+    # The fallback for a terminal with no alternate screen to ask on. Where
+    # there is one, `#enter_alternate` puts the echo somewhere nobody is
+    # looking and leaving takes it away; a line of spaces is as much as a
+    # terminal that has just demonstrated it cannot parse an escape sequence
+    # can be asked to understand, and an echo long enough to have wrapped
+    # would leave its earlier lines behind.
     def scrub_line : Nil
       @output << '\r' << " " * size.columns << '\r'
       @output.flush
     rescue IO::Error
       # The terminal has gone; there is nothing to tidy.
+    end
+
+    # Switches to the alternate screen, without the rest of the takeover.
+    #
+    # This is where the probe goes. A terminal that does not recognise a query
+    # prints its payload instead of swallowing it, so asking on the screen the
+    # person was looking at leaves rubbish there — and it is still there once
+    # the program has given the screen back. On the alternate screen nobody
+    # sees any of it and leaving takes it away along with the screen.
+    #
+    # Returns whether the screen was switched. Without `Capability::AltScreen`
+    # there is nowhere to put the echo and the caller has `#scrub_line`
+    # instead. Idempotent; `#enter` calls it, and `#leave` undoes it whether or
+    # not `#enter` ever ran.
+    def enter_alternate(capabilities : Capabilities = Capabilities::NONE) : Bool
+      return true if @alternate
+      return false unless capabilities.includes? Capability::AltScreen
+
+      raw!
+      @output << "\e[?1049h"
+      @output.flush
+      @alternate = true
     end
 
     # Takes the terminal over: raw mode, the alternate screen, no cursor.
@@ -102,7 +132,7 @@ module TermBuf
       return if @entered
 
       raw!
-      @output << "\e[?1049h" if capabilities.includes? Capability::AltScreen
+      enter_alternate capabilities
       # Bracketed paste, so that pasted text arrives marked as pasted rather
       # than as a very fast typist triggering every key binding on the way past.
       @output << "\e[?2004h" if capabilities.includes? Capability::BracketedPaste
@@ -116,13 +146,16 @@ module TermBuf
     # safe to call when `#enter` never ran, which is what makes it usable from
     # a signal handler and from `at_exit`.
     def leave(capabilities : Capabilities = Capabilities::NONE) : Nil
-      if @entered
-        @entered = false
+      taken = @entered
+      alternate = @alternate
+      @entered = false
+      @alternate = false
 
-        @output << "\e[?25h"
-        @output << "\e[?2004l" if capabilities.includes? Capability::BracketedPaste
-        @output << "\e[?1049l" if capabilities.includes? Capability::AltScreen
-        @output << "\e[0m"
+      if taken || alternate
+        @output << "\e[?25h" if taken
+        @output << "\e[?2004l" if taken && capabilities.includes? Capability::BracketedPaste
+        @output << "\e[?1049l" if alternate
+        @output << "\e[0m" if taken
         @output.flush
       end
 
