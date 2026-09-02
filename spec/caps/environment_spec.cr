@@ -86,6 +86,29 @@ Spectator.describe TermBuf::EnvironmentDetector do
       expect(caps.includes?(Cap::Blink)).to be_false
     end
 
+    # Measured against ghostty 1.3.2: XTPUSHCOLORS and XTPOPCOLORS change
+    # nothing, and an OSC 11 read back after push, set, and pop gives the value
+    # that was set. Claiming the stack leaves the terminal recoloured after the
+    # program has gone, which is the failure the gate exists to prevent.
+    it "leaves the colour stack off a terminal that ignores it" do
+      caps = detect({"TERM" => "xterm-ghostty"})
+
+      expect(caps.includes?(Cap::KittyColorStack)).to be_false
+      expect(caps.includes?(Cap::KittyGraphics)).to be_true
+    end
+
+    it "keeps the colour stack off however vague TERM is" do
+      caps = detect({"TERM" => "xterm-256color", "TERM_PROGRAM" => "ghostty"})
+
+      expect(caps.includes?(Cap::KittyColorStack)).to be_false
+    end
+
+    it "still keeps the colour stack for kitty, whose protocol it is" do
+      caps = detect({"TERM" => "xterm-kitty"})
+
+      expect(caps.includes?(Cap::KittyColorStack)).to be_true
+    end
+
     it "keeps blinking off when only the marker variable names the terminal" do
       caps = detect({"TERM" => "xterm-256color", "GHOSTTY_RESOURCES_DIR" => "/opt"})
 

@@ -539,6 +539,10 @@ what makes a change reversible, and without somewhere to put the old values ther
 them back. `Terminal#close` pops whatever is still pushed, so an application that forgets, or that
 stops on a signal, still gives the terminal back the colours it was found with.
 
+Fewer terminals have it than claim to, and there is no query to settle it: ghostty parses
+`XTPUSHCOLORS` and `XTPOPCOLORS` and does nothing with them, so it is denied the capability by name.
+Check `Terminal#colors.available?` if it matters which way a terminal went.
+
 ### Images
 
 ```crystal

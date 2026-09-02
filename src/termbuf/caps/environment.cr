@@ -26,10 +26,21 @@ module TermBuf
     # report accurately, so the only evidence is having looked.
     BLINKING = Capability::Blink | Capability::RapidBlink
 
-    # A current terminal that does not blink. `Capabilities.normalize` drops
-    # the rapid variant along with the slow one, so taking both off here is
-    # belt and braces.
-    GHOSTTY = (Capabilities::MODERN.flags | KITTY_EXTRAS) & ~BLINKING
+    # The kitty colour stack, which ghostty parses and then does nothing with.
+    #
+    # There is no query for this either: `CSI # R` goes unanswered. The only
+    # evidence is having watched it, and it was — against ghostty 1.3.2, an OSC
+    # 11 read back after a push, a set, and a pop gives the value that was set,
+    # not the one that was pushed. Without a working pop a colour change cannot
+    # be given back, which is the whole reason `ColorStack` is gated on this
+    # flag; claiming it wrongly leaves a terminal recoloured after the program
+    # has exited.
+    COLOR_STACK = Capability::KittyColorStack
+
+    # A current terminal that neither blinks nor keeps colours for you.
+    # `Capabilities.normalize` drops the rapid variant along with the slow one,
+    # so taking both off here is belt and braces.
+    GHOSTTY = (Capabilities::MODERN.flags | KITTY_EXTRAS) & ~(BLINKING | COLOR_STACK)
 
     # Matched against `TERM`, most specific first.
     TERM_PATTERNS = [
@@ -117,7 +128,7 @@ module TermBuf
     # pattern puts strike-through back on Terminal.app. A name that identifies
     # the terminal outranks one that only describes a family.
     DENIALS = [
-      {"ghostty", BLINKING},
+      {"ghostty", BLINKING | COLOR_STACK},
       # Terminal.app takes SGR 9 and draws the text unchanged.
       {"apple_terminal", Capability::Strike},
     ]

@@ -15,9 +15,13 @@ All notable changes to this project are documented here. The format follows
 - `examples/validate.cr`: tab and shift-tab go round rather than stopping at the ends, so the last
   page is one shift-tab from the first instead of eleven tabs away. The arrow keys still stop,
   which is what leaves a way to tell which end you are at.
-
-## [0.2.0] - 2026-09-02
-
+- Ghostty no longer claims `Capability::KittyColorStack`. It parses `XTPUSHCOLORS` and
+  `XTPOPCOLORS` and does nothing with them: measured against 1.3.2, an OSC 11 read back after a
+  push, a set, and a pop gives the value that was set rather than the one that was pushed, and
+  `CSI # R` goes unanswered. Since the stack is what makes a colour change reversible, claiming it
+  wrongly is worse than not having it — `Terminal#colors` was recolouring the terminal permanently
+  and leaving it that way after the program had exited. There is no query for this, so it is denied
+  by name, the way blinking is.
 ### Added
 
 - **Hyperlinks.** `Link` and `LinkTable` intern a URI and the OSC 8 grouping parameter, `Buffer#link`
