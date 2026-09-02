@@ -87,6 +87,8 @@ module TermBuf::Unicode
     width_of properties(codepoint), ambiguous
   end
 
+  # Cells *char* occupies on its own, ignoring any cluster it belongs to.
+  # Control characters and default-ignorable code points report zero.
   def self.char_width(char : Char, ambiguous : Int32 = ambiguous_width) : Int32
     codepoint = char.ord
     return 1 if 0x20 <= codepoint < 0x7F

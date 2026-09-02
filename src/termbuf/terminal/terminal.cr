@@ -156,7 +156,8 @@ module TermBuf
       @screen = Region.new Rect.full(@size.columns, @size.rows)
       @painter = Painter.new @capabilities
       @painter.clear_overhang = clear_overhang
-      @encoder = Encoder.new @buffer.styles, @capabilities, @size.columns, @size.rows
+      @encoder = Encoder.new @buffer.styles, @capabilities, @size.columns, @size.rows,
+        @buffer.links
       @meter = Meter.new @tty.output
       @commands = Channel(Command).new COMMAND_CAPACITY
       @events = Channel(Event).new EVENT_CAPACITY
@@ -376,6 +377,17 @@ module TermBuf
     def sync(&action : Buffer -> Nil) : Nil
       reply = reply_channel
       await Commands::Apply.new(action, reply), reply
+    end
+
+    # Interns a hyperlink and returns the id a `Style` carries it by.
+    #
+    #     link = terminal.link "https://example.com"
+    #     screen.write 0, 0, "example", Style::DEFAULT.linked(link)
+    #
+    # Safe to call from any fibre. Nothing is emitted for it on a terminal
+    # without `Capability::Osc8Links`; the text is drawn and the link is not.
+    def link(uri : String, id : String? = nil) : LinkId
+      @buffer.link uri, id
     end
 
     # Says that a reply beginning with *prefix* and ending with *terminator* is
@@ -749,6 +761,7 @@ module TermBuf
       @tty.output.write bytes
       @tty.flush
       @encoder.reset_state
+      @encoder.forget_link_state
     end
 
     # ----------------------------------------------------------------- input

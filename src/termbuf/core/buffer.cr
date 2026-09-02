@@ -55,6 +55,9 @@ module TermBuf
     # The interned multi code point clusters, for cells a `Char` cannot hold.
     getter clusters : ClusterPool
 
+    # The interned hyperlinks a `Style` refers to by id.
+    getter links : LinkTable
+
     # Regions declared with `#region`, in the order they were made.
     getter regions : Array(Region)
 
@@ -72,6 +75,7 @@ module TermBuf
     def initialize(@width : Int32, @height : Int32)
       @styles = StyleTable.new
       @clusters = ClusterPool.new
+      @links = LinkTable.new
       @back = Grid.new @width, @height
       @front = Grid.new @width, @height
       @regions = [] of Region
@@ -100,6 +104,15 @@ module TermBuf
       created = Region.new Rect.new(x, y, width, height), scrollback
       @regions << created
       created
+    end
+
+    # Interns a hyperlink and returns the id a `Style` carries it by.
+    #
+    #     style = Style::DEFAULT.linked buffer.link("https://example.com")
+    #
+    # See `Link` for what *id* groups.
+    def link(uri : String, id : String? = nil) : LinkId
+      @links.id uri, id
     end
 
     # Declares a region over *bounds*, keeping up to *scrollback* rows of what

@@ -28,9 +28,11 @@ module TermBuf
     # As `Scroll`, but rows leaving the top go to the region's scrollback.
     record ScrollRegion, region : Region, lines : Int32, style : Style
 
-    # Forget what the terminal is showing, so the next paint rewrites it all.
+    # Copy *from* of *source* onto this buffer at (*x*, *y*), or all of it when
+    # *from* is nil.
     record Blit, source : Buffer, x : Int32, y : Int32, from : Rect?
 
+    # Forget what the terminal is showing, so the next paint rewrites it all.
     record Invalidate
 
     # Bytes to send to the terminal untouched, once the current frame is out.

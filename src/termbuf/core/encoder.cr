@@ -18,6 +18,13 @@ module TermBuf
   class Encoder
     CSI = "\e["
 
+    # Operating system command, which is how a hyperlink is introduced.
+    OSC = "\e]"
+
+    # String terminator. The seven bit form, since a terminal that takes OSC 8
+    # at all takes this.
+    ST = "\e\\"
+
     # What the terminal can do. Colours and attributes outside this are
     # downgraded or dropped rather than emitted.
     getter capabilities : Capabilities
@@ -29,6 +36,7 @@ module TermBuf
     getter cursor_y : Int32?
 
     @styles : StyleTable
+    @links : LinkTable
     @width : Int32
     @height : Int32
     @current : Style?
@@ -37,8 +45,14 @@ module TermBuf
     @scratch : IO::Memory
     @alternate : IO::Memory
 
+    # Whether a hyperlink might be open on the terminal. A fresh encoder is
+    # writing to an alternate screen nothing else has touched, so it starts
+    # knowing that none is.
+    @link_possible = false
+
     def initialize(@styles : StyleTable, @capabilities : Capabilities,
-                   @width : Int32, @height : Int32)
+                   @width : Int32, @height : Int32,
+                   @links : LinkTable = LinkTable.new)
       @cursor_x = nil
       @cursor_y = nil
       @current = nil
@@ -247,8 +261,16 @@ module TermBuf
       target = effective id
       return if @current == target
 
-      full = full_sgr id
       previous = @current
+      write_sgr previous, id, target, io
+      # A hyperlink is not part of SGR and `SGR 0` does not close one, so it is
+      # tracked and emitted apart from everything else.
+      write_link previous, target, io
+      @current = target
+    end
+
+    private def write_sgr(previous : Style?, id : StyleId, target : Style, io : IO) : Nil
+      full = full_sgr id
 
       if previous
         @alternate.clear
@@ -256,13 +278,42 @@ module TermBuf
 
         if @alternate.bytesize < full.bytesize
           io.write @alternate.to_slice
-          @current = target
           return
         end
       end
 
       io << full
-      @current = target
+    end
+
+    # Opens, closes, or changes the hyperlink the cells that follow carry.
+    #
+    # The close is emitted for an unlinked style only when a link might be open:
+    # after one was opened, or after a passthrough wrote something this encoder
+    # never saw. Emitting it whenever the state is merely unknown would cost six
+    # bytes at the head of every frame an application that has no links draws.
+    private def write_link(previous : Style?, target : Style, io : IO) : Nil
+      return unless @capabilities.includes? Capability::Osc8Links
+      return if previous && previous.link == target.link
+
+      link = @links[target.link]?
+
+      unless link
+        return unless @link_possible
+
+        @link_possible = false
+        io << OSC << "8;;" << ST
+        return
+      end
+
+      @link_possible = true
+      io << OSC << "8;" << link.parameters << ';' << link.uri << ST
+    end
+
+    # Says that something this encoder did not write has reached the terminal,
+    # so any hyperlink it left open has to be closed before the next unlinked
+    # text. What `Terminal` calls after a passthrough.
+    def forget_link_state : Nil
+      @link_possible = true
     end
 
     # The style as this terminal can actually render it: unsupported
@@ -276,6 +327,11 @@ module TermBuf
     end
 
     private def compute_effective(style : Style) : Style
+      # Without OSC 8 the link is not merely unemitted but invisible, so two
+      # cells differing only by one are the same cell and the painter has
+      # nothing to repaint.
+      style = style.linked LinkTable::NONE unless @capabilities.includes? Capability::Osc8Links
+
       attributes = style.attributes & supported_attributes
       underline = supported_underline style.underline
       foreground = narrow style.foreground
@@ -299,7 +355,7 @@ module TermBuf
         background = Color.indexed background.index - 8 if background.bright?
       end
 
-      Style.new foreground, background, underline_color, attributes, underline, 0_u32
+      Style.new foreground, background, underline_color, attributes, underline, style.link
     end
 
     # Narrows a colour to the deepest space the terminal supports.

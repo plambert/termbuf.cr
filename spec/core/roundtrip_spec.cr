@@ -30,6 +30,17 @@ private STYLES = [
   TermBuf::Style::DEFAULT.bold.faint.blink,
 ]
 
+private LINKS = ["https://example.com/a", "https://example.com/b"]
+
+# A style, sometimes carrying a hyperlink. The link has to be interned into the
+# buffer's own table, so it cannot live in the constant above.
+private def random_style(buffer : TermBuf::Buffer, random : Random) : TermBuf::Style
+  style = STYLES.sample random
+  return style unless random.rand(4).zero?
+
+  style.linked buffer.link(LINKS.sample(random), random.rand(2).zero? ? nil : "group")
+end
+
 # Drives one paint cycle and reports any disagreement between the terminal's
 # screen and the buffer.
 private class Harness
@@ -39,9 +50,9 @@ private class Harness
 
   def initialize(width : Int32, height : Int32, capabilities : TermBuf::Capabilities)
     @buffer = TermBuf::Buffer.new width, height
-    @terminal = ModelTerminal.new width, height
+    @terminal = ModelTerminal.new width, height, links: @buffer.links
     @painter = TermBuf::Painter.new capabilities
-    @encoder = TermBuf::Encoder.new @buffer.styles, capabilities, width, height
+    @encoder = TermBuf::Encoder.new @buffer.styles, capabilities, width, height, @buffer.links
   end
 
   # Paints, feeds the result to the model terminal, and reports what still
@@ -65,18 +76,18 @@ private def apply_operation(buffer : TermBuf::Buffer, random : Random) : Nil
   case random.rand 12
   when 0..5
     buffer.write random.rand(buffer.width), random.rand(buffer.height),
-      ALPHABET.sample(random), STYLES.sample(random)
+      ALPHABET.sample(random), random_style(buffer, random)
   when 6
     buffer.write_char random.rand(buffer.width), random.rand(buffer.height),
-      ALPHABET.sample(random)[0], STYLES.sample(random)
+      ALPHABET.sample(random)[0], random_style(buffer, random)
   when 7, 8
-    buffer.scroll random_rect(buffer, random), random.rand(-2..2), STYLES.sample(random)
+    buffer.scroll random_rect(buffer, random), random.rand(-2..2), random_style(buffer, random)
   when 9
-    buffer.fill random_rect(buffer, random), '#', STYLES.sample(random)
+    buffer.fill random_rect(buffer, random), '#', random_style(buffer, random)
   when 10
     buffer.fill random_rect(buffer, random), ' ', TermBuf::Style::DEFAULT
   else
-    buffer.clear STYLES.sample(random)
+    buffer.clear random_style(buffer, random)
   end
 end
 

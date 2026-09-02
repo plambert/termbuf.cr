@@ -6,8 +6,9 @@ require "../spec_helper"
 # about output size, not something that slips through.
 private def encoder(capabilities = TermBuf::Capabilities::MODERN,
                     styles = TermBuf::StyleTable.new,
-                    width = 80, height = 24) : TermBuf::Encoder
-  TermBuf::Encoder.new styles, capabilities, width, height
+                    width = 80, height = 24,
+                    links = TermBuf::LinkTable.new) : TermBuf::Encoder
+  TermBuf::Encoder.new styles, capabilities, width, height, links
 end
 
 private def emit(encoder : TermBuf::Encoder, *ops : TermBuf::Op) : String
@@ -175,6 +176,85 @@ Spectator.describe TermBuf::Encoder do
 
       expect(emit(encoder(styles: styles), TermBuf::Ops::SetStyle.new(curly)))
         .to eq "\e[0;4:3;58;5;4m"
+    end
+  end
+
+  describe "hyperlinks" do
+    it "opens a link before the text that carries it" do
+      styles = TermBuf::StyleTable.new
+      links = TermBuf::LinkTable.new
+      id = styles.id TermBuf::Style::DEFAULT.linked(links.id "https://example.com")
+
+      expect(emit(encoder(styles: styles, links: links), TermBuf::Ops::SetStyle.new(id)))
+        .to eq "\e[0m\e]8;;https://example.com\e\\"
+    end
+
+    it "carries the grouping id when the link has one" do
+      styles = TermBuf::StyleTable.new
+      links = TermBuf::LinkTable.new
+      id = styles.id TermBuf::Style::DEFAULT.linked(links.id "https://example.com", "one")
+
+      expect(emit(encoder(styles: styles, links: links), TermBuf::Ops::SetStyle.new(id)))
+        .to contain "\e]8;id=one;https://example.com\e\\"
+    end
+
+    it "closes the link when the next run does not carry one" do
+      styles = TermBuf::StyleTable.new
+      links = TermBuf::LinkTable.new
+      linked = styles.id TermBuf::Style::DEFAULT.linked(links.id "https://example.com")
+      plain = styles.id TermBuf::Style::DEFAULT
+
+      written = emit encoder(styles: styles, links: links),
+        TermBuf::Ops::SetStyle.new(linked), TermBuf::Ops::SetStyle.new(plain)
+
+      expect(written.ends_with? "\e]8;;\e\\").to be_true
+    end
+
+    it "says nothing about links for an application that uses none" do
+      styles = TermBuf::StyleTable.new
+      id = styles.id TermBuf::Style::DEFAULT.bold
+
+      expect(emit(encoder(styles: styles), TermBuf::Ops::SetStyle.new(id))).to eq "\e[0;1m"
+    end
+
+    # A link is not an SGR attribute, so the run after one that differs only by
+    # colour must not re-open it.
+    it "leaves an open link alone while it stays the same" do
+      styles = TermBuf::StyleTable.new
+      links = TermBuf::LinkTable.new
+      link = links.id "https://example.com"
+      first = styles.id TermBuf::Style::DEFAULT.linked(link)
+      second = styles.id TermBuf::Style::DEFAULT.linked(link).bold
+
+      written = emit encoder(styles: styles, links: links),
+        TermBuf::Ops::SetStyle.new(first), TermBuf::Ops::SetStyle.new(second)
+
+      expect(written.scan("\e]8;").size).to eq 1
+    end
+
+    # Without the capability a link is not merely unemitted but invisible, so
+    # two runs differing only by one are one run.
+    it "emits nothing at all on a terminal without OSC 8" do
+      styles = TermBuf::StyleTable.new
+      links = TermBuf::LinkTable.new
+      plain = styles.id TermBuf::Style::DEFAULT.bold
+      linked = styles.id TermBuf::Style::DEFAULT.bold.linked(links.id "https://example.com")
+
+      written = emit encoder(TermBuf::Capabilities::XTERM, styles, links: links),
+        TermBuf::Ops::SetStyle.new(plain), TermBuf::Ops::SetStyle.new(linked)
+
+      expect(written).to eq "\e[0;1m"
+    end
+
+    # After a passthrough the terminal may have been left inside a link this
+    # encoder never opened.
+    it "closes a link it cannot rule out after a passthrough" do
+      styles = TermBuf::StyleTable.new
+      made = encoder styles: styles
+      made.forget_link_state
+
+      expect(emit(made, TermBuf::Ops::SetStyle.new(styles.id TermBuf::Style::DEFAULT.bold)))
+        .to eq "\e[0;1m\e]8;;\e\\"
     end
   end
 
