@@ -4,7 +4,7 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project uses
 [semantic versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.0] - 2026-09-02
 
 ### Added
 
@@ -55,7 +55,7 @@ All notable changes to this project are documented here. The format follows
   under Terminal.app — and it was still there after the program had given the screen back. The
   screen is now switched before the first query and switched back on the way out, so the echo goes
   where nobody sees it and leaves with the screen. A terminal with no alternate screen still has
-  the line it landed on wiped, which is all that can be done for one.
+  the line it landed on wiped, which is all that can be done for one. ([#7])
 - `Unicode.code_point_columns` charges an **ignorable** character what East Asian Width says
   rather than nothing, which is one rule where the zero width joiner and the tag character had
   been two, and which also gives the hangul fillers the two columns they are due. Measured over
@@ -254,7 +254,8 @@ First release. Everything below is new.
 - OSC 8 links, kitty graphics, and the kitty colour stack are detected but not emitted.
 - Mouse reporting is not enabled or decoded.
 
-[Unreleased]: https://github.com/plambert/termbuf.cr/compare/v0.1.6...HEAD
+[Unreleased]: https://github.com/plambert/termbuf.cr/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/plambert/termbuf.cr/compare/v0.1.6...v0.2.0
 [0.1.6]: https://github.com/plambert/termbuf.cr/compare/v0.1.5...v0.1.6
 [0.1.5]: https://github.com/plambert/termbuf.cr/compare/v0.1.4...v0.1.5
 [0.1.4]: https://github.com/plambert/termbuf.cr/compare/v0.1.3...v0.1.4
@@ -268,3 +269,4 @@ First release. Everything below is new.
 [#4]: https://github.com/plambert/termbuf.cr/issues/4
 [#5]: https://github.com/plambert/termbuf.cr/issues/5
 [#6]: https://github.com/plambert/termbuf.cr/issues/6
+[#7]: https://github.com/plambert/termbuf.cr/issues/7
