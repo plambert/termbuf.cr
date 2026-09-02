@@ -49,6 +49,14 @@ module TermBuf
     # attribute it does not draw.
     KITTY = (Capabilities::MODERN.flags | KITTY_EXTRAS) & ~OVERLINE
 
+    # iTerm2, which takes SGR 5 and draws the text unchanged.
+    #
+    # Measured against 3.6.11. Its preferences carry no blinking-text setting
+    # to explain it away — `Blinking Cursor` is the only blink of any kind in
+    # them — and macOS reduce-motion was off, so this is the terminal rather
+    # than the machine it was on.
+    ITERM = Capabilities::MODERN.flags & ~BLINKING
+
     # A current terminal that neither blinks nor keeps colours for you.
     # `Capabilities.normalize` drops the rapid variant along with the slow one,
     # so taking both off here is belt and braces.
@@ -77,7 +85,7 @@ module TermBuf
     PROGRAM_PATTERNS = [
       {"ghostty", GHOSTTY},
       {"WezTerm", Capabilities::MODERN.flags | Capability::KittyGraphics},
-      {"iTerm.app", Capabilities::MODERN.flags},
+      {"iTerm.app", ITERM},
       {"vscode", Capabilities::MODERN.flags},
       {"Hyper", Capabilities::XTERM.flags | Capability::TrueColor},
       {"rio", Capabilities::MODERN.flags},
@@ -101,7 +109,7 @@ module TermBuf
       {"ALACRITTY_WINDOW_ID", "alacritty", Capabilities::MODERN.flags},
       {"KONSOLE_VERSION", "konsole", Capabilities::XTERM.flags | Capability::TrueColor |
                                      Capability::Osc8Links},
-      {"ITERM_SESSION_ID", "iterm", Capabilities::MODERN.flags},
+      {"ITERM_SESSION_ID", "iterm", ITERM},
     ]
 
     # A multiplexer sits between the application and the terminal and does not
@@ -143,6 +151,8 @@ module TermBuf
       {"ghostty", BLINKING | COLOR_STACK},
       # kitty takes SGR 53 and draws the text unchanged.
       {"kitty", OVERLINE},
+      # iTerm2 takes SGR 5 and draws the text unchanged.
+      {"iterm", BLINKING},
       # Terminal.app takes SGR 9 and draws the text unchanged.
       {"apple_terminal", Capability::Strike},
     ]

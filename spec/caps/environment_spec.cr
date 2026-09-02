@@ -124,6 +124,23 @@ Spectator.describe TermBuf::EnvironmentDetector do
       expect(caps.includes?(Cap::Overline)).to be_true
     end
 
+    # Measured against iTerm2 3.6.11, whose preferences carry no blinking-text
+    # setting and whose machine had reduce-motion off: SGR 5 leaves the text
+    # unchanged.
+    it "leaves blinking off iTerm2, which does not blink" do
+      caps = detect({"TERM" => "xterm-256color", "TERM_PROGRAM" => "iTerm.app"})
+
+      expect(caps.includes?(Cap::Blink)).to be_false
+      expect(caps.includes?(Cap::RapidBlink)).to be_false
+      expect(caps.includes?(Cap::TrueColor)).to be_true
+    end
+
+    it "keeps blinking off iTerm2 when only the marker names it" do
+      caps = detect({"TERM" => "xterm-256color", "ITERM_SESSION_ID" => "w0t0p0"})
+
+      expect(caps.includes?(Cap::Blink)).to be_false
+    end
+
     it "still keeps the colour stack for kitty, whose protocol it is" do
       caps = detect({"TERM" => "xterm-kitty"})
 

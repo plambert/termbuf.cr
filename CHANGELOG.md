@@ -16,8 +16,20 @@ All notable changes to this project are documented here. The format follows
   row a cell to the left. With the rule measured, the model reproduces all nine of kitty's readings
   for the Indic corpus where it previously matched two.
 
+- A `WidthProbe` sample for `क्षि`, a conjunct carrying a spacing vowel sign, with no rule of its
+  own. It is the composite of the two rules before it and it is there to catch a terminal that adds
+  them up past what a cell pair can hold: iTerm2 3.6.11 charges three columns for it, where every
+  rule in this design tops out at two. It comes back in `WidthProbe::Result#disagreements` and
+  reaches the application as an `Events::Warning` naming the cluster, rather than being modelled
+  wrong. The row still cannot line up on such a terminal — a cluster occupies a cell or a pair of
+  them, and there is no third to put anything in — but it says so.
+
 ### Changed
 
+- iTerm2 no longer claims `Capability::Blink`, and `Capability::RapidBlink` follows it off.
+  Measured against 3.6.11: SGR 5 leaves the text unchanged. Its preferences carry no blinking-text
+  setting to explain it away — `Blinking Cursor` is the only blink of any kind in them — and macOS
+  reduce-motion was off, so this is the terminal rather than the machine it was on.
 - Kitty no longer claims `Capability::Overline`. Measured against 0.48.2: SGR 53 leaves the text
   unmarked where SGR 4 underlines it, and kitty's own terminfo declares `blink` and `smxx` and
   nothing for an overline. Ghostty, WezTerm and foot do draw one, so it stays in
