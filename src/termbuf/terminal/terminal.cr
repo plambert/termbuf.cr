@@ -228,6 +228,7 @@ module TermBuf
 
       @tty.enter @capabilities
       measure_widths
+      choose_image_transport
       install_signal_handlers
       install_exit_handler
 
@@ -270,6 +271,25 @@ module TermBuf
     # default, since a terminal quietly misrendering is the thing being
     # guarded against.
     property? warn_composed_drift : Bool = true
+
+    # Asks whether the terminal will read pixels out of a file rather than take
+    # them inline, which is cheaper for anything past a few kilobytes and
+    # impossible over a connection where the file is on the wrong machine.
+    #
+    # Asked here rather than with the rest, on the alternate screen after it is
+    # entered: a terminal that cannot parse the query prints it, and the screen
+    # the person was looking at is not the place for that. Nothing built from
+    # the capabilities so far reads this flag — only `ImageStore` does, and it
+    # is not made until an application asks for it.
+    private def choose_image_transport : Nil
+      return unless @probe_widths && @capabilities.includes? Capability::KittyGraphics
+      return unless Prober.new(@tty.input, @tty.output).probe_temp_file
+
+      @capabilities = @capabilities.with Capability::KittyGraphicsTempFile
+    rescue IO::Error
+      # A terminal that stopped answering is one the application will find out
+      # about soon enough; the inline transport works regardless.
+    end
 
     private def measure_widths : Nil
       measured = Unicode::WidthPolicy::DEFAULT
@@ -377,6 +397,42 @@ module TermBuf
     def sync(&action : Buffer -> Nil) : Nil
       reply = reply_channel
       await Commands::Apply.new(action, reply), reply
+    end
+
+    # The images on screen.
+    #
+    # They are drawn over the cells after each frame rather than into them, so
+    # text written where one sits gets both. See `ImageStore`.
+    getter images : ImageStore { build_image_store }
+
+    private def build_image_store : ImageStore
+      ImageStore.new @capabilities
+    end
+
+    # Images are written straight to the device after the frame's cells, not
+    # through the command channel: they have to land in the same frame as the
+    # cells they sit over, and they move the cursor, which the encoder has to be
+    # told about.
+    private def draw_images(forced : Bool, following : Cursor?) : Nil
+      store = @images
+      return unless store
+
+      store.redraw if forced
+      queued = store.take_pending
+      return if queued.empty?
+
+      queued.each { |text| @meter << text }
+      # Each placement had to move the cursor to get there, so where the
+      # encoder last left it is no longer where it is.
+      @encoder.forget_cursor
+
+      # And the one the application is having the terminal follow has to be put
+      # back, or it spends the frame sitting under the last picture drawn.
+      if following
+        @encoder.encode [Ops::MoveTo.new(following.x, following.y)] of Op, @meter
+      end
+
+      @tty.flush
     end
 
     # The terminal's own colours: the defaults, the cursor, and the palette.
@@ -571,6 +627,11 @@ module TermBuf
       # time a signal handler or `at_exit` gets here there may be no fibre left
       # to ask, and a terminal left a different colour than it was found is
       # exactly what the stack exists to prevent.
+      images = @images
+      if images && !images.placements.empty?
+        @tty.output << "\e_Ga=d,d=A,q=2\e\\"
+      end
+
       stack = @colors
 
       if stack && stack.depth > 0
@@ -637,6 +698,8 @@ module TermBuf
         @encoder.encode ops, @meter
         @tty.flush
       end
+
+      draw_images command.forced, following
 
       @last_paint_bytes = @meter.bytes
       @total_paint_bytes += @meter.bytes
@@ -742,6 +805,10 @@ module TermBuf
       # application made covers a pane it chose, and moving that is its
       # business rather than the driver's — which is what `#on_resize` is for.
       @screen.bounds = Rect.full size.columns, size.rows
+      # An image that no longer fits is gone; the terminal dropped it when the
+      # screen shrank under it, and keeping a placement it does not have would
+      # have the next forced repaint redraw a picture into the wrong cells.
+      @images.try &.resize size.columns, size.rows
       @buffer.invalidate
 
       run_resize_handlers size

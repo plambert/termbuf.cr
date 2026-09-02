@@ -941,6 +941,77 @@ Spectator.describe TermBuf::Terminal do
     end
   end
 
+  describe "images" do
+    private GRAPHICAL = TermBuf::Capabilities.new(
+      TermBuf::Capabilities::MODERN.flags | TermBuf::Capability::KittyGraphics)
+
+    # Cells first, pictures over the top: an application that writes text where
+    # one sits gets both, and in that order.
+    it "sends an image after the cells of the frame it belongs to" do
+      with_harness capabilities: GRAPHICAL do |harness|
+        harness.terminal.write 0, 0, "under"
+        harness.terminal.images.place TermBuf::Image.rgb(Bytes.new(12, 0_u8), 2, 2),
+          TermBuf::Rect.new(0, 0, 2, 1)
+        harness.terminal.paint
+
+        written = harness.drain
+        expect(written.index! "under").to be < written.index!("\e_G")
+      end
+    end
+
+    it "sends the pixels again when the repaint is forced" do
+      with_harness capabilities: GRAPHICAL do |harness|
+        harness.terminal.images.place TermBuf::Image.rgb(Bytes.new(12, 0_u8), 2, 2),
+          TermBuf::Rect.new(0, 0, 2, 1)
+        harness.terminal.paint
+        harness.drain
+
+        harness.terminal.paint!
+        expect(harness.drain).to contain "a=T"
+      end
+    end
+
+    it "takes the pictures down when the terminal is given back" do
+      harness = Harness.new capabilities: GRAPHICAL
+      harness.terminal.images.place TermBuf::Image.rgb(Bytes.new(12, 0_u8), 2, 2),
+        TermBuf::Rect.new(0, 0, 2, 1)
+      harness.terminal.paint
+      harness.drain
+
+      harness.terminal.close
+      expect(harness.drain).to contain "a=d,d=A"
+    end
+
+    # Every placement moves the cursor to get there, so the one the application
+    # is having the terminal follow has to be put back afterwards.
+    it "puts the followed cursor back after drawing over it" do
+      with_harness capabilities: GRAPHICAL do |harness|
+        cursor = harness.terminal.cursor
+        cursor.move_to 4, 3
+        harness.terminal.hardware_cursor = cursor
+        harness.terminal.paint
+        harness.drain
+
+        harness.terminal.images.place TermBuf::Image.rgb(Bytes.new(12, 0_u8), 2, 2),
+          TermBuf::Rect.new(0, 0, 2, 1)
+        harness.terminal.paint
+
+        written = harness.drain
+        expect(written.index! "\e_G").to be < written.rindex!("\e[4;5H")
+      end
+    end
+
+    it "sends nothing on a terminal that draws no pictures" do
+      with_harness do |harness|
+        harness.terminal.images.place TermBuf::Image.rgb(Bytes.new(12, 0_u8), 2, 2),
+          TermBuf::Rect.new(0, 0, 2, 1)
+        harness.terminal.paint
+
+        expect(harness.drain).not_to contain "\e_G"
+      end
+    end
+  end
+
   describe "closing" do
     it "shows the cursor and leaves the alternate screen" do
       harness = Harness.new

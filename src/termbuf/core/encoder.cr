@@ -66,9 +66,16 @@ module TermBuf
     # the cursor and the style from scratch, which is what a forced repaint
     # needs.
     def reset_state : Nil
+      forget_cursor
+      @current = nil
+    end
+
+    # Forgets where the cursor is without forgetting the style, so that the next
+    # move is absolute and the next run of text costs no SGR. What something
+    # writing its own cursor move between frames needs.
+    def forget_cursor : Nil
       @cursor_x = nil
       @cursor_y = nil
-      @current = nil
     end
 
     # Tells the encoder the screen changed size, and forgets where the cursor
