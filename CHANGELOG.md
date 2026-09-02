@@ -8,6 +8,13 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- `Unicode::WidthPolicy#joined_emoji_wide?`, on by default: whether a collapsed joined sequence is
+  two columns whatever it opens with, rather than as wide as the code point it starts from. iTerm2
+  3.6.11 is the one terminal of seven surveyed that does the latter. `WidthProbe` measures it from
+  a joined sequence opening with a narrow pictograph, so no terminal has to be recognised by name;
+  it is a policy rather than a `Quirk` because nothing is broken by it, and a buffer told about it
+  lays the row out correctly. With the probe running, iTerm2 matches 5,200 of the survey's 5,274
+  where the old model managed 4,908.
 - `Terminal#clear_overhang?` and `Painter#clear_overhang?`, on by default: the cell after a glyph
   that may have painted outside its own columns is written again even when nothing in it changed.
   Both terminals measured draw over a neighbouring cell without repainting it first, and a
@@ -32,8 +39,8 @@ All notable changes to this project are documented here. The format follows
 - `Unicode.string_width` counts a joined emoji sequence as two columns whatever it opens with. The
   width used to come from the first code point, which is one for a narrow pictograph such as
   `U+1F3CB`; Ghostty and kitty draw two for every joined sequence in the corpus. Worth 54 clusters
-  on Ghostty and 42 on kitty, and it costs 44 on iTerm2, which takes the first code point's width
-  as we used to.
+  on Ghostty and 42 on kitty. iTerm2 takes the first code point's width, as we used to, and is
+  measured rather than mispredicted — see `joined_emoji_wide` above.
 - `Quirk::PerCodePointColumns` is now measured rather than matched on the terminal's name. The
   width probe already sends four faces joined by zero width joiners and reads the answer back, and
   that answer settles the question outright: eleven columns is per-code-point counting, where two

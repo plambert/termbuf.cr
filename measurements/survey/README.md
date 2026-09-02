@@ -111,12 +111,24 @@ Both rules are in, and the survey re-scored against every implementation:
 
 `Unicode.code_point_columns` now reproduces **every one of the 5,274** on Terminal.app.
 
-The joined-emoji rule costs iTerm2 44 clusters, and that is the point rather than an oversight.
-iTerm2 takes a joined sequence's width from its first code point, which is what our model used to
-do; Ghostty and kitty both draw two for every joined sequence in the corpus. Being outvoted two to
-one is the standard this project has been using, so iTerm2 becomes the odd one out and a candidate
-for a quirk of its own rather than a reason to keep the old rule. Six of the 44 are cases where
-only Ghostty backs the new answer, which is what a rule simple enough to state costs.
+Those are the scores against a fixed default policy, which is not how the shard runs. iTerm2
+takes a joined sequence's width from the code point it opens with, alone among the seven, and it
+is now a `WidthPolicy` flag — `joined_emoji_wide` — with a probe sample that measures it. Told
+what each implementation answers, the probe picks a policy per terminal and the scores are these:
+
+| implementation | quirk | with the policy the probe infers |
+|---|---|---|
+| Terminal.app 470.2 | yes | **5,274** of 5,274 |
+| Ghostty 1.3.2 | no | 5,265 |
+| iTerm2 3.6.11 | no | **5,200** |
+| kitty 0.48.2 | no | 5,189 |
+| `tmux` 3.7c | no | 4,589 |
+| GNU `screen` 5.0.2 | yes | 3,917 |
+| Apple `screen` 4.00.03 | no | 1,840 |
+
+So iTerm2 ends up better off than it was before the rule changed, not worse: 4,908 against the old
+model, 5,200 once the probe turns off `joined_emoji_wide` and `emoji_presentation` for it. The
+44 clusters were only ever a cost to a terminal the shard had not asked.
 
 The double conjunct was **not** changed. Ghostty says 2, kitty says 1, iTerm2 and `tmux` say 3:
 four implementations, three answers, no majority. That is a disagreement between terminals, not a

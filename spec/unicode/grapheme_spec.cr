@@ -164,6 +164,16 @@ Spectator.describe TermBuf::Unicode do
       expect(Uni.string_width("\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}")).to eq 2
     end
 
+    it "narrows a joined sequence for a terminal that measures it that way" do
+      # iTerm2 3.6.11 takes the width from the code point the sequence opens
+      # with, alone among the terminals surveyed. It is a policy rather than a
+      # quirk: told about it, the buffer lays the row out correctly.
+      narrow = Uni::WidthPolicy::DEFAULT.with "joined_emoji_wide", false
+
+      expect(Uni.string_width("🏋‍♀")).to eq 2
+      expect(Uni.string_width("🏋‍♀", narrow)).to eq 1
+    end
+
     it "leaves a joiner between two letters alone" do
       # Nothing pictographic, so the rule above has no business widening it.
       expect(Uni.string_width("a\u{200D}b")).to eq 2

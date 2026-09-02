@@ -39,6 +39,8 @@ module TermBuf
       Sample.new("☺️", "emoji_presentation", 2, 1, "text pictograph with VS16"),
       Sample.new("👨‍👩‍👧‍👦", "joined_emoji", 2, 8, "four faces joined by ZWJ"),
       Sample.new("🇺🇸", "regional_indicators", 2, 4, "regional indicator pair"),
+      Sample.new("🏋‍♀", "joined_emoji_wide", 2, 1,
+        "joined sequence opening with a narrow pictograph"),
       Sample.new("நி", "spacing_marks", 2, 1, "tamil na with a spacing vowel sign"),
     ]
 
@@ -68,15 +70,21 @@ module TermBuf
       # Measuring beats matching on the terminal's name, which can neither know
       # about a version that fixed it nor about a terminal nobody has tried.
       def per_code_point_columns? : Bool?
-        decisive = readings.find do |reading|
+        decisive = readings.select do |reading|
           counted = Unicode.code_point_columns reading.sample.text
-          counted != reading.sample.enabled && counted != reading.sample.disabled
+          reading.measured &&
+            counted != reading.sample.enabled && counted != reading.sample.disabled
         end
 
-        return unless decisive
-        return unless measured = decisive.measured
+        return if decisive.empty?
 
-        measured == Unicode.code_point_columns(decisive.sample.text)
+        # One sample answering with its per-code-point count is enough. GNU
+        # screen 5.0.2 counts that way and still disagrees with the model about
+        # a rainbow flag, so asking every decisive sample to agree would miss
+        # it.
+        decisive.any? do |reading|
+          reading.measured == Unicode.code_point_columns(reading.sample.text)
+        end
       end
 
       # Samples the resulting policy still measures differently from the

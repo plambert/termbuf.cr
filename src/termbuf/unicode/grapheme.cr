@@ -298,7 +298,7 @@ module TermBuf::Unicode
     private def floor(base : Int32) : Int32
       return base if base >= 2
       return 2 if @conjunct
-      return 2 if @joined && @pictograph
+      return 2 if @joined && @pictograph && @policy.joined_emoji_wide?
 
       base
     end

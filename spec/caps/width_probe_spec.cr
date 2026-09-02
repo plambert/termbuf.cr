@@ -47,6 +47,14 @@ Spectator.describe TermBuf::WidthProbe do
       end
     end
 
+    it "reads back a terminal that narrows a joined sequence" do
+      wanted = Policy::DEFAULT.with "joined_emoji_wide", false
+      result, _ = probe replies(wanted)
+
+      expect(result.policy.joined_emoji_wide?).to be_false
+      expect(result.policy.joined_emoji?).to be_true
+    end
+
     it "names a terminal that counts columns per code point" do
       result, _ = probe per_code_point_replies
 
