@@ -41,12 +41,22 @@ module TermBuf::Unicode
     # Whether a spacing mark takes a cell beside its base rather than none.
     getter? spacing_marks : Bool
 
+    # Whether a consonant conjunct joined by a virama is two columns whatever
+    # it opens with, rather than as wide as the consonant it starts from.
+    #
+    # A conjunct ligates into one glyph, and what a terminal charges for that
+    # glyph is its own decision: ghostty and Terminal.app take two, kitty
+    # 0.48.2 takes one — `क्ष` is a single column there, and so is `क्षि`.
+    # The companion of `joined_emoji_wide`, and the same kind of question.
+    getter? conjunct_wide : Bool
+
     def initialize(@ambiguous : Int32 = 1,
                    @emoji_presentation : Bool = true,
                    @joined_emoji : Bool = true,
                    @joined_emoji_wide : Bool = true,
                    @regional_indicators : Bool = true,
-                   @spacing_marks : Bool = true)
+                   @spacing_marks : Bool = true,
+                   @conjunct_wide : Bool = true)
       raise ArgumentError.new "ambiguous width #{@ambiguous} is not 1 or 2" unless @ambiguous.in? 1, 2
     end
 
@@ -58,9 +68,10 @@ module TermBuf::Unicode
                   joined_emoji : Bool = @joined_emoji,
                   joined_emoji_wide : Bool = @joined_emoji_wide,
                   regional_indicators : Bool = @regional_indicators,
-                  spacing_marks : Bool = @spacing_marks) : WidthPolicy
+                  spacing_marks : Bool = @spacing_marks,
+                  conjunct_wide : Bool = @conjunct_wide) : WidthPolicy
       WidthPolicy.new ambiguous, emoji_presentation, joined_emoji,
-        joined_emoji_wide, regional_indicators, spacing_marks
+        joined_emoji_wide, regional_indicators, spacing_marks, conjunct_wide
     end
 
     # The flags by the names `TERMBUF_WIDTHS` uses.
@@ -72,6 +83,7 @@ module TermBuf::Unicode
       when "joined_emoji_wide"   then copy_with joined_emoji_wide: enabled
       when "regional_indicators" then copy_with regional_indicators: enabled
       when "spacing_marks"       then copy_with spacing_marks: enabled
+      when "conjunct_wide"       then copy_with conjunct_wide: enabled
       else                            raise ArgumentError.new "unknown width rule #{name.inspect}"
       end
     end
@@ -79,7 +91,7 @@ module TermBuf::Unicode
     # Every rule by name, for diagnostics and for `TERMBUF_WIDTHS` to check
     # against.
     NAMES = %w[ambiguous_wide emoji_presentation joined_emoji joined_emoji_wide
-      regional_indicators spacing_marks]
+      regional_indicators spacing_marks conjunct_wide]
 
     def to_s(io : IO) : Nil
       io << "WidthPolicy(ambiguous=" << @ambiguous
@@ -101,6 +113,7 @@ module TermBuf::Unicode
       when "joined_emoji_wide"   then @joined_emoji_wide
       when "regional_indicators" then @regional_indicators
       when "spacing_marks"       then @spacing_marks
+      when "conjunct_wide"       then @conjunct_wide
       else                            raise ArgumentError.new "unknown width rule #{name.inspect}"
       end
     end

@@ -291,13 +291,15 @@ module TermBuf::Unicode
     # Two columns is the least a cluster drawn as one glyph gets, whatever the
     # code point it opens with is worth alone.
     #
-    # A conjunct ligates into one glyph and both terminals measured charge the
-    # whole of it two. A joined emoji sequence is two on Ghostty and kitty for
-    # every one of the 2,497 in the survey, where taking the width from the
-    # first code point gave one for a narrow pictograph like the weight lifter.
+    # Both are the terminal's decision rather than Unicode's, so both are
+    # policy. A conjunct ligates into one glyph that ghostty and Terminal.app
+    # charge two for and kitty 0.48.2 charges one. A joined emoji sequence is
+    # two on ghostty and kitty for every one of the 2,497 in the survey, where
+    # taking the width from the first code point gave one for a narrow
+    # pictograph like the weight lifter.
     private def floor(base : Int32) : Int32
       return base if base >= 2
-      return 2 if @conjunct
+      return 2 if @conjunct && @policy.conjunct_wide?
       return 2 if @joined && @pictograph && @policy.joined_emoji_wide?
 
       base

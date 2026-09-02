@@ -188,6 +188,40 @@ Spectator.describe TermBuf::Unicode do
     end
   end
 
+  # A conjunct ligates into one glyph and what a terminal charges for that
+  # glyph is its own decision, which is why it is a rule rather than a fact.
+  # Measured against kitty 0.48.2 with `scripts/measure_columns.cr`: every one
+  # of these is a single column there, where ghostty takes two.
+  describe "a consonant conjunct" do
+    KITTY = TermBuf::Unicode::WidthPolicy::DEFAULT.copy_with(
+      spacing_marks: false, conjunct_wide: false)
+
+    it "is two columns where the terminal draws it so" do
+      expect(Uni.string_width("क्ष")).to eq 2
+      expect(Uni.string_width("क्क")).to eq 2
+      expect(Uni.string_width("क्षि")).to eq 2
+    end
+
+    it "is as wide as the consonant it opens with where the terminal says so" do
+      expect(Uni.string_width("क्ष", KITTY)).to eq 1
+      expect(Uni.string_width("क्क", KITTY)).to eq 1
+    end
+
+    # The row of the validate example's widths page that sat a cell off under
+    # kitty: the conjunct floor put it at two where the terminal drew one, and
+    # the spacing mark rule alone could not reach it.
+    it "reproduces every reading kitty gave" do
+      readings = {
+        "क" => 1, "ந" => 1, "कि" => 1, "नि" => 1, "நி" => 1,
+        "நு" => 1, "क्क" => 1, "क्ष" => 1, "क्षि" => 1,
+      }
+
+      readings.each do |cluster, columns|
+        expect(Uni.string_width(cluster, KITTY)).to eq columns
+      end
+    end
+  end
+
   describe ".each_grapheme" do
     it "reports byte offsets that slice the source string back out" do
       source = "a漢\u{1F1FA}\u{1F1F8}b"

@@ -42,6 +42,7 @@ module TermBuf
       Sample.new("🏋‍♀", "joined_emoji_wide", 2, 1,
         "joined sequence opening with a narrow pictograph"),
       Sample.new("நி", "spacing_marks", 2, 1, "tamil na with a spacing vowel sign"),
+      Sample.new("क्ष", "conjunct_wide", 2, 1, "devanagari consonants joined by a virama"),
     ]
 
     # What one sample turned into.
