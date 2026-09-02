@@ -508,6 +508,51 @@ encoder.encode painter.paint(buffer)  # => "\e[?7l\e[1;1H\e[0;1mhello\e[?7h"
 buffer.commit_paint
 ```
 
+## Hyperlinks, images, and the terminal's colours
+
+Three things a modern terminal will do that a cell grid cannot express, each behind the capability
+that says whether asking is safe.
+
+### Hyperlinks
+
+```crystal
+docs = terminal.link "https://example.com", "docs"   # the id groups two ranges as one link
+terminal.write 0, 0, "example", TermBuf::Style::DEFAULT.linked(docs)
+```
+
+A link is not an SGR attribute — `SGR 0` does not close one — so the encoder tracks it apart from
+the rest of the style and emits OSC 8 when it changes from one run to the next. Without
+`Capability::Osc8Links` it is stripped from the style entirely, so two runs differing only by a link
+become one run: setting links costs nothing on a terminal that has none.
+
+### The terminal's own colours
+
+```crystal
+terminal.colors.saved do
+  terminal.colors.background = TermBuf::Color.rgb(20, 20, 30)
+  terminal.colors[3] = TermBuf::Color.rgb(255, 128, 0)
+end
+```
+
+All of this needs `Capability::KittyColorStack`, the OSC 4 and OSC 10 setters included. The stack is
+what makes a change reversible, and without somewhere to put the old values there is no way to give
+them back. `Terminal#close` pops whatever is still pushed, so an application that forgets, or that
+stops on a signal, still gives the terminal back the colours it was found with.
+
+### Images
+
+```crystal
+sparkline = TermBuf::Image.rgb(pixels, 64, 16)
+id = terminal.images.add sparkline
+terminal.images.place id, TermBuf::Rect.new(2, 4, 16, 2)
+```
+
+Images are not cells. They are drawn over the screen after each frame rather than into the buffer,
+so an application that writes text where one sits gets both. Pixels travel once however many
+placements follow; the transport — a temp file or base64 down the escape sequence — is chosen by a
+probe at startup. Placements that no longer fit are dropped on a resize, everything is sent again on
+a forced repaint, and the pictures come down when the terminal is given back.
+
 ## An input field
 
 The one widget in the shard, because every terminal application needs one and nobody should write
@@ -632,10 +677,9 @@ crystal run scripts/gen_unicode.cr
 
 ## Status
 
-`0.1.0`. The core, the driver, input, cursors, and an input field are in and specified. Links,
-images, and the kitty colour stack are detected but not emitted yet; mouse reporting is neither
-enabled nor decoded. See [CHANGELOG.md](CHANGELOG.md) for what is in this release and
-[PLAN.md](PLAN.md) for what is coming.
+The core, the driver, input, cursors, an input field, hyperlinks, images, and the terminal's own
+colours are in and specified. Mouse reporting is neither enabled nor decoded. See
+[CHANGELOG.md](CHANGELOG.md) for what has landed and [PLAN.md](PLAN.md) for what is coming.
 
 ## Contributing
 

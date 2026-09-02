@@ -61,6 +61,21 @@ module TermBuf
     # this does, and false again once one has been found.
     property? watch_composed_drift : Bool = false
 
+    # Whether to write the cell after a glyph that may have painted outside its
+    # own columns, even when nothing in that cell changed.
+    #
+    # On by default, and there is nothing yet that would turn it off: both
+    # terminals measured draw over a neighbouring cell without repainting it
+    # first, so ink left there stays there. Nothing predicts which clusters
+    # overhang — that is font coverage, and it moved between two fonts covering
+    # different scripts — so the cheap conservative rule wins: after anything
+    # that is not plain ASCII, write the next cell again. It costs one cell per
+    # such glyph per frame and nothing at all on ASCII text.
+    #
+    # An application that knows its terminal repaints what it draws over, or
+    # that would rather have the bytes, can turn it off.
+    property? clear_overhang : Bool = true
+
     # Forgets the cluster that was found, so the next one is reported too.
     def take_composed_drift : String?
       found = @composed_drift
@@ -325,7 +340,14 @@ module TermBuf
           from -= 1
         end
 
-        to += 1 if back[to, row].wide? && to + 1 < back.width
+        to = snapped_end back, row, to
+
+        # The glyph now at the end of the segment may have painted past its own
+        # columns, so the cell after it is written again to put back whatever
+        # the ink covered.
+        if clear_overhang? && back[to, row].overhangs? && to + 1 < back.width
+          to = snapped_end back, row, to + 1
+        end
 
         if (previous = merged.last?) && from <= previous.to + 1
           merged[-1] = Segment.new previous.from, Math.max(previous.to, to)
@@ -335,6 +357,11 @@ module TermBuf
       end
 
       merged
+    end
+
+    # *to*, moved off the first half of a wide character.
+    private def snapped_end(back : Grid, row : Int32, to : Int32) : Int32
+      back[to, row].wide? && to + 1 < back.width ? to + 1 : to
     end
 
     # Where a trailing erase should start and the style to erase in, or `nil`

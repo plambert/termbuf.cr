@@ -1,0 +1,15 @@
+key	value
+date	2026-09-01 16:39:28
+term	tmux-256color
+term_program	tmux
+term_program_version	3.7c
+columns	155
+rows	40
+multiplexer	tmux
+multiplexer_socket	/private/tmp/tmux-501/termbuf
+multiplexer_version	
+multiplexer_binary	/opt/homebrew/bin/tmux
+grapheme_mode_2027	unsupported
+corpus	/Users/plambert/Documents/src/termbuf.cr/measurements/corpus.tsv
+samples	5274
+unanswered	0

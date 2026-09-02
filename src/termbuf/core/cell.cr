@@ -53,6 +53,18 @@ module TermBuf
       @width == 2
     end
 
+    # Whether this cell's glyph may paint outside the columns it was given.
+    #
+    # Measured rather than reasoned about. A cluster's ink runs past its own
+    # columns often enough to matter: `ﷺ` is charged one column and painted
+    # across three, an uncomposed `👨‍👩` is charged two and painted across four,
+    # and neither terminal measured repaints the cell it draws over. Every case
+    # seen was non-ASCII and no ASCII character in four runs painted outside
+    # its cell, which is what keeps the repaint off ordinary text.
+    def overhangs? : Bool
+      continuation? || @cluster != ClusterPool::NONE || @char.ord > 0x7F
+    end
+
     # Whether the cell holds a space and nothing else, ignoring its style.
     def blank? : Bool
       @char == ' ' && @cluster == ClusterPool::NONE

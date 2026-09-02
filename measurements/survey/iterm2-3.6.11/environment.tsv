@@ -1,0 +1,14 @@
+key	value
+date	2026-09-01 16:40:28
+term	xterm-256color
+term_program	iTerm.app
+term_program_version	3.6.11
+columns	80
+rows	25
+multiplexer	none
+multiplexer_binary	
+multiplexer_version	
+grapheme_mode_2027	permanently reset
+corpus	/Users/plambert/Documents/src/termbuf.cr/measurements/corpus.tsv
+samples	5274
+unanswered	0

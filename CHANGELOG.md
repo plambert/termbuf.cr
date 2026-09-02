@@ -6,6 +6,88 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- **Hyperlinks.** `Link` and `LinkTable` intern a URI and the OSC 8 grouping parameter, `Buffer#link`
+  and `Terminal#link` hand back the id a `Style` carries, and the encoder emits the sequence when
+  the id changes from one run to the next. A link is not an SGR attribute and `SGR 0` does not close
+  one, so it is tracked apart from the rest of the style. Without `Capability::Osc8Links` it is
+  stripped from the effective style, so two runs differing only by a link are one run and an
+  application that sets links pays nothing on a terminal that has none.
+- **The terminal's own colours.** `Terminal#colors` pushes and pops the Kitty colour stack and sets
+  the defaults, the cursor, the selection, and palette entries. All of it needs
+  `Capability::KittyColorStack`, the setters included: the stack is what makes a change reversible,
+  and without somewhere to put the old values there is no way to give them back. `Terminal#close`
+  pops whatever is still pushed, so an application that forgets — or that stops on a signal — still
+  gives the terminal back the colours it was found with.
+- **Images.** `Image`, `Placement`, and `Terminal#images` transmit pixels once and place them as
+  often as wanted, over the cells of each frame rather than into the buffer. The transport is the
+  probe's: a temp file where the terminal reads one, base64 in chunks where it does not, asked on
+  the alternate screen so a terminal that cannot parse the query does not print it on the screen the
+  person was looking at. Placements that no longer fit are dropped on a resize, everything is sent
+  again on a forced repaint, and the pictures come down when the terminal is given back.
+- `Unicode::WidthPolicy#joined_emoji_wide?`, on by default: whether a collapsed joined sequence is
+  two columns whatever it opens with, rather than as wide as the code point it starts from. iTerm2
+  3.6.11 is the one terminal of seven surveyed that does the latter. `WidthProbe` measures it from
+  a joined sequence opening with a narrow pictograph, so no terminal has to be recognised by name;
+  it is a policy rather than a `Quirk` because nothing is broken by it, and a buffer told about it
+  lays the row out correctly. With the probe running, iTerm2 matches 5,200 of the survey's 5,274
+  where the old model managed 4,908.
+- `Terminal#clear_overhang?` and `Painter#clear_overhang?`, on by default: the cell after a glyph
+  that may have painted outside its own columns is written again even when nothing in it changed.
+  Both terminals measured draw over a neighbouring cell without repainting it first, and a
+  cluster's ink runs past its columns often enough to matter — `ﷺ` is charged one column and
+  painted across three, an uncomposed `👨‍👩` is charged two and painted across four. Nothing predicts
+  which clusters overhang, so the rule is conservative and cheap: after anything that is not plain
+  ASCII, write the next cell. Ordinary text pays nothing. An application that knows better, or
+  would rather have the bytes, can turn it off.
+- `Unicode.emoji?`, the Emoji property, generated into the tables beside
+  Extended_Pictographic. The two are different questions and the difference is visible on screen:
+  `⚑` is pictographic and is not an emoji, so a variation selector after it asks for a
+  presentation it has not got, and the digits are emoji without being pictographic, which is what
+  makes a keycap two columns.
+
+### Fixed
+
+- `Unicode.code_point_columns` charges an **ignorable** character what East Asian Width says
+  rather than nothing, which is one rule where the zero width joiner and the tag character had
+  been two, and which also gives the hangul fillers the two columns they are due. Measured over
+  5,274 clusters against Terminal.app 470.2 and GNU `screen` 5.0.2; it now reproduces every one of
+  Terminal.app's, where it missed six.
+- `Unicode.string_width` counts a joined emoji sequence as two columns whatever it opens with. The
+  width used to come from the first code point, which is one for a narrow pictograph such as
+  `U+1F3CB`; Ghostty and kitty draw two for every joined sequence in the corpus. Worth 54 clusters
+  on Ghostty and 42 on kitty. iTerm2 takes the first code point's width, as we used to, and is
+  measured rather than mispredicted — see `joined_emoji_wide` above.
+- `Quirk::PerCodePointColumns` is now measured rather than matched on the terminal's name. The
+  width probe already sends four faces joined by zero width joiners and reads the answer back, and
+  that answer settles the question outright: eleven columns is per-code-point counting, where two
+  is per-cluster and no policy can reach eleven. The answer overrides the guess in both
+  directions, so a terminal that starts counting properly stops carrying the quirk and one nobody
+  has tried is judged on what it does rather than what it is called. The `TERM_PROGRAM` match
+  stays as the fallback for a terminal that does not answer.
+- Cluster widths, against Terminal.app 470.2 and Ghostty 1.3.2 measured over the same sixty seven
+  clusters. A variation selector now widens only a base with the Emoji property, so `⚑️` is one
+  column and `1️⃣` is two; an indic conjunct is two columns rather than one, so `क्ष`, `ক্ষ` and `క్ష`
+  match what both terminals count. `Unicode.string_width` now reproduces all sixty seven of
+  Ghostty's counts, where it reproduced sixty two.
+- `Unicode.code_point_columns` charges a tag character a column, so `🏴󠁧󠁢󠁳󠁣󠁴󠁿` owns eight, and composes
+  conjoining jamo before counting, so `가` and `각` each own two. It now reproduces all sixty seven
+  of Terminal.app's counts, where it reproduced sixty four. Both departures came from widening the
+  sample set from forty-four clusters; neither shape was in the original set.
+
+### Changed
+
+- `examples/validate.cr`: tab and shift-tab move between pages everywhere, ctrl-r redraws
+  everywhere, and the two pages with somewhere to type are entered with enter and left with escape,
+  which is what frees tab to mean the same thing on every page. The capability grid draws each
+  capability's name in the style it claims, so one the terminal ignores is a glance away from being
+  spotted. The colours page carries a single hue from black to full, which bands under the palette
+  where a sweep through every hue does not. The measured page keeps its sample in a column of its
+  own, so a cluster the terminal counts differently cannot take the table with it. A page change
+  repaints outright on a terminal with `Quirk::PerCodePointColumns`, which clears the rows that no
+  longer carry such a cluster.
+
 ## [0.1.6] - 2026-08-28
 
 ### Added

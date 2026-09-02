@@ -16,7 +16,7 @@ module Validate
   alias Color = TermBuf::Color
   alias Rect = TermBuf::Rect
 
-  PAGES = %w[caps edges widths colours attrs motion keys cursors measured panels field]
+  PAGES = %w[caps edges widths colours attrs motion keys cursors measured panels field rich]
 
   # One line of the width page: something to draw, and what it is.
   #
@@ -48,7 +48,18 @@ module Validate
     {"ﷺ", "U+FDFA arabic ligature"},
   ]
 
-  # The pages, in the order the number keys select them.
+  # Cycled across a row by the mixed fill: one cell, two cells, and a cluster
+  # of seven code points that a terminal may or may not measure as one.
+  MIXED_FILL = ["a", "漢", "\u{1F468}\u200D\u{1F469}\u200D\u{1F467}\u200D\u{1F466}"]
+
+  # How the edges page is filled, or `None` for the box.
+  enum Fill
+    None
+    Digits
+    Mixed
+  end
+
+  # The pages, in the order tab walks them.
   class Validator
     include TermBuf
 
@@ -58,11 +69,12 @@ module Validate
     def initialize(@terminal : Terminal)
       @page = 0
       @rebuild = true
-      @filled = false
+      @fill = Fill::None
       @running = true
       @frame = 0
       @log = 0
       @frozen = false
+      @focused = false
       @presses = [] of String
       @arriving = nil.as(Int32?)
       @entered = [] of String
@@ -115,6 +127,7 @@ module Validate
       when "measured" then draw_measured screen
       when "panels"   then draw_panels screen
       when "field"    then draw_field screen
+      when "rich"     then draw_rich screen
       end
     end
 
@@ -124,6 +137,10 @@ module Validate
 
     private def keys? : Bool
       PAGES[@page] == "keys"
+    end
+
+    private def rich? : Bool
+      PAGES[@page] == "rich"
     end
 
     private def field? : Bool
@@ -148,19 +165,27 @@ module Validate
       screen.fill Rect.new(0, 0, columns, 1), ' ', Style::DEFAULT.reverse
       screen.write 1, 0, "termbuf", Style::DEFAULT.reverse.bold
 
-      # The names cost about sixty columns; below that the numbers alone have
-      # to do, since a half-drawn tab bar says less than a full row of digits.
-      named = columns >= 70
+      # The names cost about ninety columns. Below that a half-drawn bar says
+      # less than naming the page you are on and how far along it is, since
+      # tab is the only way to move and the others cannot be reached directly.
+      return draw_narrow_tabs screen if columns < 96
+
       column = 10
 
       PAGES.each_with_index do |name, index|
-        label = named ? " #{index + 1} #{name} " : " #{index + 1} "
+        label = " #{name} "
         style = index == @page ? Style::DEFAULT.bold : Style::DEFAULT.reverse
         screen.write column, 0, label, style
         column += label.size
       end
 
       screen.write 1, rows - 1, status.ljust(Math.max(columns - 1, 0)), Style::DEFAULT.faint
+    end
+
+    # *note* once the page has the keyboard, and how to give it the keyboard
+    # before that.
+    private def focus_note(note : String) : String
+      @focused ? note : "press enter to type here"
     end
 
     # An unbroken line across the terminal, separating a page's sections.
@@ -171,12 +196,27 @@ module Validate
       screen.write 0, y, "─" * columns, Style::DEFAULT.faint
     end
 
+    # What the keyboard does here, which changes with the page and with
+    # whether it has been entered.
+    private def keys_note : String
+      return "[esc] leave the pane  [ctrl-r] redraw" if @focused
+      return "[enter] type here  [tab] page  [ctrl-r] redraw  [q] quit" if typeable?
+
+      "[tab]/[shift-tab] page  [ctrl-r] redraw  [q] quit"
+    end
+
+    private def draw_narrow_tabs(screen) : Nil
+      screen.write 10, 0, " #{PAGES[@page]} ", Style::DEFAULT.bold
+      screen.write 12 + PAGES[@page].size, 0, "#{@page + 1} of #{PAGES.size}",
+        Style::DEFAULT.reverse
+    end
+
     private def status : String
       String.build do |io|
         io << @terminal.size << "   frame " << @frame
         io << "   last paint " << @terminal.last_paint_bytes << " B"
         io << "   total " << (@terminal.total_paint_bytes / 1024).round(1) << " kB"
-        io << "   [r] redraw  [q] quit"
+        io << "   " << keys_note
       end
     end
 
@@ -222,11 +262,53 @@ module Validate
         mark = on ? '+' : '-'
         style = on ? Style::DEFAULT.fg(Color.indexed(2)) : Style::DEFAULT.faint
 
-        screen.write column, row, "#{mark} #{member}", style
+        screen.write column, row, "#{mark} ", style
+        # A capability that draws something draws its own name in it, so a
+        # claim the terminal does not honour is one glance away from being
+        # spotted: strike-through that renders as plain text says more than a
+        # green plus does.
+        screen.write column + 2, row, member.to_s, on ? shown_as(member) : style
         shown += 1
       end
 
       members.size - shown
+    end
+
+    # The style *member* turns on, for a capability that changes how text
+    # looks. The rest keep the colour that says they were detected.
+    private def shown_as(member : Capability) : Style
+      found = Style::DEFAULT.fg Color.indexed(2)
+
+      # Conceal is left out of both: a working one draws the name as nothing,
+      # which reads as a bug rather than a demonstration. Page 5 shows it
+      # beside a label that stays put.
+      attributed(member, found) || coloured(member, found) || found
+    end
+
+    private def attributed(member : Capability, found : Style) : Style?
+      case member
+      when .bold?        then found.bold
+      when .faint?       then found.faint
+      when .italic?      then found.italic
+      when .reverse?     then found.reverse
+      when .strike?      then found.strike
+      when .blink?       then found.blink
+      when .rapid_blink? then found.blink rapid: true
+      when .overline?    then found.with Attributes::Overline
+      when .superscript? then found.with Attributes::Superscript
+      end
+    end
+
+    private def coloured(member : Capability, found : Style) : Style?
+      case member
+      when .underline?          then found.underlined
+      when .extended_underline? then found.underlined Underline::Curly
+      when .underline_color?    then found.underlined Underline::Single, Color.indexed(1)
+      when .bright_colors?      then found.fg Color.indexed(10)
+      when .color256?           then found.fg Color.indexed(208)
+      when .true_color?         then found.fg Color.rgb(255, 140, 0)
+      when .osc8_links?         then found.linked 1_u32
+      end
     end
 
     # ---------------------------------------------------------------- page 2
@@ -235,7 +317,7 @@ module Validate
     # scrolls when the bottom right cell is written, the box loses its top row
     # and everything shifts; if it does not, this is a closed rectangle.
     private def draw_edges(screen) : Nil
-      return draw_fill screen if @filled
+      return draw_fill screen unless @fill.none?
 
       last_column = columns - 1
       last_row = rows - 1
@@ -284,7 +366,8 @@ module Validate
         {"#{rows - 1} as the last column and row on the rulers. A missing top", Style::DEFAULT},
         {"edge means writing the bottom right cell scrolled the screen.", Style::DEFAULT},
         {"", Style::DEFAULT},
-        {"[f] fill every cell   [r] redraw   [1-6] page   [q] quit", Style::DEFAULT.faint},
+        {"[1] fill with digits   [2] fill with mixed widths   [ctrl-r] redraw", Style::DEFAULT.faint},
+        {"[tab] page   [q] quit", Style::DEFAULT.faint},
       ]
 
       top = Math.max (rows - lines.size) // 2, 2
@@ -301,16 +384,53 @@ module Validate
     # obvious.
     private def draw_fill(screen) : Nil
       rows.times do |row|
-        line = String.build do |io|
-          columns.times { |column| io << (column % 10) }
-        end
-
         tint = Color.indexed 232 + (row * 23 // Math.max(rows - 1, 1))
+        line = @fill.digits? ? digit_row : mixed_row
         screen.write 0, row, line, Style::DEFAULT.bg(tint).fg(Color.indexed(15))
       end
 
-      screen.write 2, rows // 2, " every cell is written; press f for the box ",
-        Style::DEFAULT.reverse.bold
+      screen.write 2, rows // 2, " #{fill_note} ", Style::DEFAULT.reverse.bold
+    end
+
+    private def fill_note : String
+      return "every cell is written; press 1 for the box, 2 for the mixed fill" if @fill.digits?
+
+      "narrow, wide, composed; press 2 for the box, 1 for digits"
+    end
+
+    # A digit per column, so the row reads as a ruler and any cell the terminal
+    # would not take shows as a gap.
+    private def digit_row : String
+      String.build do |io|
+        columns.times { |column| io << (column % 10) }
+      end
+    end
+
+    # The same row, cycling a one cell character, a two cell one, and a cluster
+    # made of several code points.
+    #
+    # Every piece is one or two cells here, so the row reaches the right edge
+    # on a terminal that measures clusters the way this does.
+    #
+    # On one that adds up the code points instead, each cluster costs it eleven
+    # columns rather than the two it was written as, so a cycle costs fourteen
+    # of its columns for five of ours and the row stops about a third of the
+    # way across. The empty part is what that terminal made unaddressable.
+    private def mixed_row : String
+      String.build do |io|
+        used = 0
+        index = 0
+
+        while used < columns
+          piece = MIXED_FILL[index % MIXED_FILL.size]
+          width = Unicode.string_width piece, @terminal.widths
+          break if width.zero? || used + width > columns
+
+          io << piece
+          used += width
+          index += 1
+        end
+      end
     end
 
     # ---------------------------------------------------------------- page 3
@@ -344,7 +464,13 @@ module Validate
       note = shown < SAMPLES.size ? "#{SAMPLES.size - shown} more need a taller window; " : ""
       # Without the wrapper, since the row is only so wide.
       rules = policy.to_s.lchop("WidthPolicy(").rchop(')')
-      screen.write 2, rows - 2, "#{note}measured: #{rules}", Style::DEFAULT.faint
+      screen.write 2, rows - 3, "#{note}measured: #{rules}", Style::DEFAULT.faint
+      screen.write 2, rows - 2, widths_note, Style::DEFAULT.faint
+    end
+
+    private def widths_note : String
+      "each row is written as one run, so a bar out of line is a cluster this terminal draws " \
+      "wider or narrower than the shard measured it."
     end
 
     # ---------------------------------------------------------------- page 9
@@ -365,7 +491,8 @@ module Validate
         return
       end
 
-      screen.write 2, 2, "sample  said  ours  rule", Style::DEFAULT.bold
+      screen.write 2, 2, "said  ours  rule                 what of it            sample",
+        Style::DEFAULT.bold
       screen.write 2, 3, @terminal.widths.to_s.lchop("WidthPolicy(").rchop(')'),
         Style::DEFAULT.faint
 
@@ -382,12 +509,14 @@ module Validate
         odd = said && said != ours
         style = odd ? Style::DEFAULT.fg(Color.indexed(1)) : Style::DEFAULT
 
-        screen.write 2, row, reading.sample.text
-        screen.write 10, row, (said || "-").to_s.rjust(4), style
-        screen.write 16, row, ours.to_s.rjust(4), style
-        screen.write 22, row,
-          "#{reading.sample.rule || "-"}#{odd ? "   no rule reaches this" : ""}",
-          Style::DEFAULT.faint
+        # The sample goes last, on its own. A cluster this terminal counts
+        # differently takes the rest of its row with it, and a table that comes
+        # apart is no use for reading which terminal counted what.
+        screen.write 2, row, (said || "-").to_s.rjust(4), style
+        screen.write 8, row, ours.to_s.rjust(4), style
+        screen.write 14, row, (reading.sample.rule || "-"), Style::DEFAULT.faint
+        screen.write 35, row, odd ? "no rule reaches this" : "", style
+        screen.write 58, row, reading.sample.text
 
         row += 1
       end
@@ -447,9 +576,31 @@ module Validate
         screen.write_char 2 + offset, row, ' ', Style::DEFAULT.bg(from_hue(hue))
       end
 
+      row = draw_one_hue screen, row + 2, span
+
       sample = Color.rgb 200, 40, 90
-      screen.write 2, row + 2,
+      screen.write 2, row + 1,
         "rgb(200,40,90) is sent as #{describe_colour sample}", Style::DEFAULT.faint
+    end
+
+    # One hue from black to full, which is what tells 24 bit colour from the
+    # palette. A sweep through every hue looks smooth either way at this width,
+    # because 256 has enough hues to fake it; a single hue does not, because the
+    # cube carries six levels per channel and the steps are unmistakable.
+    private def draw_one_hue(screen, row : Int32, span : Int32) : Int32
+      return row if row >= rows - 3
+
+      screen.write 2, row, "one hue, black to full — steps here mean it is being quantized",
+        Style::DEFAULT.bold
+      row += 1
+
+      span.times do |offset|
+        level = offset * 255 // Math.max(span - 1, 1)
+        shade = Color.rgb level * 40 // 255, level * 110 // 255, level
+        screen.write_char 2 + offset, row, ' ', Style::DEFAULT.bg(shade)
+      end
+
+      row + 1
     end
 
     # What the encoder will make of *colour* under the capabilities in force.
@@ -613,7 +764,8 @@ module Validate
       end
 
       screen.write 2, rows - 3,
-        "[tab] next page   [shift+tab] previous   [q] quit   paste to see the notice",
+        "everything pressed here is listed, except tab, shift-tab, ctrl-r and q, " \
+        "which act. paste to see the notice.",
         Style::DEFAULT.faint
     end
 
@@ -628,7 +780,8 @@ module Validate
     # paragraph survives — which is what a pane with no scrollback does.
     private def draw_cursors(screen) : Nil
       screen.write 2, 2, "type into the pane", Style::DEFAULT.bold
-      screen.write 22, 2, "the block is the terminal's cursor", Style::DEFAULT.faint
+      screen.write 22, 2, focus_note("the block is the terminal's cursor"),
+        Style::DEFAULT.faint
 
       pane = Rect.new 3, 5, Math.max(columns - 6, 4), Math.max(rows - 12, 2)
       return if pane.height < 2
@@ -835,7 +988,7 @@ module Validate
       @terminal.cursor.move_to x, y
 
       screen.write 2, 2, "an input field", Style::DEFAULT.bold
-      screen.write 20, 2, "enter accepts, escape clears, up walks back",
+      screen.write 20, 2, focus_note("enter accepts, up walks back"),
         Style::DEFAULT.faint
       screen.write 2, 3, "tab completes a colour name: #{WORDS.first(4).join(", ")}, …",
         Style::DEFAULT.faint
@@ -845,6 +998,102 @@ module Validate
       @entered.last(Math.max(rows - row - 2, 0)).each_with_index do |line, offset|
         screen.write 4, row + offset, line.inspect, Style::DEFAULT.faint
       end
+    end
+
+    # --------------------------------------------------------------- page 12
+
+    # The three things a modern terminal will do that a cell grid cannot say on
+    # its own. Each is behind the capability that decides whether asking is
+    # safe, so this page reads differently on every terminal — which is the
+    # point of it.
+    private def draw_rich(screen) : Nil
+      caps = @terminal.capabilities
+      screen.write 2, 2, "beyond the cell grid", Style::DEFAULT.bold
+
+      draw_rich_links screen, caps
+      draw_rich_colors screen, caps
+      draw_rich_image screen, caps
+
+      screen.write 2, rows - 2,
+        "[c] push a colour  [C] pop  [i] place an image  [x] clear the images",
+        Style::DEFAULT.faint
+    end
+
+    private def draw_rich_links(screen, caps) : Nil
+      supported = caps.includes? Capability::Osc8Links
+      screen.write 2, 4, "OSC 8 links".ljust(16), Style::DEFAULT.faint
+      screen.write 20, 4, supported ? "yes" : "no", mark(supported)
+      return unless supported
+
+      link = @terminal.link "https://plambert.github.io/termbuf.cr/latest/", "docs"
+      underlined = Style::DEFAULT.fg(Color.indexed(4)).underlined.linked(link)
+      screen.write 26, 4, "termbuf documentation", underlined
+      screen.write 50, 4, "(same link, one group)", underlined
+    end
+
+    private def draw_rich_colors(screen, caps) : Nil
+      supported = caps.includes? Capability::KittyColorStack
+      screen.write 2, 6, "colour stack".ljust(16), Style::DEFAULT.faint
+      screen.write 20, 6, supported ? "yes" : "no", mark(supported)
+      screen.write 26, 6, "depth #{@terminal.colors.depth}", Style::DEFAULT.faint
+      return unless supported
+
+      screen.write 40, 6, "press c to tint the whole terminal, C to put it back",
+        Style::DEFAULT.faint
+    end
+
+    private def draw_rich_image(screen, caps) : Nil
+      supported = caps.includes? Capability::KittyGraphics
+      transport = caps.includes?(Capability::KittyGraphicsTempFile) ? "temp file" : "inline"
+      screen.write 2, 8, "kitty graphics".ljust(16), Style::DEFAULT.faint
+      screen.write 20, 8, supported ? "yes" : "no", mark(supported)
+      screen.write 26, 8, supported ? transport : "", Style::DEFAULT.faint
+      screen.write 40, 8, "#{@terminal.images.placements.size} placed", Style::DEFAULT.faint
+      return unless supported
+
+      screen.write 2, 10, "the box below is where the image goes; text under it stays put",
+        Style::DEFAULT.faint
+      Border.plain(Style::DEFAULT.faint).draw screen, Rect.new(2, 11, 22, 6)
+      screen.write 4, 13, "under the picture", Style::DEFAULT.faint
+    end
+
+    private def mark(on : Bool) : Style
+      on ? Style::DEFAULT.fg(Color.indexed(2)) : Style::DEFAULT.fg(Color.indexed(1))
+    end
+
+    # A gradient, so that a wrong stride or a swapped channel is visible rather
+    # than merely wrong.
+    private def swatch : Image
+      width = 32
+      height = 32
+      pixels = Bytes.new width * height * 3
+
+      height.times do |row|
+        width.times do |column|
+          at = (row * width + column) * 3
+          pixels[at] = (column * 8).to_u8
+          pixels[at + 1] = (row * 8).to_u8
+          pixels[at + 2] = 160_u8
+        end
+      end
+
+      Image.rgb pixels, width, height
+    end
+
+    private def rich_key(key : Key) : Bool
+      return false unless key.character?
+
+      case key.char
+      when 'c'
+        @terminal.colors.push
+        @terminal.colors.background = Color.rgb(30, 20, 45)
+      when 'C' then @terminal.colors.pop
+      when 'i' then @terminal.images.place swatch, Rect.new(3, 12, 20, 4)
+      when 'x' then @terminal.images.clear
+      else          return false
+      end
+
+      true
     end
 
     # ---------------------------------------------------------------- input
@@ -873,18 +1122,31 @@ module Validate
       end
     end
 
+    # Two pages want the keyboard for themselves, so they are entered rather
+    # than merely visited: nothing on them acts until enter, and escape gives
+    # the keyboard back. That is what leaves tab free to mean the same thing
+    # everywhere.
     private def press(key : Key, bytes : Bytes) : Nil
       remember key, bytes
-      return field_key key if field?
-      return @running = false if key.is? 'q'
 
-      # Tab moves between pages everywhere, which is what leaves the keys page
-      # free to show the arrows and the digits instead of acting on them.
-      if key.is? Key::Name::Tab
-        return go_to(key.shift? ? @page - 1 : @page + 1)
+      if @focused
+        return leave_page if key.is? Key::Name::Escape
+        return focused_key key
       end
 
-      return type(key) if cursors?
+      browsing_key key
+    end
+
+    # What the keys mean on a page that has not been entered, which is every
+    # page until enter is pressed on one of the two that take typing.
+    private def browsing_key(key : Key) : Nil
+      return force_repaint if key.ctrl? && key.character? && key.char == 'r'
+      return go_to(key.shift? ? @page - 1 : @page + 1) if key.is? Key::Name::Tab
+      return @running = false if key.is? 'q'
+      return enter_page if key.is?(Key::Name::Enter) && typeable?
+
+      # The keys page is here to show what arrives, so everything the lines
+      # above have not claimed is left alone for it to draw.
       return if keys?
 
       case key.name
@@ -898,11 +1160,29 @@ module Validate
       return unless key.character?
 
       case key.char
-      when 'r'      then force_repaint
-      when 'f'      then @filled = !@filled
-      when ' '      then @frozen = !@frozen
-      when '1'..'9' then go_to key.char.to_i - 1
+      when '1' then @fill = @fill.digits? ? Fill::None : Fill::Digits
+      when '2' then @fill = @fill.mixed? ? Fill::None : Fill::Mixed
+      when ' ' then @frozen = !@frozen
       end
+    end
+
+    # Whether this page has something to type into.
+    private def typeable? : Bool
+      field? || cursors?
+    end
+
+    private def enter_page : Nil
+      @focused = true
+      @rebuild = true
+    end
+
+    private def leave_page : Nil
+      @focused = false
+      @rebuild = true
+    end
+
+    private def focused_key(key : Key) : Nil
+      field? ? field_key(key) : type(key)
     end
 
     private def type(key : Key) : Nil
@@ -913,20 +1193,24 @@ module Validate
       end
     end
 
-    # Kept whichever page is showing, so a key pressed on another one is still
-    # there to look at afterwards.
+    # Only what was pressed while the keys page is showing. Recording
+    # everywhere filled it with the tab presses that walked here, so arriving
+    # meant reading someone else's log before your own.
     private def remember(key : Key, bytes : Bytes) : Nil
-      @presses << "#{key.to_s.ljust(18)}#{String.new(bytes).inspect}"
+      return unless keys?
+
+      note "#{key.to_s.ljust(18)}#{String.new(bytes).inspect}"
+    end
+
+    private def note(line : String) : Nil
+      @presses << line
       @presses.shift if @presses.size > 64
     end
 
-    # On the field page the field gets almost everything, since q and the
-    # digits are things people type.
+    # Once the page has been entered the field gets everything, tab included:
+    # completion is what tab is for in a text field, and escape has already
+    # been taken as the way back out.
     private def field_key(key : Key) : Nil
-      if key.is? Key::Name::Tab
-        return go_to(key.shift? ? @page - 1 : @page + 1) unless completing?
-      end
-
       case @field.handle key
       in Editor::Outcome::Continue  then nil
       in Editor::Outcome::Accepted  then @entered << @field.editor.accepted
@@ -935,18 +1219,14 @@ module Validate
       end
     end
 
-    # Tab belongs to completion while there is a hook with something to say,
-    # and to page switching otherwise.
-    private def completing? : Bool
-      !@field.buffer.empty?
-    end
-
     private def pasted(text : String, complete : Bool) : Nil
       preview = text.size > 40 ? "#{text[0, 40]}…" : text
-      note = complete ? "" : ", never closed"
-      return @field.paste text if field?
+      tail = complete ? "" : ", never closed"
+      return @field.paste text if field? && @focused
 
-      @presses << "#{"paste".ljust(18)}#{preview.inspect} (#{text.bytesize} bytes#{note})"
+      # Logged on the keys page for the same reason keystrokes are: that is the
+      # page showing what arrived.
+      note "#{"paste".ljust(18)}#{preview.inspect} (#{text.bytesize} bytes#{tail})" if keys?
 
       # The notice was drawn over whatever was underneath, and the motion page
       # does not clear between frames.
@@ -965,10 +1245,26 @@ module Validate
       @page = page
       @rebuild = true
       @log = 0
+      # Leaving a page gives its keyboard back, so tab always means the same
+      # thing on arrival.
+      @focused = false
+      # The keys page shows this visit, not the last one.
+      @presses.clear if keys?
       field? ? @terminal.hardware_cursor = @terminal.cursor : @terminal.hide_cursor
       # Only one page has anywhere for someone to type, so the terminal's own
       # cursor has no business blinking on the others.
       @terminal.hide_cursor unless cursors?
+
+      # On a terminal that counts a cluster's columns by adding up its code
+      # points, a row holding one leaves the screen showing something the
+      # buffer has no record of, so the diff skips cells that are wrong and the
+      # last page's text is still there.
+      #
+      # Repainting clears the rows that no longer carry such a cluster, which
+      # is most of them. It cannot clear the rest: the rewrite lands at the
+      # columns the buffer counted, and on those rows the terminal puts them
+      # somewhere else. Every other terminal keeps the diff.
+      force_repaint if @terminal.quirks.per_code_point_columns?
     end
 
     # Sends the screen again without touching what is on it. Whatever scribbled

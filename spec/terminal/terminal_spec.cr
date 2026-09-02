@@ -6,6 +6,9 @@ require "../support/model_terminal"
 #
 # Every wait has a deadline. A driver bug that deadlocks should fail a spec,
 # not hang the suite.
+private COLOURFUL = TermBuf::Capabilities.new(
+  TermBuf::Capabilities::MODERN.flags | TermBuf::Capability::KittyColorStack)
+
 private class Harness
   getter terminal : TermBuf::Terminal
   getter output : IO::Memory
@@ -898,6 +901,117 @@ Spectator.describe TermBuf::Terminal do
     end
   end
 
+  describe "the terminal's own colours" do
+    it "sends a change in order with the frames around it" do
+      with_harness capabilities: COLOURFUL do |harness|
+        harness.drain
+        harness.terminal.colors.push
+        harness.terminal.colors.background = TermBuf::Color.rgb(20, 30, 40)
+        harness.terminal.paint
+
+        written = harness.drain
+        expect(written).to contain "\e[#P"
+        expect(written).to contain "\e]11;rgb:14/1e/28\e\\"
+      end
+    end
+
+    # An application that forgets to pop, or that stops on a signal, still has
+    # to give the terminal back the colours it was found with.
+    it "pops what is still pushed when the terminal is given back" do
+      harness = Harness.new capabilities: COLOURFUL
+      harness.terminal.colors.push
+      harness.terminal.colors.push
+      harness.terminal.paint
+      harness.drain
+
+      harness.terminal.close
+
+      expect(harness.drain.scan("\e[#Q").size).to eq 2
+    end
+
+    it "says nothing on a terminal without the stack" do
+      with_harness do |harness|
+        harness.drain
+        harness.terminal.colors.push
+        harness.terminal.colors.background = TermBuf::Color::RED
+        harness.terminal.paint
+
+        expect(harness.drain).not_to contain "\e[#P"
+      end
+    end
+  end
+
+  describe "images" do
+    private GRAPHICAL = TermBuf::Capabilities.new(
+      TermBuf::Capabilities::MODERN.flags | TermBuf::Capability::KittyGraphics)
+
+    # Cells first, pictures over the top: an application that writes text where
+    # one sits gets both, and in that order.
+    it "sends an image after the cells of the frame it belongs to" do
+      with_harness capabilities: GRAPHICAL do |harness|
+        harness.terminal.write 0, 0, "under"
+        harness.terminal.images.place TermBuf::Image.rgb(Bytes.new(12, 0_u8), 2, 2),
+          TermBuf::Rect.new(0, 0, 2, 1)
+        harness.terminal.paint
+
+        written = harness.drain
+        expect(written.index! "under").to be < written.index!("\e_G")
+      end
+    end
+
+    it "sends the pixels again when the repaint is forced" do
+      with_harness capabilities: GRAPHICAL do |harness|
+        harness.terminal.images.place TermBuf::Image.rgb(Bytes.new(12, 0_u8), 2, 2),
+          TermBuf::Rect.new(0, 0, 2, 1)
+        harness.terminal.paint
+        harness.drain
+
+        harness.terminal.paint!
+        expect(harness.drain).to contain "a=T"
+      end
+    end
+
+    it "takes the pictures down when the terminal is given back" do
+      harness = Harness.new capabilities: GRAPHICAL
+      harness.terminal.images.place TermBuf::Image.rgb(Bytes.new(12, 0_u8), 2, 2),
+        TermBuf::Rect.new(0, 0, 2, 1)
+      harness.terminal.paint
+      harness.drain
+
+      harness.terminal.close
+      expect(harness.drain).to contain "a=d,d=A"
+    end
+
+    # Every placement moves the cursor to get there, so the one the application
+    # is having the terminal follow has to be put back afterwards.
+    it "puts the followed cursor back after drawing over it" do
+      with_harness capabilities: GRAPHICAL do |harness|
+        cursor = harness.terminal.cursor
+        cursor.move_to 4, 3
+        harness.terminal.hardware_cursor = cursor
+        harness.terminal.paint
+        harness.drain
+
+        harness.terminal.images.place TermBuf::Image.rgb(Bytes.new(12, 0_u8), 2, 2),
+          TermBuf::Rect.new(0, 0, 2, 1)
+        harness.terminal.paint
+
+        written = harness.drain
+        expect(written.index! "\e_G").to be < written.rindex!("\e[4;5H")
+      end
+    end
+
+    it "sends nothing on a terminal that draws no pictures" do
+      with_harness do |harness|
+        harness.terminal.images.place TermBuf::Image.rgb(Bytes.new(12, 0_u8), 2, 2),
+          TermBuf::Rect.new(0, 0, 2, 1)
+        harness.terminal.paint
+
+        expect(harness.drain).not_to contain "\e_G"
+      end
+    end
+  end
+
   describe "closing" do
     it "shows the cursor and leaves the alternate screen" do
       harness = Harness.new
@@ -1053,6 +1167,29 @@ Spectator.describe TermBuf::Tty do
     expect(tty.entered?).to be_false
   end
 
+  # A terminal that does not recognise a query prints its payload, so probing
+  # leaves rubbish on the screen the person was looking at. Terminal.app does
+  # this with XTGETTCAP, DECRPM and the kitty graphics query.
+  describe "#scrub_line" do
+    it "blanks the line with nothing but carriage returns and spaces" do
+      output = IO::Memory.new
+      tty = TermBuf::Tty.new IO::Memory.new, output, managed: false
+      tty.scrub_line
+      written = output.to_s
+
+      expect(written).to eq "\r#{" " * tty.size.columns}\r"
+      expect(written).not_to contain "\e"
+    end
+
+    it "covers a whole line, so anything echoed onto it goes" do
+      output = IO::Memory.new
+      tty = TermBuf::Tty.new IO::Memory.new, output, managed: false
+      tty.scrub_line
+
+      expect(output.to_s.count(' ')).to eq tty.size.columns
+    end
+  end
+
   it "writes nothing when leaving a terminal it never entered" do
     output = IO::Memory.new
     tty = TermBuf::Tty.new IO::Memory.new, output, managed: false
@@ -1150,7 +1287,27 @@ Spectator.describe TermBuf::ResponseRegistry do
         expect(warning).not_to be_nil
         expect(warning.try &.message).to contain "adding up its code points"
         expect(warning.try &.message).to contain "11 columns"
+        expect(warning.try &.message).to contain "9 columns to the right"
         expect(warning.try &.message).to contain "cannot be reached"
+      end
+    end
+
+    # Counting fewer columns than the glyph is drawn in is the other direction:
+    # nothing is pushed along and no room is lost, the glyph simply covers what
+    # comes after it. Saying the row lost a column would be wrong.
+    it "says which way it went wrong" do
+      with_harness quirks: TermBuf::Quirk::PerCodePointColumns do |harness|
+        harness.terminal.warn_composed_drift = false
+        harness.terminal.write 0, 0, "\u263A\uFE0F" # counted 1, drawn 2
+        harness.terminal.paint
+
+        message = harness.event_of(TermBuf::Events::Warning).try &.message || ""
+
+        expect(message).to contain "takes 1 column where"
+        expect(message).to contain "1 column to the left"
+        expect(message).to contain "covers what follows"
+        expect(message).not_to contain "cannot be reached"
+        expect(message).not_to contain "1 columns"
       end
     end
 
@@ -1212,6 +1369,41 @@ Spectator.describe TermBuf::ResponseRegistry do
 
         expect(leave).to be >= 0
         expect(enter).to be > leave
+      end
+    end
+
+    # The alternate screen keeps its own cursor visibility, so coming back to
+    # it undoes the hide that entering did. Left alone, the cursor reappears
+    # and wanders to wherever each frame's last run ended.
+    it "hides the cursor again after coming back" do
+      with_harness quirks: TermBuf::Quirk::PerCodePointColumns,
+        capabilities: TermBuf::Capabilities::MODERN do |harness|
+        harness.terminal.write 0, 0, FAMILY
+        harness.terminal.paint
+        harness.event_of TermBuf::Events::Warning
+
+        written = harness.drain
+        enter = written.rindex("\e[?1049h") || -1
+        hide = written.index("\e[?25l", enter < 0 ? 0 : enter) || -1
+
+        expect(enter).to be >= 0
+        expect(hide).to be > enter
+      end
+    end
+
+    it "puts a wanted cursor back after coming back" do
+      with_harness quirks: TermBuf::Quirk::PerCodePointColumns,
+        capabilities: TermBuf::Capabilities::MODERN do |harness|
+        harness.terminal.hardware_cursor = harness.terminal.cursor
+        harness.terminal.write 0, 0, FAMILY
+        harness.terminal.paint
+        harness.event_of TermBuf::Events::Warning
+
+        written = harness.drain
+        enter = written.rindex("\e[?1049h") || -1
+
+        # Shown again by the repaint that follows, rather than left hidden.
+        expect(written.index("\e[?25h", enter < 0 ? 0 : enter)).not_to be_nil
       end
     end
 

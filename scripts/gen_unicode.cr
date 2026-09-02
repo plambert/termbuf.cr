@@ -13,13 +13,16 @@ require "file_utils"
 
 module GenUnicode
   UNICODE_VERSION = "16.0.0"
-  BASE_URL        = "https://www.unicode.org/Public/#{UNICODE_VERSION}/ucd"
-  CACHE_DIR       = "tmp/ucd-#{UNICODE_VERSION}"
-  TABLES_PATH     = "src/termbuf/unicode/tables.cr"
-  FIXTURE_PATH    = "spec/fixtures/GraphemeBreakTest.txt"
-  MAX_CODEPOINT   = 0x10FFFF
+  # The emoji files ship on their own release schedule and their own path.
+  EMOJI_VERSION = "16.0"
+  BASE_URL      = "https://www.unicode.org/Public/#{UNICODE_VERSION}/ucd"
+  CACHE_DIR     = "tmp/ucd-#{UNICODE_VERSION}"
+  TABLES_PATH   = "src/termbuf/unicode/tables.cr"
+  FIXTURE_PATH  = "spec/fixtures/GraphemeBreakTest.txt"
+  MAX_CODEPOINT = 0x10FFFF
 
-  # Local name => path below `BASE_URL`.
+  # Local name => path below `BASE_URL`, or a whole URL for a file that does
+  # not live under the UCD tree.
   SOURCES = {
     "UnicodeData.txt"           => "UnicodeData.txt",
     "EastAsianWidth.txt"        => "EastAsianWidth.txt",
@@ -27,6 +30,10 @@ module GenUnicode
     "emoji-data.txt"            => "emoji/emoji-data.txt",
     "GraphemeBreakProperty.txt" => "auxiliary/GraphemeBreakProperty.txt",
     "GraphemeBreakTest.txt"     => "auxiliary/GraphemeBreakTest.txt",
+    # Every emoji sequence Unicode considers well formed, which is the bulk of
+    # the survey corpus. `scripts/gen_corpus.cr` reads it; nothing in the
+    # tables comes from it.
+    "emoji-test.txt" => "https://www.unicode.org/Public/emoji/#{EMOJI_VERSION}/emoji-test.txt",
   }
 
   # Grapheme cluster break classes, in the order they are emitted into the
@@ -71,6 +78,8 @@ module GenUnicode
   AMBIGUOUS_BIT    = 0x0040_u16
   PICTOGRAPHIC_BIT = 0x0080_u16
   INCB_SHIFT       =      8_u16
+  EMOJI_BIT        = 0x0400_u16
+  IGNORABLE_BIT    = 0x0800_u16
   INCB_MASK        = 0x0300_u16
 
   def self.run : Nil
@@ -83,8 +92,8 @@ module GenUnicode
 
     apply_east_asian_width widths, flags
     apply_emoji widths, flags
-    apply_general_categories widths
-    apply_default_ignorable widths
+    apply_general_categories widths, flags
+    apply_default_ignorable widths, flags
     apply_grapheme_break flags
     apply_incb flags
 
@@ -100,7 +109,8 @@ module GenUnicode
     path = File.join CACHE_DIR, name
     return path if File.exists? path
 
-    url = "#{BASE_URL}/#{SOURCES[name]}"
+    source = SOURCES[name]
+    url = source.starts_with?("https://") ? source : "#{BASE_URL}/#{source}"
     puts "fetching #{url}"
     response = HTTP::Client.get url
     raise "GET #{url} failed: #{response.status_code}" unless response.success?
@@ -161,13 +171,20 @@ module GenUnicode
         range.each { |codepoint| widths[codepoint] = 2_u8 }
       when "Extended_Pictographic"
         range.each { |codepoint| flags[codepoint] |= PICTOGRAPHIC_BIT }
+      when "Emoji"
+        # Narrower than Extended_Pictographic and a different question. `⚑`
+        # U+2691 is pictographic and is not an emoji, so a variation selector
+        # after it asks for a presentation it does not have; the digits are
+        # emoji and are not pictographic, which is what makes a keycap two
+        # columns wide.
+        range.each { |codepoint| flags[codepoint] |= EMOJI_BIT }
       end
     end
   end
 
   # Marks and format characters occupy no cell of their own; controls are never
   # stored in the buffer and are reported as zero width.
-  def self.apply_general_categories(widths : Array(UInt8)) : Nil
+  def self.apply_general_categories(widths : Array(UInt8), flags : Array(UInt16)) : Nil
     range_start = nil.as(Int32?)
 
     File.each_line File.join(CACHE_DIR, "UnicodeData.txt") do |line|
@@ -192,15 +209,29 @@ module GenUnicode
 
       next unless category.in? "Mn", "Me", "Cf", "Cc", "Cs"
 
+      # A format character keeps the width East Asian Width gave it and is
+      # marked instead of zeroed. `.char_width` still answers zero for it; the
+      # per-code-point model needs the number underneath, because a terminal
+      # counting that way charges every character its East Asian Width and
+      # never applies the zeroing at all. That is one rule where the zero width
+      # joiner and the tag character were two.
+      if category == "Cf"
+        (first..codepoint).each { |member| flags[member] |= IGNORABLE_BIT }
+        next
+      end
+
       (first..codepoint).each { |member| widths[member] = 0_u8 }
     end
   end
 
-  def self.apply_default_ignorable(widths : Array(UInt8)) : Nil
+  # Marked rather than zeroed, for the same reason. The hangul fillers are
+  # ordinary letters that happen to be ignorable, and a terminal counting per
+  # code point charges them the two columns East Asian Width says they are.
+  def self.apply_default_ignorable(widths : Array(UInt8), flags : Array(UInt16)) : Nil
     each_property "DerivedCoreProperties.txt" do |range, fields|
       next unless fields[1] == "Default_Ignorable_Code_Point"
 
-      range.each { |codepoint| widths[codepoint] = 0_u8 }
+      range.each { |codepoint| flags[codepoint] |= IGNORABLE_BIT }
     end
   end
 
@@ -298,6 +329,8 @@ module GenUnicode
           PICTOGRAPHIC_BIT = 0x0080_u16
           INCB_SHIFT       =      8_u16
           INCB_MASK        = 0x0300_u16
+          EMOJI_BIT        = 0x0400_u16
+          IGNORABLE_BIT    = 0x0800_u16
 
           RANGE_COUNT = #{starts.size}
 

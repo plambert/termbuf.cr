@@ -28,10 +28,17 @@ module TermBuf
     # As `Scroll`, but rows leaving the top go to the region's scrollback.
     record ScrollRegion, region : Region, lines : Int32, style : Style
 
-    # Forget what the terminal is showing, so the next paint rewrites it all.
+    # Copy *from* of *source* onto this buffer at (*x*, *y*), or all of it when
+    # *from* is nil.
     record Blit, source : Buffer, x : Int32, y : Int32, from : Rect?
 
+    # Forget what the terminal is showing, so the next paint rewrites it all.
     record Invalidate
+
+    # A change to the terminal's own colours, sent once the current frame is
+    # out. Unlike `Passthrough` these move no cursor and set no attribute, so
+    # the encoder's idea of the screen survives them.
+    record SetColors, bytes : Bytes
 
     # Bytes to send to the terminal untouched, once the current frame is out.
     record Passthrough, bytes : Bytes
@@ -61,7 +68,8 @@ module TermBuf
   # Anything that can be sent to the owning fibre.
   alias Command = Commands::Write | Commands::WriteChar | Commands::Fill |
                   Commands::Clear | Commands::Scroll | Commands::ScrollRegion |
-                  Commands::Blit | Commands::Invalidate | Commands::Passthrough | Commands::Paint |
+                  Commands::Blit | Commands::Invalidate | Commands::Passthrough |
+                  Commands::SetColors | Commands::Paint |
                   Commands::Resize | Commands::Apply | Commands::Batch |
                   Commands::Stop
 
@@ -194,7 +202,7 @@ module TermBuf
       in Commands::ScrollRegion then buffer.scroll_region command.region, command.lines, command.style
       in Commands::Blit         then buffer.blit command.source, command.x, command.y, command.from
       in Commands::Invalidate   then buffer.invalidate
-      in Commands::Passthrough, Commands::Paint, Commands::Resize,
+      in Commands::Passthrough, Commands::SetColors, Commands::Paint, Commands::Resize,
          Commands::Apply, Commands::Batch, Commands::Stop
         return false
       end

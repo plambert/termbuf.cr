@@ -1,0 +1,15 @@
+key	value
+date	2026-09-01 16:39:31
+term	screen.xterm-256color
+term_program	Apple_Terminal
+term_program_version	470.2
+columns	155
+rows	41
+multiplexer	screen4
+multiplexer_session	10941.termbuf4
+multiplexer_version	Screen version 4.00.03 (FAU) 23-Oct-06
+multiplexer_binary	/usr/bin/screen
+grapheme_mode_2027	unanswered
+corpus	/Users/plambert/Documents/src/termbuf.cr/measurements/corpus.tsv
+samples	5274
+unanswered	0

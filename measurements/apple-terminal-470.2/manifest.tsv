@@ -1,0 +1,69 @@
+# pad=20 steps=6 rows=72
+page	bar_row	codepoints	group	note
+1	6	0061	single	ascii
+1	8	03A9	single	greek
+1	10	00F1	single	latin-1 precomposed
+1	12	2192	single	east asian ambiguous
+1	14	6F22	single	east asian wide
+1	16	FF21	single	fullwidth
+1	18	FF71	single	halfwidth katakana
+1	20	D55C	single	hangul syllable
+1	22	2588	single	block
+1	24	2500	single	box drawing
+1	26	FDFA	single	arabic ligature
+1	28	1F44D	emoji	emoji presentation, wide
+1	30	231A	emoji	emoji presentation, wide
+1	32	2705	emoji	emoji presentation, wide
+1	34	263A	emoji	text presentation, narrow
+1	36	2764	emoji	text presentation, narrow
+1	38	1F3F3	emoji	no presentation, narrow
+1	40	2691	emoji	no presentation, narrow
+1	42	263A+FE0F	variation	narrow base + VS16
+1	44	2764+FE0F	variation	narrow base + VS16
+1	46	1F3F3+FE0F	variation	narrow base + VS16
+1	48	2691+FE0F	variation	narrow base + VS16
+1	50	1F44D+FE0F	variation	wide base + VS16
+1	52	231A+FE0F	variation	wide base + VS16
+1	54	263A+FE0E	variation	narrow base + VS15
+1	56	1F44D+FE0E	variation	wide base + VS15
+1	58	1F468+200D+1F469	joined	wide first, two parts
+1	60	1F468+200D+1F469+200D+1F467	joined	wide first, three parts
+1	62	1F468+200D+1F469+200D+1F467+200D+1F466	joined	wide first, four parts
+1	64	1F469+200D+1F4BB	joined	wide first, two parts
+1	66	1F469+200D+1F680	joined	wide first, two parts
+1	68	1F3F3+FE0F+200D+1F308	joined	narrow first, selector, two parts
+2	6	1F3F3+FE0F+200D+26A7+FE0F	joined	narrow first, two selectors
+2	8	2764+FE0F+200D+1F525	joined	narrow first, selector, two parts
+2	10	1F441+FE0F+200D+1F5E8+FE0F	joined	narrow first, two selectors
+2	12	1F43B+200D+2744+FE0F	joined	wide first, narrow second
+2	14	0061+200D+0062	joined	letters either side of a joiner
+2	16	200D	joined	a joiner on its own
+2	18	1F44D+1F3FD	modifier	skin tone
+2	20	1F469+1F3FF+200D+1F4BB	modifier	skin tone inside a joined pair
+2	22	0031+20E3	enclosing	keycap without a selector
+2	24	0031+FE0F+20E3	enclosing	keycap with a selector
+2	26	0061+20DD	enclosing	combining enclosing circle
+2	28	0061+0488	enclosing	combining cyrillic sign
+2	30	1F1FA	flag	one indicator
+2	32	1F1FA+1F1F8	flag	two indicators
+2	34	1F1FA+1F1F8+1F1EF	flag	three indicators
+2	36	1F1FA+1F1F8+1F1EF+1F1F5	flag	four indicators
+2	38	1F3F4+E0067+E0062+E0073+E0063+E0074+E007F	flag	tag sequence
+2	40	0065+0301	marks	one nonspacing mark
+2	42	0065+0301+0302	marks	two nonspacing marks
+2	44	0065+0301+0302+0303+0304	marks	four nonspacing marks
+2	46	0915+094D+0937	indic	devanagari conjunct
+2	48	0915+094D+0937+093F	indic	conjunct plus a spacing vowel
+2	50	0915+093F	indic	consonant plus a spacing vowel
+2	52	0915+094B	indic	consonant plus a two part vowel
+2	54	0BA8+0BBF	indic	tamil na plus a vowel
+2	56	0BA8+0BCB	indic	tamil na plus a two part vowel
+2	58	0995+09CD+09B7	indic	bengali conjunct
+2	60	0C15+0C4D+0C37	indic	telugu conjunct
+2	62	0E01+0E33	thai	ko kai plus sara am
+2	64	0E01+0E33+0E33	thai	ko kai plus two sara am
+2	66	0E01+0E48	thai	ko kai plus a tone mark
+2	68	0E01+0E34+0E48	thai	ko kai, vowel, tone
+3	6	0EA5+0EB2	lao	lo loot plus a vowel
+3	8	1100+1161	hangul	lead and vowel
+3	10	1100+1161+11A8	hangul	lead, vowel and tail

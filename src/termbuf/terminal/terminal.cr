@@ -149,12 +149,15 @@ module TermBuf
                    @width_spec : String? = nil,
                    @probe_widths : Bool = false,
                    @quirks : Quirk = Quirk::None,
-                   @detect_composed_drift : Bool = true)
+                   @detect_composed_drift : Bool = true,
+                   clear_overhang : Bool = true)
       @size = size || @tty.size
       @buffer = Buffer.new @size.columns, @size.rows
       @screen = Region.new Rect.full(@size.columns, @size.rows)
       @painter = Painter.new @capabilities
-      @encoder = Encoder.new @buffer.styles, @capabilities, @size.columns, @size.rows
+      @painter.clear_overhang = clear_overhang
+      @encoder = Encoder.new @buffer.styles, @capabilities, @size.columns, @size.rows,
+        @buffer.links
       @meter = Meter.new @tty.output
       @commands = Channel(Command).new COMMAND_CAPACITY
       @events = Channel(Event).new EVENT_CAPACITY
@@ -182,7 +185,11 @@ module TermBuf
       resolved = begin
         if probe && tty.managed?
           tty.raw!
-          CapabilityResolver.resolve env, input, output
+          asked = CapabilityResolver.resolve env, input, output
+          # Whatever the terminal made of the queries it did not recognise is
+          # sitting on the screen the person was looking at. See `Tty#scrub_line`.
+          tty.scrub_line
+          asked
         else
           CapabilityResolver.resolve env
         end
@@ -221,6 +228,7 @@ module TermBuf
 
       @tty.enter @capabilities
       measure_widths
+      choose_image_transport
       install_signal_handlers
       install_exit_handler
 
@@ -239,6 +247,21 @@ module TermBuf
     # What this terminal is known to get wrong. See `Quirk`.
     getter quirks : Quirk
 
+    # Whether to write the cell after a glyph that may have painted outside its
+    # own columns. See `Painter#clear_overhang?`, which this is.
+    #
+    # On unless the application says otherwise: every terminal measured draws
+    # over a neighbouring cell without repainting it, so ink left there stays
+    # until something writes that cell again.
+    def clear_overhang? : Bool
+      @painter.clear_overhang?
+    end
+
+    # :ditto:
+    def clear_overhang=(value : Bool) : Bool
+      @painter.clear_overhang = value
+    end
+
     # Whether to give the screen back and say so on stderr the first time a
     # cluster this terminal will misplace is drawn.
     #
@@ -249,11 +272,41 @@ module TermBuf
     # guarded against.
     property? warn_composed_drift : Bool = true
 
+    # Asks whether the terminal will read pixels out of a file rather than take
+    # them inline, which is cheaper for anything past a few kilobytes and
+    # impossible over a connection where the file is on the wrong machine.
+    #
+    # Asked here rather than with the rest, on the alternate screen after it is
+    # entered: a terminal that cannot parse the query prints it, and the screen
+    # the person was looking at is not the place for that. Nothing built from
+    # the capabilities so far reads this flag — only `ImageStore` does, and it
+    # is not made until an application asks for it.
+    private def choose_image_transport : Nil
+      return unless @probe_widths && @capabilities.includes? Capability::KittyGraphics
+      return unless Prober.new(@tty.input, @tty.output).probe_temp_file
+
+      @capabilities = @capabilities.with Capability::KittyGraphicsTempFile
+    rescue IO::Error
+      # A terminal that stopped answering is one the application will find out
+      # about soon enough; the inline transport works regardless.
+    end
+
     private def measure_widths : Nil
       measured = Unicode::WidthPolicy::DEFAULT
 
       if @probe_widths && Unicode::WidthOverrides.probe?(@width_spec)
         result = WidthProbe.run @tty.input, @tty.output, measured
+
+        # The probe has just asked the question this quirk is about, so the
+        # answer replaces the guess made from the terminal's name — in both
+        # directions, since a terminal that starts counting clusters properly
+        # should stop carrying the quirk. When it says nothing, the name is
+        # still the best that can be done.
+        case result.per_code_point_columns?
+        when true  then @quirks = @quirks | Quirk::PerCodePointColumns
+        when false then @quirks = @quirks & ~Quirk::PerCodePointColumns
+        end
+
         # A terminal counting columns per code point answers the probe with
         # that count, so its answers describe its bookkeeping rather than what
         # it draws: it reports one column for a variation selector emoji and
@@ -344,6 +397,63 @@ module TermBuf
     def sync(&action : Buffer -> Nil) : Nil
       reply = reply_channel
       await Commands::Apply.new(action, reply), reply
+    end
+
+    # The images on screen.
+    #
+    # They are drawn over the cells after each frame rather than into them, so
+    # text written where one sits gets both. See `ImageStore`.
+    getter images : ImageStore { build_image_store }
+
+    private def build_image_store : ImageStore
+      ImageStore.new @capabilities
+    end
+
+    # Images are written straight to the device after the frame's cells, not
+    # through the command channel: they have to land in the same frame as the
+    # cells they sit over, and they move the cursor, which the encoder has to be
+    # told about.
+    private def draw_images(forced : Bool, following : Cursor?) : Nil
+      store = @images
+      return unless store
+
+      store.redraw if forced
+      queued = store.take_pending
+      return if queued.empty?
+
+      queued.each { |text| @meter << text }
+      # Each placement had to move the cursor to get there, so where the
+      # encoder last left it is no longer where it is.
+      @encoder.forget_cursor
+
+      # And the one the application is having the terminal follow has to be put
+      # back, or it spends the frame sitting under the last picture drawn.
+      if following
+        @encoder.encode [Ops::MoveTo.new(following.x, following.y)] of Op, @meter
+      end
+
+      @tty.flush
+    end
+
+    # The terminal's own colours: the defaults, the cursor, and the palette.
+    #
+    # Changes go out in order with the frames around them. See `ColorStack` for
+    # why every one of them needs `Capability::KittyColorStack`.
+    getter colors : ColorStack { build_color_stack }
+
+    private def build_color_stack : ColorStack
+      ColorStack.new(@capabilities) { |bytes| issue Commands::SetColors.new(bytes) }
+    end
+
+    # Interns a hyperlink and returns the id a `Style` carries it by.
+    #
+    #     link = terminal.link "https://example.com"
+    #     screen.write 0, 0, "example", Style::DEFAULT.linked(link)
+    #
+    # Safe to call from any fibre. Nothing is emitted for it on a terminal
+    # without `Capability::Osc8Links`; the text is drawn and the link is not.
+    def link(uri : String, id : String? = nil) : LinkId
+      @buffer.link uri, id
     end
 
     # Says that a reply beginning with *prefix* and ending with *terminator* is
@@ -513,6 +623,22 @@ module TermBuf
       return if @restored
       @restored = true
 
+      # Straight to the device rather than through the command channel: by the
+      # time a signal handler or `at_exit` gets here there may be no fibre left
+      # to ask, and a terminal left a different colour than it was found is
+      # exactly what the stack exists to prevent.
+      images = @images
+      if images && !images.placements.empty?
+        @tty.output << "\e_Ga=d,d=A,q=2\e\\"
+      end
+
+      stack = @colors
+
+      if stack && stack.depth > 0
+        @tty.output << "\e[#Q" * stack.depth
+        @tty.flush rescue nil
+      end
+
       @tty.leave @capabilities
     end
 
@@ -537,6 +663,7 @@ module TermBuf
 
       case command
       in Commands::Passthrough then write_through command.bytes
+      in Commands::SetColors   then write_colors command.bytes
       in Commands::Paint       then perform_paint command
       in Commands::Resize      then perform_resize command.size
       in Commands::Apply       then perform_apply command
@@ -572,6 +699,8 @@ module TermBuf
         @tty.flush
       end
 
+      draw_images command.forced, following
+
       @last_paint_bytes = @meter.bytes
       @total_paint_bytes += @meter.bytes
 
@@ -594,13 +723,7 @@ module TermBuf
       cluster = @painter.take_composed_drift
       return unless cluster
 
-      columns = @buffer.clusters.code_point_columns @buffer.clusters.id(cluster, @widths)
-      ours = Unicode.string_width cluster, @widths
-      short = (columns - ours).abs
-      message = "this terminal counts a grapheme cluster's columns by adding up its code " \
-                "points, so #{cluster.inspect} takes #{columns} columns where it is drawn in " \
-                "#{ours}. Everything after it on that row is #{short} columns out of step with " \
-                "every other row, and the last #{short} columns of it cannot be reached at all."
+      message = composed_drift_message cluster
 
       emit Events::Warning.new(message)
       return unless @warn_composed_drift
@@ -609,15 +732,54 @@ module TermBuf
       repaint_in_place
     end
 
+    # What went wrong with *cluster*, in the direction it went wrong.
+    #
+    # Counting more columns than the glyph is drawn in pushes the rest of the
+    # row along and eats the room at its end; counting fewer leaves the glyph
+    # sitting on whatever comes next. They are the same arithmetic and they do
+    # not look remotely alike, so the message says which one happened.
+    private def composed_drift_message(cluster : String) : String
+      counted = @buffer.clusters.code_point_columns @buffer.clusters.id(cluster, @widths)
+      drawn = Unicode.string_width cluster, @widths
+      by = (counted - drawn).abs
+      opening = "this terminal counts a grapheme cluster's columns by adding up its code " \
+                "points, so #{cluster.inspect} takes #{plural counted, "column"} where it is " \
+                "drawn in #{drawn}."
+
+      if counted > drawn
+        "#{opening} Everything after it on that row sits #{plural by, "column"} to the right of " \
+        "where it was put, and the last #{plural by, "column"} of the row cannot be reached."
+      else
+        "#{opening} Everything after it on that row sits #{plural by, "column"} to the left of " \
+        "where it was put, so the glyph covers what follows it."
+      end
+    end
+
+    private def plural(count : Int32, noun : String) : String
+      "#{count} #{noun}#{"s" unless count == 1}"
+    end
+
     # Writes *message* where the application can see it, with the screen given
     # back for as long as it takes.
     private def say_aside(message : String) : Nil
-      @tty.output << "\e[?1049l" if @capabilities.includes? Capability::AltScreen
+      alternate = @capabilities.includes? Capability::AltScreen
+
+      @tty.output << "\e[?1049l" if alternate
       @tty.flush
       STDERR.puts "termbuf: #{message}"
       STDERR.flush
-      @tty.output << "\e[?1049h" if @capabilities.includes? Capability::AltScreen
+
+      # The alternate screen keeps its own cursor visibility, so coming back
+      # to it undoes the hide that `Tty#enter` did. Without this the cursor
+      # reappears and, with nothing placing it, sits wherever each frame's last
+      # run happened to end.
+      @tty.output << "\e[?1049h" if alternate
+      @tty.output << "\e[?25l"
       @tty.flush
+      # The repaint that follows resets the painter, which is what puts the
+      # cursor back on a screen that wants one showing.
+
+
     rescue IO::Error
       # The terminal has gone; there is nobody left to tell.
     end
@@ -643,6 +805,10 @@ module TermBuf
       # application made covers a pane it chose, and moving that is its
       # business rather than the driver's — which is what `#on_resize` is for.
       @screen.bounds = Rect.full size.columns, size.rows
+      # An image that no longer fits is gone; the terminal dropped it when the
+      # screen shrank under it, and keeping a placement it does not have would
+      # have the next forced repaint redraw a picture into the wrong cells.
+      @images.try &.resize size.columns, size.rows
       @buffer.invalidate
 
       run_resize_handlers size
@@ -677,6 +843,13 @@ module TermBuf
       command.reply.try &.send error
     end
 
+    # A colour change moves no cursor and sets no attribute, so unlike a
+    # passthrough it leaves what the encoder knows about the screen intact.
+    private def write_colors(bytes : Bytes) : Nil
+      @tty.output.write bytes
+      @tty.flush
+    end
+
     # Passthrough bytes go out after whatever frame is in flight, and leave the
     # encoder's idea of the cursor and style unknown, since there is no telling
     # what they did.
@@ -684,6 +857,7 @@ module TermBuf
       @tty.output.write bytes
       @tty.flush
       @encoder.reset_state
+      @encoder.forget_link_state
     end
 
     # ----------------------------------------------------------------- input

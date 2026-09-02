@@ -69,6 +69,13 @@ end
 
 # What Terminal.app 470.2 answers, measured by cursor position report. The rule
 # has to reproduce every one of these or it is not describing the terminal.
+#
+# The last nine came from widening the sample set: three from sixty-seven
+# clusters, and six more from 5,274. The six are one rule rather than six
+# exceptions -- an ignorable character is charged its East Asian Width -- and
+# that rule absorbs the joiner and the tag character, which had been written
+# down separately. With it the model reproduces all 5,274 of the survey.
+# The runs are in `measurements/survey/`.
 private MEASURED = [
   {"a", 1, "ascii"},
   {"漢", 2, "east asian wide"},
@@ -104,6 +111,15 @@ private MEASURED = [
   {"กำ", 2, "thai ko kai and sara am"},
   {"กำำ", 3, "and a second sara am"},
   {"ﷺ", 1, "arabic ligature"},
+  {"🏴\u{E0067}\u{E0062}\u{E0073}\u{E0063}\u{E0074}\u{E007F}", 8, "a column for every tag character"},
+  {"\u{1100}\u{1161}", 2, "jamo compose before they are counted"},
+  {"\u{1100}\u{1161}\u{11A8}", 2, "a tail joins the same syllable"},
+  {"\u{00AD}", 1, "soft hyphen, ignorable and ambiguous"},
+  {"\u{0600}", 1, "arabic number sign, ignorable and neutral"},
+  {"\u{061C}", 1, "arabic letter mark"},
+  {"\u{200C}", 1, "zero width non joiner"},
+  {"\u{115F}", 2, "hangul choseong filler, ignorable and wide"},
+  {"\u{3164}", 2, "hangul filler"},
 ]
 
 Spectator.describe "Unicode.code_point_columns" do

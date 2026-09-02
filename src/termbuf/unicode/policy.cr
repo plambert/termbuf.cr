@@ -25,6 +25,16 @@ module TermBuf::Unicode
     # emoji. Without it the cluster is as wide as its pieces laid end to end.
     getter? joined_emoji : Bool
 
+    # Whether a collapsed joined sequence is two columns whatever it opens
+    # with, rather than as wide as the code point it starts from.
+    #
+    # Ghostty, kitty and `tmux` draw two for a weight lifter joined to a female
+    # sign, which opens with a narrow pictograph. iTerm2 3.6.11 draws one, and it is alone in that among
+    # the terminals surveyed — see `measurements/survey/`. It is not a `Quirk`:
+    # nothing is broken by it, and a buffer told about it lays the row out
+    # correctly.
+    getter? joined_emoji_wide : Bool
+
     # Whether a pair of regional indicators collapses to one flag.
     getter? regional_indicators : Bool
 
@@ -34,6 +44,7 @@ module TermBuf::Unicode
     def initialize(@ambiguous : Int32 = 1,
                    @emoji_presentation : Bool = true,
                    @joined_emoji : Bool = true,
+                   @joined_emoji_wide : Bool = true,
                    @regional_indicators : Bool = true,
                    @spacing_marks : Bool = true)
       raise ArgumentError.new "ambiguous width #{@ambiguous} is not 1 or 2" unless @ambiguous.in? 1, 2
@@ -45,10 +56,11 @@ module TermBuf::Unicode
     def copy_with(ambiguous : Int32 = @ambiguous,
                   emoji_presentation : Bool = @emoji_presentation,
                   joined_emoji : Bool = @joined_emoji,
+                  joined_emoji_wide : Bool = @joined_emoji_wide,
                   regional_indicators : Bool = @regional_indicators,
                   spacing_marks : Bool = @spacing_marks) : WidthPolicy
       WidthPolicy.new ambiguous, emoji_presentation, joined_emoji,
-        regional_indicators, spacing_marks
+        joined_emoji_wide, regional_indicators, spacing_marks
     end
 
     # The flags by the names `TERMBUF_WIDTHS` uses.
@@ -57,6 +69,7 @@ module TermBuf::Unicode
       when "ambiguous_wide"      then copy_with ambiguous: enabled ? 2 : 1
       when "emoji_presentation"  then copy_with emoji_presentation: enabled
       when "joined_emoji"        then copy_with joined_emoji: enabled
+      when "joined_emoji_wide"   then copy_with joined_emoji_wide: enabled
       when "regional_indicators" then copy_with regional_indicators: enabled
       when "spacing_marks"       then copy_with spacing_marks: enabled
       else                            raise ArgumentError.new "unknown width rule #{name.inspect}"
@@ -65,7 +78,8 @@ module TermBuf::Unicode
 
     # Every rule by name, for diagnostics and for `TERMBUF_WIDTHS` to check
     # against.
-    NAMES = %w[ambiguous_wide emoji_presentation joined_emoji regional_indicators spacing_marks]
+    NAMES = %w[ambiguous_wide emoji_presentation joined_emoji joined_emoji_wide
+      regional_indicators spacing_marks]
 
     def to_s(io : IO) : Nil
       io << "WidthPolicy(ambiguous=" << @ambiguous
@@ -84,6 +98,7 @@ module TermBuf::Unicode
       when "ambiguous_wide"      then @ambiguous == 2
       when "emoji_presentation"  then @emoji_presentation
       when "joined_emoji"        then @joined_emoji
+      when "joined_emoji_wide"   then @joined_emoji_wide
       when "regional_indicators" then @regional_indicators
       when "spacing_marks"       then @spacing_marks
       else                            raise ArgumentError.new "unknown width rule #{name.inspect}"

@@ -72,6 +72,27 @@ module TermBuf
       SizeDetector.detect @output_fd
     end
 
+    # Blanks the line the cursor is on, using nothing but a carriage return and
+    # spaces.
+    #
+    # A terminal that does not recognise a query prints its payload instead of
+    # swallowing it, so asking one leaves rubbish on the screen the person was
+    # looking at — and it is still there once the program gives the screen
+    # back. Terminal.app does this with `XTGETTCAP`, `DECRPM` and the kitty
+    # graphics query, between them putting about forty five characters on the
+    # line the program started on.
+    #
+    # Two carriage returns and a line of spaces is as much as a terminal that
+    # has just demonstrated it cannot parse an escape sequence can be asked to
+    # understand. An echo long enough to have wrapped would leave its earlier
+    # lines behind; nothing seen so far comes close to a line.
+    def scrub_line : Nil
+      @output << '\r' << " " * size.columns << '\r'
+      @output.flush
+    rescue IO::Error
+      # The terminal has gone; there is nothing to tidy.
+    end
+
     # Takes the terminal over: raw mode, the alternate screen, no cursor.
     #
     # *capabilities* decides which of the optional modes are worth asking for;

@@ -45,8 +45,11 @@ class ModelTerminal
   # *policy* has to match the buffer's, or the model measures a cluster
   # differently from the thing it is checking and every later cell on the row
   # disagrees for a reason that has nothing to do with the painter.
+  # *links* has to be the table the buffer interns into, or a link the model
+  # parses gets an id the buffer never assigned and every linked cell differs.
   def initialize(@width : Int32, @height : Int32,
-                 @policy : TermBuf::Unicode::WidthPolicy = TermBuf::Unicode::WidthPolicy::DEFAULT)
+                 @policy : TermBuf::Unicode::WidthPolicy = TermBuf::Unicode::WidthPolicy::DEFAULT,
+                 @links : TermBuf::LinkTable = TermBuf::LinkTable.new)
     @cells = Array(ModelCell).new(@width * @height) { ModelCell.blank }
     @style = TermBuf::Style::DEFAULT
     @scroll_top = 0
@@ -171,6 +174,8 @@ class ModelTerminal
   end
 
   private def parse_escape(source : String, reader : Char::Reader) : Char::Reader
+    return parse_osc source, reader if reader.current_char == ']'
+
     unless reader.current_char == '['
       raise "model terminal: unsupported escape #{reader.current_char.inspect}"
     end
@@ -194,6 +199,45 @@ class ModelTerminal
     reader.next_char
     dispatch parameters.to_s, final, private_marker
     reader
+  end
+
+  # An operating system command, which runs to a string terminator rather than
+  # to a final byte. Only OSC 8 is modelled; anything else is consumed and
+  # ignored, which is what a terminal without it would do.
+  private def parse_osc(source : String, reader : Char::Reader) : Char::Reader
+    reader.next_char
+    body = String::Builder.new
+
+    while reader.pos < source.bytesize
+      if reader.current_char == '\e'
+        reader.next_char
+        break if reader.pos >= source.bytesize || reader.current_char == '\\'
+
+        body << '\e'
+        next
+      end
+
+      break if reader.current_char == '\a'
+
+      body << reader.current_char
+      reader.next_char
+    end
+
+    reader.next_char if reader.pos < source.bytesize
+    apply_osc body.to_s
+    reader
+  end
+
+  # `8 ; params ; uri`, where an empty URI closes whatever was open.
+  private def apply_osc(body : String) : Nil
+    return unless body.starts_with? "8;"
+
+    fields = body[2..].split ';', 2
+    uri = fields[1]? || ""
+    return @style = @style.linked TermBuf::LinkTable::NONE if uri.empty?
+
+    id = fields[0].split(':').find(&.starts_with? "id=").try &.[3..]
+    @style = @style.linked @links.id(uri, id.presence)
   end
 
   # ameba:disable Metrics/CyclomaticComplexity
@@ -413,7 +457,10 @@ class ModelTerminal
       code = field.empty? ? 0 : field.to_i
 
       case code
-      when 0 then @style = TermBuf::Style::DEFAULT
+      when 0
+        # A hyperlink is not an SGR attribute and `SGR 0` does not close one.
+        # Only OSC 8 opens and closes it, so it survives the reset.
+        @style = TermBuf::Style::DEFAULT.linked @style.link
       when 1 then @style = @style.with TermBuf::Attributes::Bold
       when 2 then @style = @style.with TermBuf::Attributes::Faint
       when 3 then @style = @style.with TermBuf::Attributes::Italic
