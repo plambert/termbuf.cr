@@ -107,14 +107,16 @@ module TermBuf
 
     # Draws *image* over the cells of *bounds*, sending the pixels if this is
     # the first time it has been needed.
-    def place(image : Image, bounds : Rect) : Placement
-      place add(image), bounds
+    #
+    # *z* decides what it sits over. See `Placement#z`.
+    def place(image : Image, bounds : Rect, z : Int32 = 0) : Placement
+      place add(image), bounds, z
     end
 
     # :ditto:
-    def place(image : UInt32, bounds : Rect) : Placement
+    def place(image : UInt32, bounds : Rect, z : Int32 = 0) : Placement
       @next_placement += 1
-      placement = Placement.new image, @next_placement, bounds
+      placement = Placement.new image, @next_placement, bounds, z
       @placements << placement
       draw placement
       placement
@@ -172,8 +174,12 @@ module TermBuf
     end
 
     private def placement_keys(placement : Placement) : String
+      # `z` is left out at zero rather than sent as `z=0`, which is what the
+      # protocol defaults to: bytes on the wire for nothing said.
+      depth = placement.z.zero? ? "" : "z=#{placement.z},"
+
       "i=#{placement.image},p=#{placement.id}," \
-      "c=#{placement.bounds.width},r=#{placement.bounds.height},C=1,#{QUIET}"
+      "c=#{placement.bounds.width},r=#{placement.bounds.height},#{depth}C=1,#{QUIET}"
     end
 
     private def transmit(image : Image, placement : Placement) : Nil

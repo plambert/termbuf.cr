@@ -84,7 +84,24 @@ module TermBuf
     # The cells it covers.
     getter bounds : Rect
 
-    def initialize(@image : UInt32, @id : UInt32, @bounds : Rect)
+    # Where this sits in the stack against the text and the other placements.
+    #
+    # Zero is over the text, which is the default and what an image drawn to be
+    # looked at wants. Negative is under it, so the cells keep their glyphs and
+    # the picture shows through wherever they are blank — a chart behind a
+    # table, a watermark. Higher covers lower among placements, so a cascade is
+    # a rising *z* and nothing else.
+    #
+    # The protocol's own rule for the boundary: text is drawn between `-1` and
+    # `0`, so `-1` is the topmost layer still beneath it.
+    getter z : Int32
+
+    def initialize(@image : UInt32, @id : UInt32, @bounds : Rect, @z : Int32 = 0)
+    end
+
+    # Whether this sits beneath the text rather than over it.
+    def under_text? : Bool
+      @z.negative?
     end
 
     # Column of the left edge.

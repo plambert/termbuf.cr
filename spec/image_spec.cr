@@ -142,6 +142,52 @@ Spectator.describe TermBuf::ImageStore do
     end
   end
 
+  # Kitty draws text between z -1 and 0, so a negative z is a picture the text
+  # sits on top of and a positive one covers it.
+  describe "stacking" do
+    it "says nothing at the default, which is over the text" do
+      made = store
+      made.place swatch, TermBuf::Rect.new(0, 0, 2, 1)
+
+      sent = made.take_pending.find &.starts_with? "\e_G"
+      fail "nothing was sent" unless sent
+
+      expect(sent).not_to contain "z="
+    end
+
+    it "puts a placement under the text" do
+      made = store
+      placement = made.place swatch, TermBuf::Rect.new(0, 0, 2, 1), z: -1
+
+      sent = made.take_pending.find &.starts_with? "\e_G"
+      fail "nothing was sent" unless sent
+
+      expect(sent).to contain "z=-1"
+      expect(placement.under_text?).to be_true
+    end
+
+    it "keeps the depth when the same image is placed again" do
+      made = store
+      id = made.add swatch
+      made.place id, TermBuf::Rect.new(0, 0, 2, 1), z: -1
+      made.take_pending
+      made.place id, TermBuf::Rect.new(4, 0, 2, 1), z: 3
+
+      sent = made.take_pending.find &.starts_with? "\e_G"
+      fail "nothing was sent" unless sent
+
+      # The pixels went with the first placement; this one only positions them.
+      expect(sent).to contain "a=p"
+      expect(sent).to contain "z=3"
+    end
+
+    it "is over the text by default" do
+      expect(TermBuf::Placement.new(1_u32, 1_u32, TermBuf::Rect.new(0, 0, 2, 1)).z).to eq 0
+      expect(TermBuf::Placement.new(1_u32, 1_u32, TermBuf::Rect.new(0, 0, 2, 1)).under_text?)
+        .to be_false
+    end
+  end
+
   describe "managing" do
     it "deletes one placement by image and placement" do
       made = store

@@ -549,13 +549,16 @@ Check `Terminal#colors.available?` if it matters which way a terminal went.
 sparkline = TermBuf::Image.rgb(pixels, 64, 16)
 id = terminal.images.add sparkline
 terminal.images.place id, TermBuf::Rect.new(2, 4, 16, 2)
+terminal.images.place id, TermBuf::Rect.new(2, 8, 16, 2), z: -1   # under the text
 ```
 
 Images are not cells. They are drawn over the screen after each frame rather than into the buffer,
-so an application that writes text where one sits gets both. Pixels travel once however many
-placements follow; the transport — a temp file or base64 down the escape sequence — is chosen by a
-probe at startup. Placements that no longer fit are dropped on a resize, everything is sent again on
-a forced repaint, and the pictures come down when the terminal is given back.
+so an application that writes text where one sits gets both. `z` decides which of them is on top:
+zero and above covers the text, negative sits beneath it so the glyphs stay readable and the picture
+shows through where the cells are blank. Among placements, higher covers lower. Pixels travel once
+however many placements follow; the transport — a temp file or base64 down the escape sequence — is
+chosen by a probe at startup. Placements that no longer fit are dropped on a resize, everything is
+sent again on a forced repaint, and the pictures come down when the terminal is given back.
 
 ## An input field
 
