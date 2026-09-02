@@ -379,6 +379,16 @@ module TermBuf
       await Commands::Apply.new(action, reply), reply
     end
 
+    # The terminal's own colours: the defaults, the cursor, and the palette.
+    #
+    # Changes go out in order with the frames around them. See `ColorStack` for
+    # why every one of them needs `Capability::KittyColorStack`.
+    getter colors : ColorStack { build_color_stack }
+
+    private def build_color_stack : ColorStack
+      ColorStack.new(@capabilities) { |bytes| issue Commands::SetColors.new(bytes) }
+    end
+
     # Interns a hyperlink and returns the id a `Style` carries it by.
     #
     #     link = terminal.link "https://example.com"
@@ -557,6 +567,17 @@ module TermBuf
       return if @restored
       @restored = true
 
+      # Straight to the device rather than through the command channel: by the
+      # time a signal handler or `at_exit` gets here there may be no fibre left
+      # to ask, and a terminal left a different colour than it was found is
+      # exactly what the stack exists to prevent.
+      stack = @colors
+
+      if stack && stack.depth > 0
+        @tty.output << "\e[#Q" * stack.depth
+        @tty.flush rescue nil
+      end
+
       @tty.leave @capabilities
     end
 
@@ -581,6 +602,7 @@ module TermBuf
 
       case command
       in Commands::Passthrough then write_through command.bytes
+      in Commands::SetColors   then write_colors command.bytes
       in Commands::Paint       then perform_paint command
       in Commands::Resize      then perform_resize command.size
       in Commands::Apply       then perform_apply command
@@ -752,6 +774,13 @@ module TermBuf
       command.reply.try &.send nil
     rescue error
       command.reply.try &.send error
+    end
+
+    # A colour change moves no cursor and sets no attribute, so unlike a
+    # passthrough it leaves what the encoder knows about the screen intact.
+    private def write_colors(bytes : Bytes) : Nil
+      @tty.output.write bytes
+      @tty.flush
     end
 
     # Passthrough bytes go out after whatever frame is in flight, and leave the

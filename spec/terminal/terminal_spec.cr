@@ -6,6 +6,9 @@ require "../support/model_terminal"
 #
 # Every wait has a deadline. A driver bug that deadlocks should fail a spec,
 # not hang the suite.
+private COLOURFUL = TermBuf::Capabilities.new(
+  TermBuf::Capabilities::MODERN.flags | TermBuf::Capability::KittyColorStack)
+
 private class Harness
   getter terminal : TermBuf::Terminal
   getter output : IO::Memory
@@ -894,6 +897,46 @@ Spectator.describe TermBuf::Terminal do
 
         fail "no warning arrived" unless warning
         expect(warning.message).to contain "TERMBUF_WIDTHS"
+      end
+    end
+  end
+
+  describe "the terminal's own colours" do
+    it "sends a change in order with the frames around it" do
+      with_harness capabilities: COLOURFUL do |harness|
+        harness.drain
+        harness.terminal.colors.push
+        harness.terminal.colors.background = TermBuf::Color.rgb(20, 30, 40)
+        harness.terminal.paint
+
+        written = harness.drain
+        expect(written).to contain "\e[#P"
+        expect(written).to contain "\e]11;rgb:14/1e/28\e\\"
+      end
+    end
+
+    # An application that forgets to pop, or that stops on a signal, still has
+    # to give the terminal back the colours it was found with.
+    it "pops what is still pushed when the terminal is given back" do
+      harness = Harness.new capabilities: COLOURFUL
+      harness.terminal.colors.push
+      harness.terminal.colors.push
+      harness.terminal.paint
+      harness.drain
+
+      harness.terminal.close
+
+      expect(harness.drain.scan("\e[#Q").size).to eq 2
+    end
+
+    it "says nothing on a terminal without the stack" do
+      with_harness do |harness|
+        harness.drain
+        harness.terminal.colors.push
+        harness.terminal.colors.background = TermBuf::Color::RED
+        harness.terminal.paint
+
+        expect(harness.drain).not_to contain "\e[#P"
       end
     end
   end
