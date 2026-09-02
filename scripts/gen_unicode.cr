@@ -79,6 +79,7 @@ module GenUnicode
   PICTOGRAPHIC_BIT = 0x0080_u16
   INCB_SHIFT       =      8_u16
   EMOJI_BIT        = 0x0400_u16
+  IGNORABLE_BIT    = 0x0800_u16
   INCB_MASK        = 0x0300_u16
 
   def self.run : Nil
@@ -91,8 +92,8 @@ module GenUnicode
 
     apply_east_asian_width widths, flags
     apply_emoji widths, flags
-    apply_general_categories widths
-    apply_default_ignorable widths
+    apply_general_categories widths, flags
+    apply_default_ignorable widths, flags
     apply_grapheme_break flags
     apply_incb flags
 
@@ -183,7 +184,7 @@ module GenUnicode
 
   # Marks and format characters occupy no cell of their own; controls are never
   # stored in the buffer and are reported as zero width.
-  def self.apply_general_categories(widths : Array(UInt8)) : Nil
+  def self.apply_general_categories(widths : Array(UInt8), flags : Array(UInt16)) : Nil
     range_start = nil.as(Int32?)
 
     File.each_line File.join(CACHE_DIR, "UnicodeData.txt") do |line|
@@ -208,15 +209,29 @@ module GenUnicode
 
       next unless category.in? "Mn", "Me", "Cf", "Cc", "Cs"
 
+      # A format character keeps the width East Asian Width gave it and is
+      # marked instead of zeroed. `.char_width` still answers zero for it; the
+      # per-code-point model needs the number underneath, because a terminal
+      # counting that way charges every character its East Asian Width and
+      # never applies the zeroing at all. That is one rule where the zero width
+      # joiner and the tag character were two.
+      if category == "Cf"
+        (first..codepoint).each { |member| flags[member] |= IGNORABLE_BIT }
+        next
+      end
+
       (first..codepoint).each { |member| widths[member] = 0_u8 }
     end
   end
 
-  def self.apply_default_ignorable(widths : Array(UInt8)) : Nil
+  # Marked rather than zeroed, for the same reason. The hangul fillers are
+  # ordinary letters that happen to be ignorable, and a terminal counting per
+  # code point charges them the two columns East Asian Width says they are.
+  def self.apply_default_ignorable(widths : Array(UInt8), flags : Array(UInt16)) : Nil
     each_property "DerivedCoreProperties.txt" do |range, fields|
       next unless fields[1] == "Default_Ignorable_Code_Point"
 
-      range.each { |codepoint| widths[codepoint] = 0_u8 }
+      range.each { |codepoint| flags[codepoint] |= IGNORABLE_BIT }
     end
   end
 
@@ -315,6 +330,7 @@ module GenUnicode
           INCB_SHIFT       =      8_u16
           INCB_MASK        = 0x0300_u16
           EMOJI_BIT        = 0x0400_u16
+          IGNORABLE_BIT    = 0x0800_u16
 
           RANGE_COUNT = #{starts.size}
 

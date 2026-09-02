@@ -156,6 +156,19 @@ Spectator.describe TermBuf::Unicode do
       expect(Uni.string_width("\u{2764}\u{FE0F}")).to eq 2
     end
 
+    it "counts a joined emoji sequence as two cells whatever it opens with" do
+      # The weight lifter is East Asian Neutral, so taking the cluster's width
+      # from its first code point gave one. Ghostty and kitty draw two, and
+      # agree on two for every joined sequence in the survey.
+      expect(Uni.string_width("\u{1F3CB}\u{1F3FB}\u{200D}\u{2640}\u{FE0F}")).to eq 2
+      expect(Uni.string_width("\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}")).to eq 2
+    end
+
+    it "leaves a joiner between two letters alone" do
+      # Nothing pictographic, so the rule above has no business widening it.
+      expect(Uni.string_width("a\u{200D}b")).to eq 2
+    end
+
     it "counts a keycap sequence as two cells" do
       # The digit is an emoji and is not a pictograph, which is why this needs
       # the Emoji property rather than Extended_Pictographic. Both terminals

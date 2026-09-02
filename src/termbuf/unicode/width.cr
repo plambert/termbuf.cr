@@ -69,12 +69,33 @@ module TermBuf::Unicode
   # Number of terminal cells *char* occupies on its own, ignoring any grapheme
   # cluster it may belong to. Control characters report zero; they are never
   # stored in the buffer.
-  def self.char_width(char : Char, ambiguous : Int32 = ambiguous_width) : Int32
+  # Whether *char* is a format character or default ignorable: one the tables
+  # carry an East Asian Width for and nothing draws.
+  #
+  # `.char_width` answers zero for these. `.code_point_columns` does not, since
+  # a terminal counting per code point charges them anyway.
+  def self.ignorable?(char : Char) : Bool
+    properties(char.ord) & Tables::IGNORABLE_BIT != 0
+  end
+
+  # What East Asian Width says *char* is worth, before anything zeroes it.
+  def self.east_asian_columns(char : Char, ambiguous : Int32 = ambiguous_width) : Int32
     codepoint = char.ord
     return 1 if 0x20 <= codepoint < 0x7F
     return 0 if codepoint < 0x20 || codepoint == 0x7F
 
     width_of properties(codepoint), ambiguous
+  end
+
+  def self.char_width(char : Char, ambiguous : Int32 = ambiguous_width) : Int32
+    codepoint = char.ord
+    return 1 if 0x20 <= codepoint < 0x7F
+    return 0 if codepoint < 0x20 || codepoint == 0x7F
+
+    found = properties codepoint
+    return 0 if found & Tables::IGNORABLE_BIT != 0
+
+    width_of found, ambiguous
   end
 
   # Only a stored width of one can be ambiguous: combining marks resolve to
@@ -129,18 +150,6 @@ module TermBuf::Unicode
     0x0488..0x0489, 0x1ABE..0x1ABE, 0x20DD..0x20E0, 0x20E2..0x20E4, 0xA670..0xA672,
   ]
 
-  # Tag characters, `U+E0020..U+E007F`. They carry the region of a subdivision
-  # flag and are `Cf`, so nothing draws them and `.char_width` gives them none.
-  #
-  # They matter only to `.code_point_columns`: a terminal counting per code
-  # point charges each of them a column, which is what makes `🏴󠁧󠁢󠁳󠁣󠁴󠁿` own eight.
-  TAGS = 0xE0020..0xE007F
-
-  # Whether *char* is a tag character.
-  def self.tag?(char : Char) : Bool
-    TAGS.includes? char.ord
-  end
-
   # Whether *char* is an enclosing mark.
   def self.enclosing_mark?(char : Char) : Bool
     codepoint = char.ord
@@ -152,23 +161,25 @@ module TermBuf::Unicode
   # Columns a terminal takes for *text* when it counts them by summing the
   # code points rather than by measuring the grapheme cluster.
   #
-  # Not what any standard says a cluster is worth — what
+  # Not what any standard says a cluster is worth: what
   # `Quirk::PerCodePointColumns` terminals do. Measured against Terminal.app
-  # 470.2 across sixty-seven samples, and reproducing all of them:
-  # `.char_width` per code point, with five departures.
+  # 470.2 and GNU screen 5.0.2 over 5,274 clusters, in `measurements/survey/`.
   #
-  # * The zero width joiner takes a column, so four joined faces own eleven.
-  # * So does an enclosing mark, which is what makes `1️⃣` own two.
-  # * So does a tag character, which is what makes `🏴󠁧󠁢󠁳󠁣󠁴󠁿` own eight.
-  # * A regional indicator takes one rather than two, so a flag owns two and
-  #   five indicators own five. That reads as if the terminal went by East
-  #   Asian Width alone and never applied emoji presentation, but only the
-  #   indicators were measured, so only they are named here.
-  # * Conjoining jamo are composed before counting, so the vowel and the tail
-  #   take nothing and `가` and `각` each own two, like the syllable they make.
-  #   This is the one place the terminal counts a cluster rather than its
-  #   pieces. A vowel or tail with no lead before it is not something the
-  #   samples cover, and is given nothing here.
+  # The rule is East Asian Width per code point, with three departures.
+  #
+  # * An **ignorable** character is charged what East Asian Width says rather
+  #   than nothing. A zero width joiner is Neutral, so four joined faces own
+  #   eleven; a tag character is Neutral, so a subdivision flag owns eight; the
+  #   hangul fillers are Wide, so they own two apiece. The joiner and the tag
+  #   were found one at a time and written down as two rules. They were one.
+  # * An **enclosing mark** takes one, which is what makes a keycap own two.
+  # * A **regional indicator** takes one rather than two, so a flag owns two and
+  #   five indicators own five.
+  # * **Conjoining jamo** are composed before counting, so the vowel and the
+  #   tail take nothing and a syllable spelled out owns two, like the one it
+  #   makes. This is the one place the terminal counts a cluster rather than its
+  #   pieces. A vowel or tail with no lead is not something the samples cover,
+  #   and is given nothing here.
   def self.code_point_columns(text : String, policy : WidthPolicy = Unicode.policy) : Int32
     total = 0
     text.each_char { |char| total += code_point_columns char, policy }
@@ -177,12 +188,12 @@ module TermBuf::Unicode
 
   # :ditto:
   def self.code_point_columns(char : Char, policy : WidthPolicy = Unicode.policy) : Int32
-    return 1 if char == ZERO_WIDTH_JOINER || enclosing_mark? char
+    return 1 if enclosing_mark? char
     return 1 if grapheme_class(char).regional_indicator?
-    return 1 if tag? char
 
     klass = grapheme_class char
     return 0 if klass.hangul_v? || klass.hangul_t?
+    return east_asian_columns char, policy.ambiguous if ignorable? char
 
     char_width char, policy.ambiguous
   end

@@ -24,6 +24,16 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 
+- `Unicode.code_point_columns` charges an **ignorable** character what East Asian Width says
+  rather than nothing, which is one rule where the zero width joiner and the tag character had
+  been two, and which also gives the hangul fillers the two columns they are due. Measured over
+  5,274 clusters against Terminal.app 470.2 and GNU `screen` 5.0.2; it now reproduces every one of
+  Terminal.app's, where it missed six.
+- `Unicode.string_width` counts a joined emoji sequence as two columns whatever it opens with. The
+  width used to come from the first code point, which is one for a narrow pictograph such as
+  `U+1F3CB`; Ghostty and kitty draw two for every joined sequence in the corpus. Worth 54 clusters
+  on Ghostty and 42 on kitty, and it costs 44 on iTerm2, which takes the first code point's width
+  as we used to.
 - `Quirk::PerCodePointColumns` is now measured rather than matched on the terminal's name. The
   width probe already sends four faces joined by zero width joiners and reads the answer back, and
   that answer settles the question outright: eleven columns is per-code-point counting, where two
