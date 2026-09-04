@@ -1010,6 +1010,46 @@ Spectator.describe TermBuf::Terminal do
     end
   end
 
+  # Reporting is the application's to turn on: a terminal reporting the mouse
+  # is one that no longer lets the person select text with it.
+  describe "the mouse" do
+    it "asks for the reporting the application asked for" do
+      with_harness do |harness|
+        harness.drain
+        harness.terminal.enable TermBuf::Tty::MOUSE_SGR
+        harness.terminal.paint!
+
+        expect(harness.drain).to contain "\e[?1000h\e[?1006h"
+      end
+    end
+
+    it "delivers a report as an event, in buffer cells" do
+      with_harness do |harness|
+        harness.terminal.enable TermBuf::Tty::MOUSE_SGR
+        harness.terminal.paint!
+        harness.type "\e[<0;12;3M"
+
+        event = harness.event_of TermBuf::Events::Mouse
+        fail "no mouse event arrived" unless event
+
+        expect(event.button).to eq TermBuf::Input::Mouse::Button::Left
+        expect(event.action).to eq TermBuf::Input::Mouse::Action::Press
+        expect(event.x).to eq 11
+        expect(event.y).to eq 2
+      end
+    end
+
+    it "gives the reporting back when the terminal closes" do
+      harness = Harness.new
+      harness.terminal.enable TermBuf::Tty::MOUSE_SGR
+      harness.terminal.paint!
+      harness.drain
+      harness.close
+
+      expect(harness.output.to_s).to contain "\e[?1006l\e[?1000l"
+    end
+  end
+
   describe "passthrough" do
     it "sends bytes to the terminal untouched" do
       with_harness do |harness|

@@ -56,6 +56,13 @@ module TermBuf
     # Mouse button reporting in the SGR encoding, which is the one that can
     # name a column past 223. Both are asked for together, and given back in
     # the reverse order.
+    #
+    # Enabling this is the application's call — `terminal.enable
+    # TermBuf::Tty::MOUSE_SGR` — and nothing in this shard does it uninvited: a
+    # terminal reporting the mouse is one that no longer lets the person select
+    # and copy text with it, which is a trade only the application can weigh.
+    # Once it is on, a report arrives as `Events::Mouse` with its coordinates
+    # already converted to buffer cells. `Tty#leave` sends the reset.
     MOUSE_SGR = Mode.new "mouse-sgr", "\e[?1000h\e[?1006h", "\e[?1006l\e[?1000l"
 
     # The kitty keyboard protocol, which tells apart keystrokes an ordinary

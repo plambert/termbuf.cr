@@ -200,6 +200,16 @@ All notable changes to this project are documented here. The format follows
   something a filter should be able to swallow. The array is swapped rather than mutated and the
   dispatcher takes a reference to it once per event, so a chain replaced while an event is half way
   through finishes on the one it started on and reordering is assigning a new array.
+- `Input::Mouse` and `Events::Mouse`, decoding the SGR mouse reports — `CSI < button ; column ;
+  row M` for a press or a motion and the same with a final `m` for a release. `Mouse::Button` names
+  the three buttons, the four wheel notches and buttons 8 to 11; `Mouse::Action` says press, release
+  or motion; the modifier bits become `Modifiers`; and the coordinates are converted from the
+  terminal's 1-based columns and rows to the 0-based buffer cells `Terminal#hit` and `Buffer#hit`
+  take. `Input::Stream` watches for `CSI <` from the moment it is built, so a report is understood
+  whether or not it was this shard that asked for one, and a `CSI <` that is not a report is left to
+  the key decoder and arrives as `Key::Name::Unknown` rather than being guessed at. Turning the
+  reporting on stays the application's call — `terminal.enable TermBuf::Tty::MOUSE_SGR` — because a
+  terminal reporting the mouse no longer lets the person select text with it.
 - `Terminal#stages`, the chain termbuf builds during `#start`: `:resize` consumes the
   `Events::Signal` for `SIGWINCH` and answers it with `Events::Resize`, so a window change is one
   event and not two, and `:signals` passes everything through as a named place for an application's

@@ -1,5 +1,6 @@
 require "../caps/screen_size"
 require "../input/key"
+require "../input/mouse"
 require "../input/signals"
 require "../input/timers"
 
@@ -59,6 +60,28 @@ module TermBuf
     # Repeated as it grows, no more often than the decoder's progress interval.
     # The `Paste` that follows is the signal to take the notice down.
     record Pasting, bytes : Int32, elapsed : Time::Span do
+      include Event
+    end
+
+    # The pointer did something, out of an SGR mouse report.
+    #
+    # *x* and *y* are 0-based buffer cells, converted from the 1-based
+    # coordinates the terminal sends, so they can be handed to `Terminal#hit`
+    # or `Buffer#hit` as they stand.
+    #
+    # These arrive only once the application has turned reporting on:
+    #
+    #     terminal.enable TermBuf::Tty::MOUSE_SGR
+    #
+    # Nothing enables it for the application, because a terminal reporting the
+    # mouse is one that no longer lets the person select text with it, and that
+    # is not a trade a library makes on someone's behalf. `Terminal#close`
+    # turns it off again with the rest of the modes.
+    #
+    # A wheel notch is an `Input::Mouse::Action::Press` whose button answers
+    # `Input::Mouse::Button#wheel?`, and no release follows it.
+    record Mouse, button : Input::Mouse::Button, x : Int32, y : Int32,
+      modifiers : Modifiers, action : Input::Mouse::Action do
       include Event
     end
 

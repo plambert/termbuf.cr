@@ -1,5 +1,6 @@
 require "../terminal/event"
 require "./decoder"
+require "./mouse"
 require "./patterns"
 require "./reader"
 require "./signals"
@@ -79,6 +80,24 @@ module TermBuf
         @timers = Timers.new @reader.inbound
         @signals = Signals.new @reader.inbound
         @preloaded = Bytes.empty
+
+        watch_the_mouse
+      end
+
+      # Watches for SGR mouse reports from the start, so that a terminal
+      # reporting the mouse is understood whether or not it was this shard that
+      # asked it to.
+      #
+      # Registered rather than built in because a report is an escape sequence
+      # like any other: an application that would rather have the bytes
+      # unregisters this and puts its own pattern on `CSI <`.
+      #
+      # `Mouse.decode` answering `nil` leaves the sequence to the key decoder,
+      # which is what should happen to a `CSI <` that is not a report.
+      private def watch_the_mouse : Pattern
+        @patterns.register(Prefix::CSI, head: "<") do |sequence|
+          Mouse.decode sequence
+        end
       end
 
       # Bytes that were read before this stream existed, to be decoded ahead of
