@@ -1,5 +1,6 @@
 require "../caps/screen_size"
 require "../input/key"
+require "../input/timers"
 
 module TermBuf
   # Anything the terminal has to say, in the order it happened.
@@ -63,6 +64,17 @@ module TermBuf
     # A complete escape sequence the terminal sent, which is to say an answer
     # to something that was asked of it.
     record Response, bytes : Bytes do
+      include Event
+    end
+
+    # A timer the application armed with `Terminal#after` has gone off.
+    #
+    # *nonce* is what `#after` handed back, which is how an application running
+    # several timers tells them apart, and how one it no longer cares about is
+    # recognised: a timer cancelled while its tick was already in flight is
+    # dropped before it gets here, so anything that arrives was still wanted
+    # when it was delivered.
+    record Timer, nonce : Input::Nonce do
       include Event
     end
 

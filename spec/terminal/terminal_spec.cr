@@ -877,6 +877,25 @@ Spectator.describe TermBuf::Terminal do
       end
     end
 
+    it "delivers a timer the application armed" do
+      with_harness do |harness|
+        nonce = harness.terminal.after 20.milliseconds
+
+        timer = harness.event_of TermBuf::Events::Timer
+        fail "no timer arrived" unless timer
+        expect(timer.nonce).to eq nonce
+      end
+    end
+
+    it "says nothing about a timer that was cancelled" do
+      with_harness do |harness|
+        nonce = harness.terminal.after 30.milliseconds
+        harness.terminal.cancel nonce
+
+        expect(harness.event_of(TermBuf::Events::Timer, 300.milliseconds)).to be_nil
+      end
+    end
+
     it "delivers pasted text as one event rather than as typing" do
       with_harness do |harness|
         harness.type "\e[200~hello\nthere\e[201~"

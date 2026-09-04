@@ -100,6 +100,15 @@ All notable changes to this project are documented here. The format follows
   leaves the keyboard changed after the program has gone. A mode enabled before the takeover is
   recorded and goes out with it; leaving resets what is set, newest first, and keeps the
   registrations, so taking the terminal back re-applies them.
+- `Terminal#after` and `Terminal#cancel`, and the same pair on `Input::Stream`: a wake-up in a
+  `Time::Span` from now, delivered as `Events::Timer` down the same channel as everything else the
+  terminal has to say, and named by a nonce so it can be withdrawn or told from its siblings. The
+  tick travels the input channel rather than a `select` of its own, which is what orders it against
+  the bytes: a reply that arrived before a timer was armed is delivered before that timer goes off,
+  every time, rather than whenever the scheduler feels like it. Cancellation cannot be atomic with a
+  sleep that has already finished, so the nonce is checked again when the tick is taken off the
+  channel and one that raced is dropped. `Input::Timers` is the mechanism, usable on its own, and
+  the decoder's escape and paste deadlines now ride it like any other timer.
 
 ### Changed
 
@@ -173,8 +182,8 @@ All notable changes to this project are documented here. The format follows
   what it read on a channel — in an isolated execution context when the terminal is a real one, so
   a blocking read stalls nothing else — and a dispatcher fibre feeds the decoder, offers each
   complete escape sequence to the registered patterns, and sends what came of it to the
-  application. The escape and paste deadlines are the dispatcher's now, kept by a `select` on the
-  inbound channel rather than by a read timeout, so they hold on an input that has none.
+  application. The escape and paste deadlines are the dispatcher's now, armed as timers on the
+  inbound channel rather than kept by a read timeout, so they hold on an input that has none.
 - Terminal replies are matched by `Input::Patterns` rather than by prefix and terminator strings. A
   pattern names an `Input::Prefix` — the introducer, `CSI` through `APC` — what has to follow it,
   what has to end it, and a handler that is given the parsed `Input::Sequence` and returns the

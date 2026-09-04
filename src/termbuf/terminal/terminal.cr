@@ -109,6 +109,23 @@ module TermBuf
       @input.decoder.paste_stall = span
     end
 
+    # Asks for an `Events::Timer` in *span* from now, and returns the nonce
+    # that will name it.
+    #
+    # The tick travels the input channel, so it is ordered against everything
+    # the terminal said before it was armed rather than racing it. It is a
+    # floor and not a promise: the event arrives no sooner than *span*, and no
+    # sooner than the application drains what is queued ahead of it.
+    def after(span : Time::Span) : Input::Nonce
+      @input.after span
+    end
+
+    # Withdraws the timer *nonce* names. Nothing is delivered for it, even when
+    # it is called after the timer has already gone off.
+    def cancel(nonce : Input::Nonce) : Nil
+      @input.cancel nonce
+    end
+
     # How many bytes the last paint sent. The point of the buffer is that a
     # frame costs a diff rather than a screenful, and this is how an
     # application checks that it is getting one.

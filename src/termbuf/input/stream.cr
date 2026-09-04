@@ -2,6 +2,7 @@ require "../terminal/event"
 require "./decoder"
 require "./patterns"
 require "./reader"
+require "./timers"
 
 module TermBuf
   module Input
@@ -16,6 +17,12 @@ module TermBuf
     # The dispatcher is the only fibre that ever touches the decoder or asks a
     # pattern about a sequence, so neither needs locking. Registration is the
     # exception, and `Patterns` guards itself for it.
+    #
+    # Time arrives the same way bytes do. A timer is a fibre that sleeps and
+    # then puts a tick on the same channel the reader writes to, so a wake-up
+    # takes its place in the queue behind whatever the terminal had already
+    # said. The decoder's own escape and paste deadlines are timers like any
+    # other; the application's are `#after` and `#cancel`.
     class Stream
       # Events waiting for the application. Once this fills, decoding stops,
       # and after that reading does: the terminal's own buffer then applies
@@ -34,17 +41,28 @@ module TermBuf
       # adjusted; feeding it from anywhere but the dispatcher is not safe.
       getter decoder : Decoder
 
+      # The wake-ups this stream has armed, the application's and the
+      # decoder's alike. `#after` and `#cancel` are the way in.
+      getter timers : Timers
+
       # Whether the fibres are running.
       getter? started : Bool = false
 
       # Whether the events channel has been closed.
       getter? closed : Bool = false
 
+      # The timer the decoder's current deadline is riding on, if it has one,
+      # and when that timer is due. The dispatcher's alone: nothing else reads
+      # or writes either of them.
+      @deadline : Nonce? = nil
+      @deadline_at : Time::Instant? = nil
+
       def initialize(io : IO, blocking : Bool)
         @reader = Reader.new io, blocking
         @events = Channel(Event).new CAPACITY
         @patterns = Patterns.new
         @decoder = Decoder.new
+        @timers = Timers.new @reader.inbound
         @preloaded = Bytes.empty
       end
 
@@ -73,6 +91,24 @@ module TermBuf
         spawn(name: "termbuf-dispatch") { dispatch }
       end
 
+      # Asks for an `Events::Timer` in *span* from now, and returns the nonce
+      # that will name it.
+      #
+      # The tick comes down the same channel as the bytes, so it is ordered
+      # against them: anything the terminal said before this call is delivered
+      # before this timer goes off. What it is not is punctual — it arrives no
+      # sooner than *span*, and however much later the application takes to
+      # drain the events ahead of it.
+      def after(span : Time::Span) : Nonce
+        @timers.after span
+      end
+
+      # Withdraws the timer *nonce* names. Nothing is delivered for it, even if
+      # its fibre had already woken by the time this was called.
+      def cancel(nonce : Nonce) : Nil
+        @timers.cancel nonce
+      end
+
       # Sends *event* without decoding anything, for what the driver has to say
       # on its own account.
       def inject(event : Event) : Nil
@@ -90,6 +126,7 @@ module TermBuf
         return if @closed
         @closed = true
 
+        @timers.clear
         @events.close rescue nil
       end
 
@@ -102,27 +139,10 @@ module TermBuf
         unless @preloaded.empty?
           decoder.feed(@preloaded) { |event| inject event }
           @preloaded = Bytes.empty
+          rearm decoder
         end
 
-        running = true
-
-        while running
-          # Every deadline is the decoder's: something is being held back, and
-          # this is how long it is worth holding it for. With nothing held
-          # there is nothing to wake up for, and an idle application costs
-          # nothing.
-          deadline = decoder.read_deadline
-
-          if deadline
-            select
-            when message = inbound.receive?
-              running = consume message, decoder
-            when timeout deadline
-              decoder.tick { |event| inject event }
-            end
-          else
-            running = consume inbound.receive?, decoder
-          end
+        while consume inbound.receive?, decoder
         end
       ensure
         inject Events::Closed.new
@@ -135,8 +155,64 @@ module TermBuf
         in Reader::Eof then false
         in Bytes
           decoder.feed(message) { |event| inject event }
+          rearm decoder
+          true
+        in Timers::Tick
+          fired message.nonce, decoder
           true
         end
+      end
+
+      # A timer went off. Whether it still means anything is the live set's to
+      # say: one cancelled between its sleep ending and this receive is dropped
+      # here, which is the half of cancellation a sleeping fibre cannot do.
+      private def fired(nonce : Nonce, decoder : Decoder) : Nil
+        return unless @timers.claim nonce
+
+        if nonce == @deadline
+          disarm
+          decoder.tick { |event| inject event }
+          rearm decoder
+        else
+          inject Events::Timer.new nonce
+        end
+      end
+
+      # Puts the decoder's deadline, whatever it is now, on a timer.
+      #
+      # Every deadline is the decoder's: something is being held back, and this
+      # is how long it is worth holding it for. With nothing held there is
+      # nothing to wake up for, so nothing is armed and an idle application
+      # costs nothing.
+      private def rearm(decoder : Decoder) : Nil
+        span = decoder.read_deadline
+        return disarm unless span
+
+        due = Time.instant + span
+
+        # A timer already armed for no later than the new deadline is left
+        # where it is. Waking early costs the decoder a look at the clock and
+        # this method another call, where cancelling and arming afresh costs a
+        # fibre for every read — and a paste arrives in a thousand reads, each
+        # one pushing the stall deadline further out. `Decoder#tick` decides
+        # for itself whether anything is due, so an early wake-up is a no-op.
+        armed = @deadline_at
+        return if @deadline && armed && armed <= due
+
+        disarm
+        @deadline = @timers.after span
+        @deadline_at = due
+      end
+
+      # Forgets the decoder's deadline timer, cancelling it if it has not
+      # already gone off.
+      private def disarm : Nil
+        if nonce = @deadline
+          @timers.cancel nonce
+        end
+
+        @deadline = nil
+        @deadline_at = nil
       end
     end
   end
