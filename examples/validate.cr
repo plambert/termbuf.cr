@@ -16,7 +16,7 @@ module Validate
   alias Color = TermBuf::Color
   alias Rect = TermBuf::Rect
 
-  PAGES = %w[caps edges widths colours attrs motion keys cursors measured panels field rich]
+  PAGES = %w[caps edges widths colours attrs motion keys cursors measured panels rich]
 
   # One line of the width page: something to draw, and what it is.
   #
@@ -59,12 +59,22 @@ module Validate
     Mixed
   end
 
+  # The six characters a box is drawn from: the four corners, then the two
+  # edges. The widgets that drew their own boxes went to `termbuf-widgets`,
+  # and the two boxes still here are little enough to draw themselves.
+  record BoxGlyphs,
+    top_left : Char, top_right : Char,
+    bottom_left : Char, bottom_right : Char,
+    horizontal : Char, vertical : Char
+
+  ROUNDED_BOX = BoxGlyphs.new '╭', '╮', '╰', '╯', '─', '│'
+  PLAIN_BOX   = BoxGlyphs.new '┌', '┐', '└', '┘', '─', '│'
+
   # The pages, in the order tab walks them.
   class Validator
     include TermBuf
 
     getter terminal : Terminal
-    @field : Field
 
     def initialize(@terminal : Terminal)
       @page = 0
@@ -79,8 +89,6 @@ module Validate
       @arriving = nil.as(Int32?)
       # The swatch, registered the first time it is wanted and reused after.
       @swatch = nil.as(UInt32?)
-      @entered = [] of String
-      @field = self.class.build_field
       @typed = ""
     end
 
@@ -128,7 +136,6 @@ module Validate
       when "cursors"  then draw_cursors screen
       when "measured" then draw_measured screen
       when "panels"   then draw_panels screen
-      when "field"    then draw_field screen
       when "rich"     then draw_rich screen
       end
     end
@@ -143,10 +150,6 @@ module Validate
 
     private def rich? : Bool
       PAGES[@page] == "rich"
-    end
-
-    private def field? : Bool
-      PAGES[@page] == "field"
     end
 
     private def cursors? : Bool
@@ -188,6 +191,41 @@ module Validate
     # before that.
     private def focus_note(note : String) : String
       @focused ? note : "press enter to type here"
+    end
+
+    # A box around the edge of *rect*, with *title* laid into the top edge and
+    # trimmed to what is left of it.
+    private def draw_box(screen, rect : Rect, glyphs : BoxGlyphs,
+                         style : Style = Style::DEFAULT, title : String? = nil) : Nil
+      return if rect.width < 2 || rect.height < 2
+
+      right = rect.right
+      bottom = rect.bottom
+      edge = glyphs.horizontal.to_s * (rect.width - 2)
+
+      screen.write rect.x + 1, rect.y, edge, style
+      screen.write rect.x + 1, bottom, edge, style
+
+      (rect.y + 1...bottom).each do |row|
+        screen.write_char rect.x, row, glyphs.vertical, style
+        screen.write_char right, row, glyphs.vertical, style
+      end
+
+      screen.write_char rect.x, rect.y, glyphs.top_left, style
+      screen.write_char right, rect.y, glyphs.top_right, style
+      screen.write_char rect.x, bottom, glyphs.bottom_left, style
+      screen.write_char right, bottom, glyphs.bottom_right, style
+
+      return unless title && rect.width > 4
+
+      screen.write rect.x + 2, rect.y, Unicode.truncate(title, rect.width - 4), style
+    end
+
+    # The area inside a box, which is *rect* short of its own border.
+    private def inset(rect : Rect) : Rect
+      return Rect.new rect.x, rect.y, 0, 0 if rect.width < 3 || rect.height < 3
+
+      Rect.new rect.x + 1, rect.y + 1, rect.width - 2, rect.height - 2
     end
 
     # An unbroken line across the terminal, separating a page's sections.
@@ -871,26 +909,6 @@ module Validate
 
     # --------------------------------------------------------------- page 10
 
-    WORDS = %w[amber azure carmine cerulean chartreuse cobalt crimson indigo
-      magenta ochre saffron scarlet sienna teal ultramarine vermilion]
-
-    def self.build_field : Field
-      editor = Editor.new(
-        history: History.new(search: History::Search::Prefix),
-        completions: ->(request : Completion::Request) do
-          Completion::Result.new WORDS.select(&.starts_with? request.word)
-        end)
-
-      Field.new(
-        bounds: Rect.new(2, 4, 40, 3),
-        editor: editor,
-        border: Border.rounded(title: " type here "),
-        prompt: Field::Prompt.new("› ", Style::DEFAULT.fg(Color.indexed(4))),
-        growth: Field::Growth::Grow,
-        max_rows: 8,
-        placeholder: "type sc, or c, then tab")
-    end
-
     # Clipping, a view's own style, and a background that varies under text.
     # A row that reads right proves all three: the bar is painted once, the
     # label crosses where its colour changes, and nothing reaches past the
@@ -933,9 +951,9 @@ module Validate
       # Fixed rather than sized to the terminal: the interior has to come to an
       # odd number of cells for a two-cell glyph to be left with nowhere to go.
       box = Rect.new 2, 10, 23, 6
-      Border.new(Border::ROUNDED, title: "clipped").draw screen, box
+      draw_box screen, box, ROUNDED_BOX, title: "clipped"
 
-      inside = screen.view Border.inset(box)
+      inside = screen.view inset(box)
       inside.fill inside.bounds, '.', Style::DEFAULT.faint
 
       inside.write 0, 0, "this line is far longer than the box"
@@ -987,32 +1005,7 @@ module Validate
         Style::DEFAULT.faint
     end
 
-    # An input field driven from an application's own loop rather than by
-    # `Field#run`, which is what most applications with anything else on screen
-    # will do.
-    private def draw_field(screen) : Nil
-      field = @field
-      width = Math.min columns - 4, 44
-      field.bounds = Rect.new 2, 4, Math.max(width, 8), field.desired_height
-      field.draw screen
-
-      x, y = field.cursor_position
-      @terminal.cursor.move_to x, y
-
-      screen.write 2, 2, "an input field", Style::DEFAULT.bold
-      screen.write 20, 2, focus_note("enter accepts, up walks back"),
-        Style::DEFAULT.faint
-      screen.write 2, 3, "tab completes a colour name: #{WORDS.first(4).join(", ")}, …",
-        Style::DEFAULT.faint
-
-      row = field.bounds.bottom + 2
-
-      @entered.last(Math.max(rows - row - 2, 0)).each_with_index do |line, offset|
-        screen.write 4, row + offset, line.inspect, Style::DEFAULT.faint
-      end
-    end
-
-    # --------------------------------------------------------------- page 12
+    # --------------------------------------------------------------- page 11
 
     # The three things a modern terminal will do that a cell grid cannot say on
     # its own. Each is behind the capability that decides whether asking is
@@ -1100,8 +1093,8 @@ module Validate
         "left: the picture is over the text. right: the text is over the picture.",
         Style::DEFAULT.faint
 
-      Border.plain(Style::DEFAULT.faint).draw screen, OVER_BOX
-      Border.plain(Style::DEFAULT.faint).draw screen, UNDER_BOX
+      draw_box screen, OVER_BOX, PLAIN_BOX, Style::DEFAULT.faint
+      draw_box screen, UNDER_BOX, PLAIN_BOX, Style::DEFAULT.faint
 
       # Both boxes carry the same words, so which one wins is the only
       # difference to look at.
@@ -1234,7 +1227,7 @@ module Validate
 
       if @focused
         return leave_page if key.is? Key::Name::Escape
-        return focused_key key
+        return type key
       end
 
       browsing_key key
@@ -1274,7 +1267,7 @@ module Validate
 
     # Whether this page has something to type into.
     private def typeable? : Bool
-      field? || cursors?
+      cursors?
     end
 
     private def enter_page : Nil
@@ -1285,10 +1278,6 @@ module Validate
     private def leave_page : Nil
       @focused = false
       @rebuild = true
-    end
-
-    private def focused_key(key : Key) : Nil
-      field? ? field_key(key) : type(key)
     end
 
     private def type(key : Key) : Nil
@@ -1322,18 +1311,6 @@ module Validate
       @presses.shift if @presses.size > 64
     end
 
-    # Once the page has been entered the field gets everything, tab included:
-    # completion is what tab is for in a text field, and escape has already
-    # been taken as the way back out.
-    private def field_key(key : Key) : Nil
-      case @field.handle key
-      in Editor::Outcome::Continue  then nil
-      in Editor::Outcome::Accepted  then @entered << @field.editor.accepted
-      in Editor::Outcome::Cancelled then @field.text = ""
-      in Editor::Outcome::Ended     then @running = false
-      end
-    end
-
     # The most of a paste the typing pane keeps.
     #
     # A person cannot type enough for this to matter and a clipboard easily
@@ -1344,7 +1321,6 @@ module Validate
     private def pasted(text : String, complete : Bool) : Nil
       preview = text.size > 40 ? "#{text[0, 40]}…" : text
       tail = complete ? "" : ", never closed"
-      return @field.paste text if field? && @focused
       return type_text text if cursors? && @focused
 
       # Logged on the keys page for the same reason keystrokes are: that is the
@@ -1384,10 +1360,10 @@ module Validate
       @focused = false
       # The keys page shows this visit, not the last one.
       @presses.clear if keys?
-      field? ? @terminal.hardware_cursor = @terminal.cursor : @terminal.hide_cursor
       # Only one page has anywhere for someone to type, so the terminal's own
-      # cursor has no business blinking on the others.
-      @terminal.hide_cursor unless cursors?
+      # cursor has no business blinking on the others. The page that does puts
+      # it back on every frame it draws.
+      @terminal.hide_cursor
 
       # On a terminal that counts a cluster's columns by adding up its code
       # points, a row holding one leaves the screen showing something the
