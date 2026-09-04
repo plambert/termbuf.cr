@@ -144,7 +144,6 @@ module TermBuf
     @commands : Channel(Command)
     @scheduler : Fiber?
     @scheduling = false
-    @signals = [] of Signal
     @restored = false
     @resize_handlers = [] of ResizeHandler
 
@@ -157,7 +156,8 @@ module TermBuf
                    @probe_widths : Bool = false,
                    @quirks : Quirk = Quirk::None,
                    @detect_composed_drift : Bool = true,
-                   clear_overhang : Bool = true)
+                   clear_overhang : Bool = true,
+                   signals : Bool? = nil)
       @size = size || @tty.size
       @buffer = Buffer.new @size.columns, @size.rows
       @screen = Region.new Rect.full(@size.columns, @size.rows)
@@ -168,6 +168,7 @@ module TermBuf
       @input = Input::Stream.new @tty.input, blocking: @tty.managed?
       @pending_input = pending_input
       @initial_warnings = warnings.dup
+      @handle_signals = signals
     end
 
     # Detects what the terminal can do, takes it over, and starts running.
@@ -1060,47 +1061,67 @@ module TermBuf
 
     # --------------------------------------------------------------- signals
 
-    private def install_signal_handlers : Nil
-      return unless @tty.managed?
+    # What the operating system says, and what this terminal does about it.
+    #
+    # `SIGTERM`, `SIGINT` and `SIGHUP` give the terminal back and re-raise
+    # themselves; `SIGWINCH` becomes an `Events::Resize`; `SIGTSTP` and
+    # `SIGCONT` hand the screen over and take it back. An application that
+    # wants a first interrupt to ask rather than kill says so here:
+    #
+    #     terminal.signals.mode Signal::INT, TermBuf::Input::Signals::Mode::WarnThenExit
+    #
+    # and then draws something on the `Events::Signal` that arrives, calling
+    # `Input::Signals#reset_count` if the person decides to stay.
+    def signals : Input::Signals
+      @input.signals
+    end
 
-      trap Signal::WINCH do
-        window_resized
-      end
+    private def install_signal_handlers : Nil
+      handle = @handle_signals
+      return unless handle.nil? ? @tty.managed? : handle
+
+      signals = @input.signals
 
       # A terminal left in raw mode on the alternate screen makes the user's
-      # shell unusable, so these restore before letting the default happen.
-      {Signal::TERM, Signal::INT, Signal::HUP}.each do |signal|
-        trap signal do
-          restore
-          signal.reset
-          Process.signal signal, Process.pid
+      # shell unusable, so `Mode::Exit` restores before letting the default
+      # happen. `TERM`, `INT` and `HUP` are on that mode already.
+      signals.before_exit { restore }
+
+      # A resize is answered here rather than by the application: the buffer
+      # has to be resized and everything marked for redraw before anyone is
+      # told, and `Events::Resize` is what says so. Returning nil consumes the
+      # signal, so a window change is one event and not two.
+      @input.on_signal do |signalled|
+        if signalled.signal.winch?
+          window_resized
+          nil
+        else
+          Events::Signal.new signalled.signal, signalled.count
         end
       end
 
-      install_suspend_handlers
+      install_suspend_handlers signals
+      signals.install
     end
 
     # Suspending gives the terminal back before stopping, and resuming takes it
     # again and redraws, since the shell will have written over the screen in
     # between.
-    private def install_suspend_handlers : Nil
-      trap Signal::TSTP do
+    #
+    # `Input::Signals` puts the trap back after every delivery, so neither of
+    # these has to re-install the other.
+    private def install_suspend_handlers(signals : Input::Signals) : Nil
+      signals.on(Signal::TSTP) do
         restore
         Signal::TSTP.reset
         Process.signal Signal::TSTP, Process.pid
       end
 
-      trap Signal::CONT do
+      signals.on(Signal::CONT) do
         @restored = false
         @tty.enter @capabilities
-        install_suspend_handlers
         issue Commands::Paint.new(true, nil)
       end
-    end
-
-    private def trap(signal : Signal, &handler : ->) : Nil
-      @signals << signal unless @signals.includes? signal
-      signal.trap { handler.call }
     end
 
     private def install_exit_handler : Nil

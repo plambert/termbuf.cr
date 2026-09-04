@@ -1,5 +1,6 @@
 require "../caps/screen_size"
 require "../input/key"
+require "../input/signals"
 require "../input/timers"
 
 module TermBuf
@@ -75,6 +76,21 @@ module TermBuf
     # dropped before it gets here, so anything that arrives was still wanted
     # when it was delivered.
     record Timer, nonce : Input::Nonce do
+      include Event
+    end
+
+    # A signal arrived and the application is the one to act on it.
+    #
+    # Only for the signals whose mode is `Input::Signals::Mode::Event` or
+    # `WarnThenExit`; the ones that mean "stop" restore the terminal and re-
+    # raise themselves without ever reaching a channel, and `SIGWINCH` is
+    # consumed by the driver, which answers it with `Resize`.
+    #
+    # *count* is how many of this signal have arrived since the count was last
+    # cleared, counting from one. Under `WarnThenExit` it is what the warning
+    # is made of: an application draws "press again to quit" on the first and
+    # is gone by the last. `Input::Signals#reset_count` clears it.
+    record Signal, signal : ::Signal, count : Int32 do
       include Event
     end
 

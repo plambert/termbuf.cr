@@ -168,6 +168,43 @@ All notable changes to this project are documented here. The format follows
   was spelled, which left `Key.parse` no way back to it.
 - `Decoder` reads a C0 control byte by asking `Key.from_control` rather than from a table of its
   own. There was one table written twice and the two agreeing is the whole point of it.
+- `Input::Signals`, the signals a terminal application gets, on the same queue as the bytes. A
+  handler runs in a fibre of Crystal's own with no idea what the application was in the middle of,
+  so almost nothing is decided there: the delivery is counted, a marker goes on the reader's inbound
+  channel, and the dispatcher makes an `Events::Signal` of it in order with the keystrokes around
+  it. `Signals::Mode::Exit` is the exception, since a process being killed will not drain a channel:
+  it runs the `#before_exit` hooks in the handler itself — each one rescued, because giving things
+  back is what they are for and the ones after a failure have their own to give — then resets the
+  signal and re-raises it, so the exit status says what happened. `SIGTERM`, `SIGINT` and `SIGHUP`
+  start on that mode and `SIGWINCH` on `Mode::Event`. `Mode::WarnThenExit` makes the first press of
+  a key an event and the `#threshold`th an exit, so an application can draw "press again to quit"
+  rather than losing unsaved work to a stray interrupt; the count survives whatever arrives in
+  between and is cleared only by `#reset_count`. Nothing here writes to stderr — the screen belongs
+  to the application, and the warning is an event for it to draw. `Signals#on` takes a handler that
+  runs instead of the modes, which is what `SIGTSTP` and `SIGCONT` need, and the trap is put back
+  after every delivery, so a handler that resets its own signal to re-raise it still has one when
+  the process comes back. `Signal.trap` is process-global, so `#install` and `#uninstall` are
+  explicit and anything that installs has to uninstall.
+- `Events::Signal`, naming the signal and how many of it have arrived since the count was last
+  cleared.
+- `Terminal#signals`, so an application can change what a signal does — passing `Signal::INT` and
+  `Mode::WarnThenExit` to `#mode` makes the first interrupt an event rather than an exit — and clear
+  the count when the person decides to stay. `Terminal.new` gained `signals:`, which forces signal
+  handling on or off for a terminal that is not managing a device; by default it is installed
+  exactly when the device is managed, as before.
+- `Input::Stream#on_signal`, consulted in the dispatcher's fibre for every signal that reaches it:
+  returning `nil` consumes the signal and returning an event delivers that, and with no hook every
+  signal becomes an `Events::Signal`. It is what lets the driver answer `SIGWINCH` itself, so a
+  window change is one `Events::Resize` and not a resize and a signal both.
+
+### Changed
+
+- The terminal's signal handling now goes through `Input::Signals` rather than trapping signals
+  itself. What each one does is the same, with one difference: the traps persist across a delivery,
+  so the `SIGCONT` handler no longer has to re-install the `SIGTSTP` one. `Input::Reader::Inbound`
+  gained `Signals::Signalled` alongside `Bytes`, `Timers::Tick` and `Eof`, and `Input::Stream#close`
+  puts the traps back, since one left pointing at a stream nobody is draining would fill the inbound
+  channel and block Crystal's signal fibre.
 - `Commands::SetColors` is now `Commands::Quiet`: bytes sent after the current frame that move no
   cursor and set no attribute, so the encoder's idea of the screen survives them. The colour stack
   and the clipboard both issue through it, and the name no longer claims one of them.

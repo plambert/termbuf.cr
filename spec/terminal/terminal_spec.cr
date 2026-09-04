@@ -1664,3 +1664,77 @@ Spectator.describe TermBuf::Terminal do
     end
   end
 end
+
+# Signal handling is only installed for a terminal that is managing a device,
+# which no harness is, so these ask for it by hand. Traps are process-global:
+# closing the terminal puts them back, and every one of these closes.
+private def with_signalling_harness(columns = 3, rows = 2, &)
+  reader, keyboard = IO.pipe
+  output = IO::Memory.new
+  tty = TermBuf::Tty.new reader, output, managed: false
+
+  terminal = TermBuf::Terminal.new tty, TermBuf::Capabilities::XTERM,
+    TermBuf::ScreenSize.new(columns, rows), signals: true
+  terminal.start
+
+  begin
+    yield Harness.wrapping(terminal, output, keyboard)
+  ensure
+    terminal.close
+    keyboard.close rescue nil
+  end
+end
+
+Spectator.describe TermBuf::Terminal do
+  describe "signals" do
+    # The driver answers `SIGWINCH` itself: the buffer has to be resized before
+    # anyone is told, and `Events::Resize` is what tells them. The harness is
+    # three columns by two rows, which is not a size any window is, so whatever
+    # the device says it is now is a change.
+    it "answers a window change with a resize and nothing else" do
+      with_signalling_harness do |harness|
+        Process.signal ::Signal::WINCH, Process.pid
+
+        resize = harness.event_of TermBuf::Events::Resize
+        fail "no resize arrived" unless resize
+
+        expect(resize.previous.columns).to eq 3
+        expect(resize.previous.rows).to eq 2
+        expect(harness.event_of(TermBuf::Events::Signal, 100.milliseconds)).to be_nil
+      end
+    end
+
+    it "hands the signal policy to the application" do
+      with_signalling_harness do |harness|
+        expect(harness.terminal.signals.installed?).to be_true
+        expect(harness.terminal.signals.mode(::Signal::INT))
+          .to eq TermBuf::Input::Signals::Mode::Exit
+
+        harness.terminal.signals.mode ::Signal::INT,
+          TermBuf::Input::Signals::Mode::WarnThenExit
+
+        expect(harness.terminal.signals.mode(::Signal::INT))
+          .to eq TermBuf::Input::Signals::Mode::WarnThenExit
+      end
+    end
+
+    it "puts the traps back when the terminal closes" do
+      reader, keyboard = IO.pipe
+      output = IO::Memory.new
+      tty = TermBuf::Tty.new reader, output, managed: false
+
+      terminal = TermBuf::Terminal.new tty, TermBuf::Capabilities::XTERM,
+        TermBuf::ScreenSize.new(3, 2), signals: true
+      terminal.start
+
+      begin
+        expect(terminal.signals.installed?).to be_true
+        terminal.close
+        expect(terminal.signals.installed?).to be_false
+      ensure
+        terminal.close
+        keyboard.close rescue nil
+      end
+    end
+  end
+end

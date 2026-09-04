@@ -2,6 +2,7 @@ require "./input/key"
 require "./input/scanner"
 require "./input/patterns"
 require "./input/decoder"
+require "./input/signals"
 require "./input/timers"
 require "./input/reader"
 require "./input/stream"
@@ -18,7 +19,9 @@ module TermBuf
   # the byte stream into complete escape sequences, and `Input::Patterns` says
   # which of those are replies rather than keys. `Input::Timers` puts wake-ups
   # in the same queue as the bytes, which is how `Events::Timer` arrives in
-  # order with everything else. Every one of them is usable on its own.
+  # order with everything else, and `Input::Signals` puts signals on it too, so
+  # that a resize or an interrupt is ordered against the keystrokes around it.
+  # Every one of them is usable on its own.
   module Input
   end
 end

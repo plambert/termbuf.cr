@@ -2,6 +2,7 @@ require "../terminal/event"
 require "./decoder"
 require "./patterns"
 require "./reader"
+require "./signals"
 require "./timers"
 
 module TermBuf
@@ -45,6 +46,11 @@ module TermBuf
       # decoder's alike. `#after` and `#cancel` are the way in.
       getter timers : Timers
 
+      # What the operating system has to say. Its handlers are not installed
+      # until something calls `Signals#install`, since traps are process-global
+      # and a stream is not necessarily the process.
+      getter signals : Signals
+
       # Whether the fibres are running.
       getter? started : Bool = false
 
@@ -57,12 +63,16 @@ module TermBuf
       @deadline : Nonce? = nil
       @deadline_at : Time::Instant? = nil
 
+      # What a signal becomes, if the driver has said. See `#on_signal`.
+      @on_signal : Proc(Signals::Signalled, Event?)? = nil
+
       def initialize(io : IO, blocking : Bool)
         @reader = Reader.new io, blocking
         @events = Channel(Event).new CAPACITY
         @patterns = Patterns.new
         @decoder = Decoder.new
         @timers = Timers.new @reader.inbound
+        @signals = Signals.new @reader.inbound
         @preloaded = Bytes.empty
       end
 
@@ -117,15 +127,37 @@ module TermBuf
         # Nobody is listening any more.
       end
 
+      # Says what a signal that reached the dispatcher becomes.
+      #
+      # Consulted for every `Signals::Signalled`, in the dispatcher's fibre
+      # rather than the signal handler's, so it runs with the rest of the
+      # stream rather than underneath it. Returning `nil` consumes the signal
+      # and nothing is delivered; returning an event delivers that. With no
+      # hook registered every signal becomes an `Events::Signal`.
+      #
+      # This is what lets the driver answer `SIGWINCH` itself — resizing the
+      # buffer and sending `Events::Resize` — so that a resize is one event
+      # rather than two. One hook, replacing any previous one, since the point
+      # of it is to own the whole translation.
+      def on_signal(&block : Signals::Signalled -> Event?) : Nil
+        @on_signal = block
+        nil
+      end
+
       # Stops delivering events.
       #
       # The reader is left where it is, blocked on a device only the owner of
       # that device can close; it ends when the device does. Nothing it reads
       # after this reaches anyone.
+      #
+      # Signal handlers go back to the default: they are process-global, and
+      # one left pointing at a stream nobody is draining would fill the inbound
+      # channel and then block Crystal's signal fibre.
       def close : Nil
         return if @closed
         @closed = true
 
+        @signals.uninstall
         @timers.clear
         @events.close rescue nil
       end
@@ -160,7 +192,20 @@ module TermBuf
         in Timers::Tick
           fired message.nonce, decoder
           true
+        in Signals::Signalled
+          signalled message
+          true
         end
+      end
+
+      # A signal arrived. What it becomes is the hook's to say, and with no
+      # hook it becomes an event naming the signal and how many of it have
+      # arrived.
+      private def signalled(message : Signals::Signalled) : Nil
+        hook = @on_signal
+        event = hook ? hook.call(message) : Events::Signal.new(message.signal, message.count)
+
+        inject event if event
       end
 
       # A timer went off. Whether it still means anything is the live set's to

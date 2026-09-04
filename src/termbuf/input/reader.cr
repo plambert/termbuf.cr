@@ -1,3 +1,4 @@
+require "./signals"
 require "./timers"
 
 module TermBuf
@@ -26,11 +27,12 @@ module TermBuf
       # wake-up that came from nowhere near the device has somewhere to go.
       #
       # The reader itself only ever sends `Bytes` and one `Eof`. A
-      # `Timers::Tick` comes from a timer fibre, and arrives here rather than
-      # on a channel of its own so that it is ordered against the bytes: what
-      # the terminal said before a timer was armed is always dispatched before
-      # that timer goes off.
-      alias Inbound = Bytes | Timers::Tick | Eof
+      # `Timers::Tick` comes from a timer fibre and a `Signals::Signalled` from
+      # Crystal's signal fibre, and both arrive here rather than on channels of
+      # their own so that they are ordered against the bytes: what the terminal
+      # said before a timer was armed, or before a signal landed, is always
+      # dispatched before it.
+      alias Inbound = Bytes | Timers::Tick | Signals::Signalled | Eof
 
       # What has been read, in the order it was read.
       getter inbound : Channel(Inbound)
