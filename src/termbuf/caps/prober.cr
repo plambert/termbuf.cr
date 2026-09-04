@@ -48,13 +48,43 @@ module TermBuf
     # asking for them by hex name is how XTGETTCAP works.
     TCAP_QUERY = "\eP+q5463;524742\e\\"
 
+    # The DEC private modes worth asking about, and the capability each one
+    # stands for. `CSI ? Pm $ p` is DECRQM and the reply is DECRPM, which is
+    # the only mechanism a terminal offers for saying it does *not* have
+    # something; every other query in the batch is silent about what it lacks.
+    #
+    # Mode 2027 is asked about and never turned on. Enabling it changes how the
+    # terminal counts grapheme clusters, and the width probe measures this
+    # terminal with the mode off; switching it on afterwards would invalidate
+    # every width already established. See `Capability::GraphemeClusters`.
+    MODE_CAPABILITIES = {
+      2026 => Capability::SynchronizedOutput,
+      2027 => Capability::GraphemeClusters,
+      1004 => Capability::FocusEvents,
+      1006 => Capability::MouseSgr,
+      2004 => Capability::BracketedPaste,
+    }
+
+    # Which query a mode report answered, for `Result#answered`. A separate
+    # table because a symbol cannot be built out of a value at runtime.
+    MODE_QUERIES = {
+      2026 => :synchronized_output,
+      2027 => :grapheme_clusters,
+      1004 => :focus_events,
+      1006 => :mouse_sgr,
+      2004 => :bracketed_paste,
+    }
+
     QUERIES = String.build do |io|
-      io << "\e[c"       # primary device attributes
-      io << "\e[>c"      # secondary device attributes
-      io << "\e[>0q"     # XTVERSION, the terminal's own name
-      io << TCAP_QUERY   # 24 bit colour, asked of terminfo
-      io << "\e[?2026$p" # synchronized output
-      io << "\e[?u"      # kitty keyboard protocol
+      io << "\e[c"     # primary device attributes
+      io << "\e[>c"    # secondary device attributes
+      io << "\e[>0q"   # XTVERSION, the terminal's own name
+      io << TCAP_QUERY # 24 bit colour, asked of terminfo
+
+      # DECRQM for every mode above, in the same write as everything else.
+      MODE_CAPABILITIES.each_key { |mode| io << "\e[?" << mode << "$p" }
+
+      io << "\e[?u" # kitty keyboard protocol
       io << KITTY_GRAPHICS_QUERY
       io << "\e[6n" # cursor position: the sentinel, always answered
     end
@@ -65,6 +95,11 @@ module TermBuf
       @output.flush
 
       flags = base.flags
+      # A terminal saying it does not recognise a mode outranks whatever put
+      # the capability there, its own name included, and the replies do not
+      # arrive in an order anything guarantees. So refusals are collected
+      # apart and taken off at the end, where their order cannot matter.
+      denied = Capability::None
       answered = [] of Symbol
       input = IO::Memory.new
       name = nil.as(String?)
@@ -78,6 +113,7 @@ module TermBuf
 
         reading = interpret String.new(bytes), flags
         flags = reading.flags
+        denied |= reading.denied
 
         if query = reading.query
           answered << query
@@ -87,7 +123,7 @@ module TermBuf
         reading.query == :cursor_position
       end
 
-      Result.new Capabilities.new(flags), input.to_slice, answered, name, cursor
+      Result.new Capabilities.new(flags & ~denied), input.to_slice, answered, name, cursor
     end
 
     # Reads until the block reports the sentinel has arrived, or the deadline
@@ -155,6 +191,7 @@ module TermBuf
     end
 
     CURSOR_POSITION    = /\A\e\[(\d+);(\d+)R\z/
+    MODE_REPORT        = /\A\e\[\?(\d+);(\d+)\$y\z/
     KITTY_KEYBOARD     = /\A\e\[\?\d*u\z/
     PRIMARY_ATTRIBUTES = /\A\e\[\?[\d;]*c\z/
     TERMINAL_NAME      = /\A\eP>\|(.*)\e\\\z/m
@@ -165,7 +202,9 @@ module TermBuf
       flags : Capability,
       query : Symbol?,
       name : String? = nil,
-      cursor : {Int32, Int32}? = nil
+      cursor : {Int32, Int32}? = nil,
+      # Capabilities the terminal said outright that it does not have.
+      denied : Capability = Capability::None
 
     private def interpret(response : String, flags : Capability) : Reading
       if match = response.match CURSOR_POSITION
@@ -173,8 +212,8 @@ module TermBuf
           cursor: {match[2].to_i - 1, match[1].to_i - 1}
       end
 
-      if response.starts_with? "\e[?2026;"
-        return Reading.new interpret_decrpm(response, flags), :synchronized_output
+      if match = response.match MODE_REPORT
+        return interpret_decrpm match, flags
       end
 
       if response.matches? KITTY_KEYBOARD
@@ -201,14 +240,24 @@ module TermBuf
       Reading.new flags, nil
     end
 
-    # `CSI ? 2026 ; Ps $ y`, where 1 means set and 2 means reset. Either way the
-    # mode exists; 0 and 4 mean it does not.
-    private def interpret_decrpm(response : String, flags : Capability) : Capability
-      match = response.match(/\A\e\[\?2026;(\d+)\$y\z/)
-      return flags unless match
-      return flags unless match[1].in? "1", "2", "3"
+    # `CSI ? Pm ; Ps $ y`, the DECRPM reply. A value of 1 means the mode is
+    # set, 2 that it is reset, and 3 that it is permanently set; all three say
+    # the mode is there. 0 means the terminal does not recognise the mode and 4
+    # that it is permanently reset, and both say it is not.
+    #
+    # A refusal is recorded rather than merely not added. The report is
+    # evidence about the terminal actually on the other end, where a name that
+    # put the capability there is evidence about the family it belongs to, and
+    # the specific answer wins.
+    private def interpret_decrpm(match : Regex::MatchData, flags : Capability) : Reading
+      mode = match[1].to_i?
+      capability = mode ? MODE_CAPABILITIES[mode]? : nil
+      return Reading.new flags, nil unless mode && capability
 
-      flags | Capability::SynchronizedOutput
+      query = MODE_QUERIES[mode]?
+      return Reading.new flags | capability, query if match[2].in? "1", "2", "3"
+
+      Reading.new flags, query, denied: capability
     end
 
     # Any reply at all means the terminal parsed the graphics command, which is

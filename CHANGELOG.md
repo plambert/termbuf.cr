@@ -8,6 +8,16 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- The probe batch now asks DECRQM for modes 2027, 1004, 1006 and 2004 alongside 2026, in the same
+  write, and reads all five through one table. Focus events, SGR mouse reporting and bracketed paste
+  were previously guessed from the terminal's name and never confirmed.
+- `Capability::GraphemeClusters`, DEC private mode 2027, set by the mode report and by nothing else.
+  It is measured and never enabled: turning the mode on changes how the terminal counts clusters,
+  and the widths this shard works from were measured with it off. No environment table claims it and
+  it is not in `Capabilities::MODERN`.
+- `Capability::Osc52Clipboard`, reading and writing the system clipboard through the terminal.
+  Reserved: nothing sets it and nothing reads it yet, and `TERMBUF_CAPS=+osc52_clipboard` is the
+  only way to turn it on.
 - `Unicode::WidthPolicy#conjunct_wide?`, on by default, and a `WidthProbe` sample that settles it:
   whether a consonant conjunct joined by a virama is two columns whatever it opens with. A conjunct
   ligates into one glyph and what a terminal charges for that glyph is its own decision — ghostty
@@ -61,6 +71,14 @@ All notable changes to this project are documented here. The format follows
   is open, so a `case` over events can no longer be exhaustive: the handlers in `Field`, and the
   examples, take a `when`/`else` and an `else` that leaves an unrecognised event alone.
 
+- A DECRPM reply saying a mode is absent now takes the capability back off, where before it could
+  only fail to add one. A value of 0 or 4 removes the capability whatever put it there — the
+  environment tables, or the name the terminal gave for itself — because the report is evidence
+  about the terminal on the other end where a name is evidence about the family it belongs to. The
+  refusals are collected apart from the additions and applied at the end, so it does not matter
+  which reply arrived first.
+- `Capability` is documented as append-only. A flags enum numbers its members by position, so
+  inserting one silently renumbers every member after it.
 - Kitty no longer claims `Capability::Overline` or `Capability::Conceal`. Measured against 0.48.2:
   SGR 53 leaves the text unmarked where SGR 4 underlines it, and SGR 8 leaves it visible. Kitty's
   own terminfo agrees, declaring `blink` and `smxx` and neither an overline nor `invis` — where

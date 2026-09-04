@@ -4,6 +4,11 @@ module TermBuf
   # Detection fills this in; the encoder only reads it. Anything not known to
   # be supported is treated as unsupported, so a terminal nobody recognises
   # gets plain text rather than a screen full of escape sequences.
+  #
+  # This enum is append-only. A flags enum numbers its members by position, so
+  # inserting or reordering one silently renumbers every member after it, and
+  # a mask persisted or written down by bit value stops meaning what it meant.
+  # New capabilities go on the end, and a retired one keeps its place.
   @[Flags]
   enum Capability : UInt64
     # The eight colours of SGR 30-37 and 40-47.
@@ -69,6 +74,18 @@ module TermBuf
     KittyColorStack
     Titles
     CursorShape
+
+    # DEC private mode 2027, where the terminal measures text by grapheme
+    # cluster rather than by code point.
+    #
+    # Measured only, never enabled. Turning the mode on changes how the
+    # terminal counts clusters, and the width probe measured this terminal
+    # with it off; enabling it afterwards would invalidate every width already
+    # established. Knowing whether the terminal has it is still worth having.
+    GraphemeClusters
+
+    # OSC 52, reading and writing the system clipboard through the terminal.
+    Osc52Clipboard
   end
 
   # A capability mask that keeps itself consistent.

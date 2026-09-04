@@ -10,6 +10,10 @@ private KITTY = "\e[?62;c" \
                 "\eP>|kitty(0.32.2)\e\\" \
                 "\eP1+r5463=787465726d2d6b697474790a\e\\" \
                 "\e[?2026;2$y" \
+                "\e[?2027;2$y" \
+                "\e[?1004;2$y" \
+                "\e[?1006;2$y" \
+                "\e[?2004;2$y" \
                 "\e[?0u" \
                 "\e_Gi=31;OK\e\\" \
                 "\e[1;1R"
@@ -18,15 +22,25 @@ private GHOSTTY = "\e[?62;22c" \
                   "\e[>1;1;0c" \
                   "\eP>|ghostty 1.0.1\e\\" \
                   "\e[?2026;2$y" \
+                  "\e[?2027;2$y" \
+                  "\e[?1004;2$y" \
+                  "\e[?1006;2$y" \
+                  "\e[?2004;2$y" \
                   "\e[?0u" \
                   "\e_Gi=31;OK\e\\" \
                   "\e[5;10R"
 
+# xterm knows the mouse and paste modes and neither of the newer two, so it is
+# the terminal that answers a mode report both ways in the same batch.
 private XTERM = "\e[?63;1;2;4;6;9;15;22;29c" \
                 "\e[>41;390;0c" \
                 "\eP>|XTerm(390)\e\\" \
                 "\eP0+r\e\\" \
                 "\e[?2026;0$y" \
+                "\e[?2027;0$y" \
+                "\e[?1004;2$y" \
+                "\e[?1006;2$y" \
+                "\e[?2004;2$y" \
                 "\e[2;5R"
 
 # Terminal.app answers the two device attribute queries and the cursor
@@ -58,8 +72,28 @@ Spectator.describe TermBuf::Prober do
       expect(queries).to contain "\e[>c"
       expect(queries).to contain "\e[>0q"
       expect(queries).to contain "\e[?2026$p"
+      expect(queries).to contain "\e[?2027$p"
+      expect(queries).to contain "\e[?1004$p"
+      expect(queries).to contain "\e[?1006$p"
+      expect(queries).to contain "\e[?2004$p"
       expect(queries).to contain "\e[?u"
       expect(queries).to contain "\e_G"
+    end
+
+    it "asks about every mode it has a capability for" do
+      _, queries = probe KITTY
+
+      TermBuf::Prober::MODE_CAPABILITIES.each_key do |mode|
+        expect(queries).to contain "\e[?#{mode}$p"
+      end
+    end
+
+    # Mode 2027 changes how the terminal counts grapheme clusters, and the
+    # widths this shard works from were measured with it off.
+    it "asks about grapheme clusters without turning the mode on" do
+      _, queries = probe KITTY
+
+      expect(queries).not_to contain "\e[?2027h"
     end
   end
 
@@ -71,6 +105,25 @@ Spectator.describe TermBuf::Prober do
       expect(result.capabilities.includes?(Cap::SynchronizedOutput)).to be_true
       expect(result.capabilities.includes?(Cap::KittyKeyboard)).to be_true
       expect(result.capabilities.includes?(Cap::KittyGraphics)).to be_true
+    end
+
+    it "reads every mode it asked about off the reports" do
+      result, _ = probe KITTY
+
+      expect(result.capabilities.includes?(Cap::GraphemeClusters)).to be_true
+      expect(result.capabilities.includes?(Cap::FocusEvents)).to be_true
+      expect(result.capabilities.includes?(Cap::MouseSgr)).to be_true
+      expect(result.capabilities.includes?(Cap::BracketedPaste)).to be_true
+    end
+
+    it "records each mode report as its own answered query" do
+      result, _ = probe KITTY
+
+      expect(result.answered).to contain :synchronized_output
+      expect(result.answered).to contain :grapheme_clusters
+      expect(result.answered).to contain :focus_events
+      expect(result.answered).to contain :mouse_sgr
+      expect(result.answered).to contain :bracketed_paste
     end
 
     it "reports the name the terminal gave for itself" do
@@ -120,10 +173,19 @@ Spectator.describe TermBuf::Prober do
       expect(result.capabilities.includes?(Cap::TrueColor)).to be_false
     end
 
-    it "reads a zero from the mode report as unsupported" do
+    it "reads a zero from a mode report as unsupported, whichever mode it was" do
       result, _ = probe XTERM
 
       expect(result.capabilities.includes?(Cap::SynchronizedOutput)).to be_false
+      expect(result.capabilities.includes?(Cap::GraphemeClusters)).to be_false
+    end
+
+    it "reads a two from a mode report as supported, whichever mode it was" do
+      result, _ = probe XTERM
+
+      expect(result.capabilities.includes?(Cap::FocusEvents)).to be_true
+      expect(result.capabilities.includes?(Cap::MouseSgr)).to be_true
+      expect(result.capabilities.includes?(Cap::BracketedPaste)).to be_true
     end
 
     it "adds nothing for the queries a terminal ignores" do
@@ -141,6 +203,56 @@ Spectator.describe TermBuf::Prober do
       result, _ = probe APPLE_TERMINAL, base
 
       expect(result.capabilities.includes?(Cap::Color256)).to be_true
+    end
+  end
+
+  describe "the mode reports" do
+    it "sets grapheme clusters when the terminal has mode 2027" do
+      result, _ = probe "\e[?2027;1$y\e[1;1R"
+
+      expect(result.capabilities.includes?(Cap::GraphemeClusters)).to be_true
+    end
+
+    it "reads a permanently set mode as supported" do
+      result, _ = probe "\e[?2004;3$y\e[1;1R"
+
+      expect(result.capabilities.includes?(Cap::BracketedPaste)).to be_true
+    end
+
+    # 4 is permanently reset: the terminal knows the mode by number and will
+    # never have it, which is a refusal rather than an admission.
+    it "reads a permanently reset mode as unsupported" do
+      result, _ = probe "\e[?2004;4$y\e[1;1R", base: TermBuf::Capabilities::MODERN
+
+      expect(result.capabilities.includes?(Cap::BracketedPaste)).to be_false
+    end
+
+    # The name says what the family does; the mode report says what this
+    # terminal does, and the specific answer wins.
+    it "takes a capability back off a terminal that named itself into it" do
+      result, _ = probe "\eP>|ghostty 1.0.1\e\\\e[?1006;0$y\e[1;1R"
+
+      expect(result.name).to eq "ghostty 1.0.1"
+      expect(result.capabilities.includes?(Cap::MouseSgr)).to be_false
+    end
+
+    it "takes it off whichever of the two replies arrived first" do
+      result, _ = probe "\e[?1006;0$y\eP>|ghostty 1.0.1\e\\\e[1;1R"
+
+      expect(result.capabilities.includes?(Cap::MouseSgr)).to be_false
+    end
+
+    it "takes a capability back off one the environment established" do
+      result, _ = probe "\e[?2026;0$y\e[1;1R", base: TermBuf::Capabilities::MODERN
+
+      expect(result.capabilities.includes?(Cap::SynchronizedOutput)).to be_false
+    end
+
+    it "ignores a report for a mode it never asked about" do
+      result, _ = probe "\e[?1049;2$y\e[1;1R", base: TermBuf::Capabilities::ANSI
+
+      expect(result.capabilities).to eq TermBuf::Capabilities::ANSI
+      expect(result.answered).to contain :cursor_position
     end
   end
 

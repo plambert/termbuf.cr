@@ -32,6 +32,16 @@ Spectator.describe TermBuf::CapabilityOverrides do
     it "accepts the name as the enum spells it" do
       expect(override("TrueColor").capabilities.includes?(Cap::TrueColor)).to be_true
     end
+
+    # Nothing puts these two on: no environment table claims them and no
+    # detection ever will for the clipboard, so the variable is the only way in
+    # and the names have to work.
+    it "accepts a capability nothing detects" do
+      expect(override("+grapheme_clusters").capabilities.includes?(Cap::GraphemeClusters))
+        .to be_true
+      expect(override("+osc52_clipboard").capabilities.includes?(Cap::Osc52Clipboard))
+        .to be_true
+    end
   end
 
   describe "turning capabilities off" do
