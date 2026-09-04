@@ -812,9 +812,97 @@ module TermBuf
       perform_paint Commands::Paint.new(false, nil)
     end
 
+    # How often a window resize is acted on, at most.
+    #
+    # Dragging a window corner produces a `SIGWINCH` for every intermediate
+    # geometry the window passes through, and acting on each one means a full
+    # repaint per pixel of travel. The first resize of a burst goes through at
+    # once, since a window that has been still is one whose new size is worth
+    # showing immediately; everything after it inside the interval collapses
+    # into a single further resize taken on the geometry the window finished
+    # at.
+    #
+    # Zero turns the limiting off, and every resize is acted on as it arrives.
+    property resize_interval : Time::Span = 50.milliseconds
+
+    # Guards the resize state below, which the signal handler, the fibre
+    # waiting out an interval, and the application can all reach at once.
+    private getter resize_mutex : Mutex = Mutex.new
+
+    # When a resize was last acted on, which is what the interval is measured
+    # from. Nil until the first one.
+    private property last_window_resize_at : Time::Instant? = nil
+
+    # Whether a fibre is already waiting out the interval on behalf of a burst.
+    # There is never more than one.
+    private property? resize_trailing : Bool = false
+
+    # The size that fibre will act on, replaced by every resize that arrives
+    # while it waits so that what lands is the last of the burst.
+    private property pending_resize_size : ScreenSize? = nil
+
+    # Tells the terminal its window changed size.
+    #
+    # This is what the `SIGWINCH` handler calls. An application that does not
+    # get the signal — one driving a pty whose size it sets itself, say — calls
+    # it in the signal's place, and passes the size rather than leaving it to
+    # be read off the terminal.
+    #
+    # Rate limited by `#resize_interval`. The leading edge is issued straight
+    # away; a call inside the interval instead leaves a single fibre to sleep
+    # out the remainder and issue one resize at the end of it, reading the size
+    # then so that the repaint lands on the geometry the window settled at
+    # rather than one it passed through. Further calls inside the interval do
+    # no more than replace what that fibre will use.
+    def window_resized(size : ScreenSize = @tty.size) : Nil
+      interval = resize_interval
+      immediate = false
+      trailing = false
+
+      resize_mutex.synchronize do
+        last = last_window_resize_at
+
+        if interval <= Time::Span.zero || last.nil? || last.elapsed >= interval
+          self.last_window_resize_at = Time.instant
+          immediate = true
+        else
+          self.pending_resize_size = size
+          trailing = !resize_trailing?
+          self.resize_trailing = true
+        end
+      end
+
+      issue Commands::Resize.new(size) if immediate
+      spawn_trailing_resize interval if trailing
+    end
+
+    # Sleeps out what is left of the interval and issues the last size of the
+    # burst. Started at most once per burst, by the call that found no fibre
+    # already waiting.
+    private def spawn_trailing_resize(interval : Time::Span) : Nil
+      spawn do
+        remaining = resize_mutex.synchronize do
+          last = last_window_resize_at
+          last ? interval - last.elapsed : Time::Span.zero
+        end
+        sleep remaining if remaining > Time::Span.zero
+
+        size = resize_mutex.synchronize do
+          self.resize_trailing = false
+          self.last_window_resize_at = Time.instant
+          settled = pending_resize_size
+          self.pending_resize_size = nil
+          settled
+        end
+
+        issue Commands::Resize.new(size) if size
+      end
+    end
+
     private def perform_resize(size : ScreenSize) : Nil
       return if size.columns == @size.columns && size.rows == @size.rows
 
+      previous = @size
       @size = size
       @buffer.resize size.columns, size.rows
       @encoder.resize size.columns, size.rows
@@ -832,7 +920,7 @@ module TermBuf
 
       run_resize_handlers size
 
-      emit Events::Resize.new(size)
+      emit Events::Resize.new(size, previous)
     end
 
     # The application's layout, run before it is told the screen changed so
@@ -948,7 +1036,7 @@ module TermBuf
       return unless @tty.managed?
 
       trap Signal::WINCH do
-        issue Commands::Resize.new(@tty.size)
+        window_resized
       end
 
       # A terminal left in raw mode on the alternate screen makes the user's

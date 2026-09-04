@@ -9,7 +9,12 @@ module TermBuf
   module Events
     # The window changed size. The buffer has already been resized to match
     # and everything marked for redraw by the time this arrives.
-    record Resize, size : ScreenSize
+    #
+    # *previous* is the size being left. An application that only needs the new
+    # geometry can ignore it; one that scales or scrolls to follow the change
+    # needs to know which way the window went, and asking the terminal after
+    # the fact only ever gives the size it is already at.
+    record Resize, size : ScreenSize, previous : ScreenSize
 
     # A key press. *bytes* is what the terminal sent to say so, which matters
     # for the sequences the decoder could not name and for anything an

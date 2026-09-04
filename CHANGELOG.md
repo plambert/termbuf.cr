@@ -16,6 +16,15 @@ All notable changes to this project are documented here. The format follows
   row a cell to the left. With the rule measured, the model reproduces all nine of kitty's readings
   for the Indic corpus where it previously matched two.
 
+- `Terminal#window_resized`, which is what the `SIGWINCH` handler now calls, and
+  `Terminal#resize_interval` (`Time::Span`, 50 milliseconds) limiting how often it acts. Dragging a
+  window corner produces a signal for every geometry the window passes through, and a full repaint
+  per pixel of travel is a repaint per pixel wasted. The first resize of a burst goes through at
+  once; the rest collapse into a single further resize at the end of the interval, taken on the
+  size the window settled at rather than one it passed through. Zero turns the limiting off. An
+  application driving a pty whose size it sets itself calls `#window_resized` in the signal's
+  place.
+
 - `Placement#z` and a `z:` argument to `ImageStore#place`: where a picture sits against the text and
   against the other placements. Zero and above covers the text, which is the default and what an
   image drawn to be looked at wants; negative sits beneath it, so the cells keep their glyphs and
@@ -31,6 +40,11 @@ All notable changes to this project are documented here. The format follows
   them, and there is no third to put anything in — but it says so.
 
 ### Changed
+
+- `Events::Resize` carries `previous`, the size being left, alongside the new one. An application
+  that scales or scrolls to follow a resize needs to know which way the window went, and asking the
+  terminal after the fact only ever gives the size it is already at. Constructing the event by hand
+  takes the second argument.
 
 - Kitty no longer claims `Capability::Overline` or `Capability::Conceal`. Measured against 0.48.2:
   SGR 53 leaves the text unmarked where SGR 4 underlines it, and SGR 8 leaves it visible. Kitty's

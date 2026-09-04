@@ -81,6 +81,18 @@ private class Harness
   end
 end
 
+# Every resize that arrives before the terminal goes quiet, as column and row
+# pairs in the order they were sent.
+private def drain_resizes(harness, quiet : Time::Span = 300.milliseconds) : Array(Tuple(Int32, Int32))
+  sizes = [] of Tuple(Int32, Int32)
+
+  while resize = harness.event_of TermBuf::Events::Resize, quiet
+    sizes << {resize.size.columns, resize.size.rows}
+  end
+
+  sizes
+end
+
 private def with_harness(**options, &)
   harness = Harness.new **options
 
@@ -504,6 +516,18 @@ Spectator.describe TermBuf::Terminal do
       end
     end
 
+    it "carries the size it left" do
+      with_harness do |harness|
+        harness.terminal.issue TermBuf::Commands::Resize.new(TermBuf::ScreenSize.new(40, 10))
+        resize = harness.event_of TermBuf::Events::Resize
+
+        expect(resize.try &.previous.columns).to eq 20
+        expect(resize.try &.previous.rows).to eq 6
+        expect(resize.try &.size.columns).to eq 40
+        expect(resize.try &.size.rows).to eq 10
+      end
+    end
+
     it "redraws the whole screen afterwards" do
       with_harness do |harness|
         harness.terminal.write 0, 0, "content"
@@ -627,6 +651,60 @@ Spectator.describe TermBuf::Terminal do
         expect(harness.event_of(TermBuf::Events::Resize, 200.milliseconds)).to be_nil
 
         expect(runs).to eq 0
+      end
+    end
+
+    it "collapses a burst of window resizes into the size it ended at" do
+      with_harness do |harness|
+        harness.terminal.resize_interval = 50.milliseconds
+
+        10.times do |step|
+          harness.terminal.window_resized TermBuf::ScreenSize.new(21 + step, 6)
+        end
+
+        sizes = drain_resizes harness
+
+        # The leading edge, and one more for the end of the burst. The leading
+        # edge alone is allowed, in case the burst outran the interval.
+        expect(sizes.size).to be_between 1, 2
+        expect(sizes.last).to eq({30, 6})
+      end
+    end
+
+    it "starts a fresh burst once the interval has passed" do
+      with_harness do |harness|
+        harness.terminal.resize_interval = 200.milliseconds
+
+        harness.terminal.window_resized TermBuf::ScreenSize.new(30, 8)
+        leading = harness.event_of TermBuf::Events::Resize, 100.milliseconds
+        expect(leading.try &.size.columns).to eq 30
+
+        # Inside the interval, so this one waits rather than going through.
+        harness.terminal.window_resized TermBuf::ScreenSize.new(40, 10)
+        expect(harness.event_of(TermBuf::Events::Resize, 100.milliseconds)).to be_nil
+
+        trailing = harness.event_of TermBuf::Events::Resize, 400.milliseconds
+        expect(trailing.try &.size.columns).to eq 40
+
+        sleep 250.milliseconds
+
+        # The window has been still for longer than the interval, so this is a
+        # leading edge again and goes through at once.
+        harness.terminal.window_resized TermBuf::ScreenSize.new(50, 12)
+        fresh = harness.event_of TermBuf::Events::Resize, 100.milliseconds
+        expect(fresh.try &.size.columns).to eq 50
+      end
+    end
+
+    it "acts on every window resize when the interval is zero" do
+      with_harness do |harness|
+        harness.terminal.resize_interval = Time::Span.zero
+
+        harness.terminal.window_resized TermBuf::ScreenSize.new(30, 8)
+        harness.terminal.window_resized TermBuf::ScreenSize.new(40, 10)
+        harness.terminal.window_resized TermBuf::ScreenSize.new(50, 12)
+
+        expect(drain_resizes(harness)).to eq [{30, 8}, {40, 10}, {50, 12}]
       end
     end
   end
