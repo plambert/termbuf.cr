@@ -145,6 +145,47 @@ Spectator.describe TermBuf::Terminal do
         expect(harness.drain).not_to contain "\e[?1049h"
       end
     end
+
+    # A mode asked for is a mode the terminal is left in, so closing has to
+    # give every one of them back, newest first.
+    it "resets every mode it was asked for when it closes" do
+      harness = Harness.new
+      harness.terminal.enable TermBuf::Tty::MOUSE_SGR
+      harness.terminal.enable TermBuf::Tty::KITTY_KEYBOARD
+      harness.terminal.paint
+      harness.drain
+      harness.close
+      written = harness.drain
+
+      expect(written).to contain TermBuf::Tty::KITTY_KEYBOARD.reset
+      expect(written).to contain TermBuf::Tty::MOUSE_SGR.reset
+      expect(written.index!(TermBuf::Tty::KITTY_KEYBOARD.reset))
+        .to be < written.index!(TermBuf::Tty::MOUSE_SGR.reset)
+    end
+
+    # Before the fibres are running there is no frame to land in the middle
+    # of, so the mode is recorded and goes out with the takeover itself.
+    it "sends a mode enabled before it started with the rest of the takeover" do
+      reader, keyboard = IO.pipe
+      output = IO::Memory.new
+      tty = TermBuf::Tty.new reader, output, managed: false
+      terminal = TermBuf::Terminal.new tty, TermBuf::Capabilities::XTERM,
+        TermBuf::ScreenSize.new(20, 6)
+      terminal.enable TermBuf::Tty::FOCUS_EVENTS
+
+      expect(output.to_s).to eq ""
+
+      begin
+        terminal.start
+
+        expect(output.to_s).to contain TermBuf::Tty::FOCUS_EVENTS.set
+      ensure
+        terminal.close
+        keyboard.close rescue nil
+      end
+
+      expect(output.to_s.scan(TermBuf::Tty::FOCUS_EVENTS.reset).size).to eq 1
+    end
   end
 
   describe "drawing" do
@@ -1241,7 +1282,7 @@ Spectator.describe TermBuf::Tty do
     expect(tty.entered?).to be_false
     tty.enter TermBuf::Capabilities::XTERM
     expect(tty.entered?).to be_true
-    tty.leave TermBuf::Capabilities::XTERM
+    tty.leave
     expect(tty.entered?).to be_false
   end
 
@@ -1296,7 +1337,7 @@ Spectator.describe TermBuf::Tty do
       tty = TermBuf::Tty.new IO::Memory.new, output, managed: false
 
       tty.enter_alternate TermBuf::Capabilities::XTERM
-      tty.leave TermBuf::Capabilities::XTERM
+      tty.leave
 
       expect(output.to_s).to eq "\e[?1049h\e[?1049l"
       expect(tty.alternate?).to be_false
@@ -1308,7 +1349,7 @@ Spectator.describe TermBuf::Tty do
 
       tty.enter_alternate TermBuf::Capabilities::XTERM
       tty.enter TermBuf::Capabilities::XTERM
-      tty.leave TermBuf::Capabilities::XTERM
+      tty.leave
       written = output.to_s
 
       expect(written.scan("\e[?1049h").size).to eq 1
@@ -1323,7 +1364,7 @@ Spectator.describe TermBuf::Tty do
       tty = TermBuf::Tty.new IO::Memory.new, output, managed: false
 
       tty.enter_alternate TermBuf::Capabilities::XTERM
-      tty.leave TermBuf::Capabilities::NONE
+      tty.leave
 
       expect(output.to_s).to contain "\e[?1049l"
     end
@@ -1332,7 +1373,7 @@ Spectator.describe TermBuf::Tty do
   it "writes nothing when leaving a terminal it never entered" do
     output = IO::Memory.new
     tty = TermBuf::Tty.new IO::Memory.new, output, managed: false
-    tty.leave TermBuf::Capabilities::XTERM
+    tty.leave
 
     expect(output.to_s).to eq ""
   end
@@ -1342,7 +1383,7 @@ Spectator.describe TermBuf::Tty do
     tty = TermBuf::Tty.new IO::Memory.new, output, managed: false
 
     tty.enter TermBuf::Capabilities::XTERM
-    tty.leave TermBuf::Capabilities::XTERM
+    tty.leave
     written = output.to_s
 
     expect(written).to contain "\e[?1049h"

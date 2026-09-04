@@ -39,6 +39,15 @@ All notable changes to this project are documented here. The format follows
   wrong. The row still cannot line up on such a terminal — a cluster occupies a cell or a pair of
   them, and there is no third to put anything in — but it says so.
 
+- `Tty::Mode` and a registry of them on the tty: `Tty#enable`, `Tty#disable` and `Tty#modes`, with
+  `Terminal#enable` and `Terminal#disable` sending the change through the owning fibre so it cannot
+  land in the middle of a frame. `Tty::BRACKETED_PASTE`, `Tty::FOCUS_EVENTS`, `Tty::MOUSE_SGR` and
+  `Tty::KITTY_KEYBOARD` come with it. Registration is by name, so enabling a mode twice writes it
+  once — `KITTY_KEYBOARD` pushes onto a stack the terminal keeps, and a second push against one pop
+  leaves the keyboard changed after the program has gone. A mode enabled before the takeover is
+  recorded and goes out with it; leaving resets what is set, newest first, and keeps the
+  registrations, so taking the terminal back re-applies them.
+
 ### Changed
 
 - `Events::Resize` carries `previous`, the size being left, alongside the new one. An application
@@ -70,6 +79,11 @@ All notable changes to this project are documented here. The format follows
 - `examples/validate.cr`: the cursors page says what its two escape-sequence rows are for. They are
   the same string down two cursors, one scanning it into attributes and one printing the bytes; the
   labels `scanned` and `raw` conveyed neither.
+- `Tty#leave` no longer takes a capability set. Bracketed paste is on the mode registry now, so
+  leaving gives back what was actually set rather than what a capability set says should have been.
+  This is what a resume was missing: `Tty#enter` re-applies every registered mode, where before it
+  knew only about the modes written into it, and anything the application had turned on came back
+  from a suspend turned off.
 
 ## [0.2.1] - 2026-09-02
 

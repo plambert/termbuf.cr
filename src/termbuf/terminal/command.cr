@@ -1,5 +1,6 @@
 require "../core/buffer"
 require "../caps/screen_size"
+require "./tty"
 
 module TermBuf
   # Everything that mutates the buffer arrives as one of these.
@@ -48,6 +49,11 @@ module TermBuf
     # command is fire and forget, which is what the frame scheduler wants.
     record Paint, forced : Bool, reply : Channel(Exception?)?
 
+    # A terminal mode turned on or off, once the current frame is out. Like
+    # `SetColors` these move no cursor and set no attribute, so the encoder's
+    # idea of the screen survives them.
+    record Mode, mode : Tty::Mode, enabled : Bool
+
     # The window changed size.
     record Resize, size : ScreenSize
 
@@ -69,7 +75,7 @@ module TermBuf
   alias Command = Commands::Write | Commands::WriteChar | Commands::Fill |
                   Commands::Clear | Commands::Scroll | Commands::ScrollRegion |
                   Commands::Blit | Commands::Invalidate | Commands::Passthrough |
-                  Commands::SetColors | Commands::Paint |
+                  Commands::SetColors | Commands::Mode | Commands::Paint |
                   Commands::Resize | Commands::Apply | Commands::Batch |
                   Commands::Stop
 
@@ -202,8 +208,8 @@ module TermBuf
       in Commands::ScrollRegion then buffer.scroll_region command.region, command.lines, command.style
       in Commands::Blit         then buffer.blit command.source, command.x, command.y, command.from
       in Commands::Invalidate   then buffer.invalidate
-      in Commands::Passthrough, Commands::SetColors, Commands::Paint, Commands::Resize,
-         Commands::Apply, Commands::Batch, Commands::Stop
+      in Commands::Passthrough, Commands::SetColors, Commands::Mode, Commands::Paint,
+         Commands::Resize, Commands::Apply, Commands::Batch, Commands::Stop
         return false
       end
 

@@ -617,6 +617,29 @@ module TermBuf
       @scheduling
     end
 
+    # --------------------------------------------------------- terminal modes
+
+    # Turns *mode* on, and keeps it on across a suspend and resume.
+    #
+    # See `Tty::Mode` for what a mode is and `Tty#enable` for what enabling one
+    # twice does. Before `#start` the mode is only recorded, and goes out with
+    # the rest of the takeover; afterwards it goes through the owning fibre,
+    # since writing to the device from anywhere else would land in the middle
+    # of a frame.
+    def enable(mode : Tty::Mode) : Nil
+      return @tty.enable mode unless @started
+
+      issue Commands::Mode.new(mode, true)
+    end
+
+    # Turns *mode* off and forgets it, so a later takeover does not bring it
+    # back. A mode that was never enabled is nothing to turn off.
+    def disable(mode : Tty::Mode) : Nil
+      return @tty.disable mode unless @started
+
+      issue Commands::Mode.new(mode, false)
+    end
+
     # ------------------------------------------------------------- lifecycle
 
     # Restores the terminal and stops. Safe to call more than once, and safe to
@@ -658,7 +681,7 @@ module TermBuf
         @tty.flush rescue nil
       end
 
-      @tty.leave @capabilities
+      @tty.leave
     end
 
     # --------------------------------------------------------------- running
@@ -683,6 +706,7 @@ module TermBuf
       case command
       in Commands::Passthrough then write_through command.bytes
       in Commands::SetColors   then write_colors command.bytes
+      in Commands::Mode        then write_mode command
       in Commands::Paint       then perform_paint command
       in Commands::Resize      then perform_resize command.size
       in Commands::Apply       then perform_apply command
@@ -948,6 +972,16 @@ module TermBuf
       command.reply.try &.send nil
     rescue error
       command.reply.try &.send error
+    end
+
+    # As with a colour change, turning a mode on or off moves no cursor and
+    # sets no attribute, so the encoder's idea of the screen survives it.
+    private def write_mode(command : Commands::Mode) : Nil
+      if command.enabled
+        @tty.enable command.mode
+      else
+        @tty.disable command.mode
+      end
     end
 
     # A colour change moves no cursor and sets no attribute, so unlike a

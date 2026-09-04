@@ -36,6 +36,42 @@ module TermBuf
     # capability set settled afterwards says should have been.
     getter? alternate : Bool = false
 
+    # A terminal mode that can be turned on and off, and the sequences that do
+    # it.
+    #
+    # The *name* is what identity means here, not the sequences: turning the
+    # same mode on twice must not send its set sequence twice. `KITTY_KEYBOARD`
+    # pushes onto a stack the terminal itself keeps, so a second push against
+    # the one pop that `#leave` sends would leave the keyboard changed after
+    # the program has gone.
+    record Mode, name : String, set : String, reset : String
+
+    # Pasted text arrives marked as pasted, rather than as a very fast typist
+    # triggering every key binding on the way past.
+    BRACKETED_PASTE = Mode.new "bracketed-paste", "\e[?2004h", "\e[?2004l"
+
+    # The terminal reports the window gaining and losing focus.
+    FOCUS_EVENTS = Mode.new "focus-events", "\e[?1004h", "\e[?1004l"
+
+    # Mouse button reporting in the SGR encoding, which is the one that can
+    # name a column past 223. Both are asked for together, and given back in
+    # the reverse order.
+    MOUSE_SGR = Mode.new "mouse-sgr", "\e[?1000h\e[?1006h", "\e[?1006l\e[?1000l"
+
+    # The kitty keyboard protocol, which tells apart keystrokes an ordinary
+    # terminal reports identically. This pushes a flag set onto the terminal's
+    # own stack and the reset pops it.
+    KITTY_KEYBOARD = Mode.new "kitty-keyboard", "\e[>1u", "\e[<u"
+
+    # Every mode registered on this terminal, in the order it was enabled.
+    # `#leave` resets them in the reverse of that order.
+    getter modes = [] of Mode
+
+    # The names of the modes currently set on the device, which is not always
+    # every registered one: a mode enabled before `#enter` is recorded and only
+    # written when the takeover happens.
+    @applied = Set(String).new
+
     # Crystal's bindings carry `VMIN` but not `VTIME` on every platform, so the
     # index is filled in here when it is missing.
     {% if LibC.has_constant?(:VTIME) %}
@@ -127,25 +163,26 @@ module TermBuf
     #
     # *capabilities* decides which of the optional modes are worth asking for;
     # asking a terminal to enable something it does not have leaves the request
-    # printed on screen.
+    # printed on screen. Bracketed paste is registered here, and every mode
+    # registered by `#enable` is written now, which is what makes taking the
+    # terminal back after a suspend put the modes back too.
     def enter(capabilities : Capabilities = Capabilities::NONE) : Nil
       return if @entered
 
       raw!
       enter_alternate capabilities
-      # Bracketed paste, so that pasted text arrives marked as pasted rather
-      # than as a very fast typist triggering every key binding on the way past.
-      @output << "\e[?2004h" if capabilities.includes? Capability::BracketedPaste
+      register BRACKETED_PASTE if capabilities.includes? Capability::BracketedPaste
+      @entered = true
+      apply_modes
       @output << "\e[?25l"
       @output << "\e[2J\e[H"
       @output.flush
-      @entered = true
     end
 
     # Gives the terminal back exactly as it was found. Safe to call twice, and
     # safe to call when `#enter` never ran, which is what makes it usable from
     # a signal handler and from `at_exit`.
-    def leave(capabilities : Capabilities = Capabilities::NONE) : Nil
+    def leave : Nil
       taken = @entered
       alternate = @alternate
       @entered = false
@@ -153,7 +190,7 @@ module TermBuf
 
       if taken || alternate
         @output << "\e[?25h" if taken
-        @output << "\e[?2004l" if taken && capabilities.includes? Capability::BracketedPaste
+        reset_modes
         @output << "\e[?1049l" if alternate
         @output << "\e[0m" if taken
         @output.flush
@@ -173,6 +210,73 @@ module TermBuf
     # Pushes whatever is buffered out to the device.
     def flush : Nil
       @output.flush
+    end
+
+    # ---------------------------------------------------- terminal modes
+
+    # Turns *mode* on: now if the terminal has been taken over, and at `#enter`
+    # if it has not.
+    #
+    # Registration is by name, so enabling the same mode twice registers it
+    # once and writes it once. That is not tidiness. `KITTY_KEYBOARD` pushes
+    # onto a stack the terminal keeps, and a second push against the single pop
+    # `#leave` sends leaves the keyboard changed after the program has gone.
+    def enable(mode : Mode) : Nil
+      register mode
+      return unless @entered
+      return if @applied.includes? mode.name
+
+      @output << mode.set
+      @output.flush
+      @applied << mode.name
+    end
+
+    # Turns *mode* off and forgets it, so a later `#enter` does not bring it
+    # back. A mode that was never enabled is nothing to turn off.
+    def disable(mode : Mode) : Nil
+      index = @modes.index { |registered| registered.name == mode.name }
+      return unless index
+
+      registered = @modes.delete_at index
+      return unless @applied.delete registered.name
+
+      @output << registered.reset
+      @output.flush
+    end
+
+    # Records *mode*, replacing a registration of the same name where it
+    # stands, so that the order the resets go out in does not depend on how
+    # many times a mode was enabled.
+    private def register(mode : Mode) : Nil
+      index = @modes.index { |registered| registered.name == mode.name }
+
+      if index
+        @modes[index] = mode
+      else
+        @modes << mode
+      end
+    end
+
+    # Writes every registered mode that is not on the device yet.
+    private def apply_modes : Nil
+      @modes.each do |mode|
+        next if @applied.includes? mode.name
+
+        @output << mode.set
+        @applied << mode.name
+      end
+    end
+
+    # Gives back every mode that is on the device, newest first, since a mode
+    # enabled after another may depend on it.
+    private def reset_modes : Nil
+      @modes.reverse_each do |mode|
+        next unless @applied.includes? mode.name
+
+        @output << mode.reset
+      end
+
+      @applied.clear
     end
 
     # ------------------------------------------------------------- modes
