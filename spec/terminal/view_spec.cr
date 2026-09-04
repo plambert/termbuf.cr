@@ -47,6 +47,40 @@ Spectator.describe TermBuf::View do
     end
   end
 
+  describe "#local" do
+    it "turns a screen cell into the view's own coordinates" do
+      with_screen do |screen, _|
+        panel = screen.view Rect.new(3, 1, 6, 3)
+
+        expect(panel.local(3, 1)).to eq({0, 0})
+        expect(panel.local(8, 3)).to eq({5, 2})
+      end
+    end
+
+    it "answers nothing for a cell outside the view" do
+      with_screen do |screen, _|
+        panel = screen.view Rect.new(3, 1, 6, 3)
+
+        expect(panel.local(2, 1)).to be_nil
+        expect(panel.local(9, 1)).to be_nil
+        expect(panel.local(3, 0)).to be_nil
+        expect(panel.local(3, 4)).to be_nil
+      end
+    end
+
+    it "measures from the innermost view through a nest" do
+      with_screen do |screen, _|
+        panel = screen.view Rect.new(2, 1, 8, 3)
+        inner = panel.view Rect.new(1, 1, 4, 1)
+
+        expect(inner.local(3, 2)).to eq({0, 0})
+        expect(inner.local(6, 2)).to eq({3, 0})
+        expect(inner.local(7, 2)).to be_nil
+        expect(inner.local(3, 1)).to be_nil
+      end
+    end
+  end
+
   describe "clipping a write" do
     it "cuts what runs past the right edge" do
       with_screen do |screen, buffer|

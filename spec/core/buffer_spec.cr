@@ -2,6 +2,11 @@ require "../spec_helper"
 
 private RED = TermBuf::Style::DEFAULT.fg TermBuf::Color::RED
 
+# A terminal that charges a column for a conjunct's spacing vowel sign, which
+# is what makes `क्षि` three cells wide rather than two.
+private WIDE_CONJUNCT_POLICY =
+  TermBuf::Unicode::WidthPolicy::DEFAULT.with "conjunct_spacing_adds", true
+
 Spectator.describe TermBuf::Region do
   it "keeps nothing when its capacity is zero" do
     region = TermBuf::Region.new TermBuf::Rect.new(0, 0, 4, 2)
@@ -327,6 +332,68 @@ Spectator.describe TermBuf::Buffer do
 
       expect(background_at(buffer, 2, 0)).to eq TermBuf::Color::GREEN
       expect(background_at(buffer, 5, 0)).to eq TermBuf::Color::GREEN
+    end
+  end
+
+  describe "#hit" do
+    it "answers the cell asked about when it leads nothing" do
+      buffer.write 1, 1, "a"
+      hit = buffer.hit 1, 1
+
+      expect(hit.try(&.x)).to eq 1
+      expect(hit.try(&.y)).to eq 1
+      expect(hit.try(&.lead)).to be_true
+      expect(hit.try(&.text)).to eq "a"
+    end
+
+    it "answers the lead of a wide cluster asked about at its own column" do
+      buffer.write 2, 0, "漢"
+      hit = buffer.hit 2, 0
+
+      expect(hit.try(&.x)).to eq 2
+      expect(hit.try(&.lead)).to be_true
+      expect(hit.try(&.cell.width)).to eq 2
+      expect(hit.try(&.text)).to eq "漢"
+    end
+
+    it "walks a continuation back to the lead it belongs to" do
+      buffer.write 2, 0, "漢"
+      hit = buffer.hit 3, 0
+
+      expect(hit.try(&.x)).to eq 2
+      expect(hit.try(&.y)).to eq 0
+      expect(hit.try(&.lead)).to be_false
+      expect(hit.try(&.text)).to eq "漢"
+    end
+
+    # A conjunct carrying a spacing vowel sign is three cells wide on a
+    # terminal that charges for the sign, so its last column is two away from
+    # the lead rather than one.
+    it "walks the last column of a three cell cluster back to its lead" do
+      buffer.policy = WIDE_CONJUNCT_POLICY
+      expect(buffer.write(1, 0, "क्षि")).to eq 3
+
+      hit = buffer.hit 3, 0
+
+      expect(hit.try(&.x)).to eq 1
+      expect(hit.try(&.lead)).to be_false
+      expect(hit.try(&.cell.width)).to eq 3
+      expect(hit.try(&.text)).to eq "क्षि"
+    end
+
+    it "answers a blank cell with the blank it holds" do
+      hit = buffer.hit 0, 0
+
+      expect(hit.try(&.lead)).to be_true
+      expect(hit.try(&.text)).to eq " "
+      expect(hit.try(&.cell.blank?)).to be_true
+    end
+
+    it "answers nothing off the grid" do
+      expect(buffer.hit(-1, 0)).to be_nil
+      expect(buffer.hit(8, 0)).to be_nil
+      expect(buffer.hit(0, -1)).to be_nil
+      expect(buffer.hit(0, 4)).to be_nil
     end
   end
 

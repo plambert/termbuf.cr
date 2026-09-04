@@ -109,6 +109,16 @@ All notable changes to this project are documented here. The format follows
   sleep that has already finished, so the nonce is checked again when the tick is taken off the
   channel and one that raced is dropped. `Input::Timers` is the mechanism, usable on its own, and
   the decoder's escape and paste deadlines now ride it like any other timer.
+- `Buffer#hit(x, y)`, answering what sits at one cell as a `Buffer::Hit` — the lead cell's column
+  and row, the cell, the cluster's text, and whether the position asked about was the lead itself.
+  A continuation resolves to the cluster it belongs to, so a click on the right half of a CJK glyph
+  reports the glyph rather than half of one, and off the grid answers nothing. `Terminal#hit` runs
+  the same read through `#sync`, so it sees the buffer between frames rather than part way through
+  one.
+- `View#local(x, y)`, turning a screen cell into a view's own coordinates, or nothing when the cell
+  falls outside it. Measured from the view's absolute origin, so a nest costs one call rather than
+  one per level. Coordinates are 0-based buffer cells throughout; an SGR mouse report numbers its
+  own from one, and converting that belongs to the mouse decoder.
 
 ### Changed
 

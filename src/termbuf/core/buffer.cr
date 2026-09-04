@@ -398,5 +398,50 @@ module TermBuf
     def to_text : String
       @back.to_text @clusters
     end
+
+    # ---------------------------------------------------------------- reading
+
+    # What one cell holds, as `Buffer#hit` answers it.
+    #
+    # A hit always names the cluster's *lead*: ask about the right half of a
+    # wide character and `x` comes back as the left half's column, with `lead`
+    # false to say the question was not asked there. That is what a click on a
+    # CJK glyph wants — the glyph, not the half of it under the pointer.
+    record Hit,
+      # The lead cell's column, which is not the column asked about when the
+      # cell there continues a cluster.
+      x : Int32,
+      # The row, which is the row asked about.
+      y : Int32,
+      # Whether the position asked about was the lead itself.
+      lead : Bool,
+      # The lead cell.
+      cell : Cell,
+      # The cluster's text, `" "` for a blank cell.
+      text : String
+
+    # What sits at (*x*, *y*), or `nil` when that is off the grid.
+    #
+    # A continuation resolves to the cluster it belongs to, so the hit's `x`
+    # can be to the left of the column asked about and `Hit#lead` says whether
+    # it moved. Read from the back grid: what the application has drawn, which
+    # is what it wants to reason about, rather than what the terminal is
+    # believed to be showing.
+    #
+    #     hit = buffer.hit column, row
+    #     puts hit.text if hit
+    #
+    # Coordinates are 0-based buffer cells. An SGR mouse report is 1-based and
+    # carries its own columns; converting one is the mouse decoder's job, not
+    # this method's. Turning a hit into an index within a line editor's text
+    # belongs to whoever owns that text, which is the widget shard.
+    def hit(x : Int32, y : Int32) : Hit?
+      return unless @back.contains? x, y
+
+      column = @back.lead_of x, y
+      cell = @back[column, y]
+
+      Hit.new column, y, column == x, cell, cell.text(@clusters)
+    end
   end
 end

@@ -495,6 +495,25 @@ module TermBuf
       @buffer.link uri, id
     end
 
+    # Yields what sits at the buffer cell (*x*, *y*), or `nil` when that is off
+    # the screen. See `Buffer#hit`.
+    #
+    # The read goes through `#sync`, so it sees the buffer between frames
+    # rather than part way through one, and the block runs on the fibre that
+    # owns it — keep it short, since the frame after it is waiting.
+    #
+    #     terminal.hit column, row do |hit|
+    #       next unless hit
+    #       terminal.write 0, 0, "clicked #{hit.text}"
+    #     end
+    #
+    # Coordinates are 0-based buffer cells. An SGR mouse report numbers its
+    # columns and rows from one; subtracting that is the mouse decoder's job,
+    # not this method's.
+    def hit(x : Int32, y : Int32, &block : Buffer::Hit? ->) : Nil
+      sync { |buffer| block.call buffer.hit(x, y) }
+    end
+
     # Says that a reply beginning with *prefix* and ending with *terminator* is
     # expected, so it arrives as an `Events::Response` rather than as input.
     #

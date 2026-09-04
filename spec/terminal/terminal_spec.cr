@@ -368,6 +368,37 @@ Spectator.describe TermBuf::Terminal do
     end
   end
 
+  describe "#hit" do
+    it "yields what sits at a cell, read on the fibre that owns the buffer" do
+      with_harness do |harness|
+        harness.terminal.write 2, 1, "漢"
+
+        seen = nil.as(TermBuf::Buffer::Hit?)
+        harness.terminal.hit(3, 1) { |hit| seen = hit }
+
+        expect(seen.try(&.x)).to eq 2
+        expect(seen.try(&.y)).to eq 1
+        expect(seen.try(&.lead)).to be_false
+        expect(seen.try(&.text)).to eq "漢"
+      end
+    end
+
+    it "yields nothing for a cell off the screen" do
+      with_harness do |harness|
+        yielded = false
+        seen = nil.as(TermBuf::Buffer::Hit?)
+
+        harness.terminal.hit(99, 0) do |hit|
+          yielded = true
+          seen = hit
+        end
+
+        expect(yielded).to be_true
+        expect(seen).to be_nil
+      end
+    end
+  end
+
   describe "cursors" do
     it "puts what was streamed through one on the screen" do
       with_harness do |harness|

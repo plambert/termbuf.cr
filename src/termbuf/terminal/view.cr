@@ -120,6 +120,29 @@ module TermBuf
       @rect.height
     end
 
+    # Where the screen cell (*x*, *y*) falls in this view, or `nil` when it
+    # falls outside the view altogether.
+    #
+    # The inverse of what a draw call goes through: the buffer's coordinates in,
+    # the view's own out. Nesting is already accounted for, since the answer is
+    # measured from `#origin`, so a cell is turned into the innermost view's
+    # coordinates in one step rather than one per level.
+    #
+    #     if inside = panel.local(hit.x, hit.y)
+    #       column, row = inside
+    #     end
+    #
+    # Coordinates are 0-based cells on both sides. An SGR mouse report is
+    # 1-based; converting one is the mouse decoder's job, not this method's.
+    def local(x : Int32, y : Int32) : {Int32, Int32}?
+      origin_x, origin_y = @origin
+      column = x - origin_x
+      row = y - origin_y
+      return unless 0 <= column < @rect.width && 0 <= row < @rect.height
+
+      {column, row}
+    end
+
     # Trims *command* to the view and sends it on, or drops it when nothing of
     # it lands inside.
     def issue(command : Command) : Nil
