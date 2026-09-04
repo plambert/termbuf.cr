@@ -1,4 +1,4 @@
-require "../input/key"
+require "../input"
 require "./completion"
 require "./history"
 require "./line_buffer"

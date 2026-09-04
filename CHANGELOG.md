@@ -163,6 +163,17 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- The input side is now the [termbuf-input](https://github.com/plambert/termbuf-input.cr) shard: a
+  dependency rather than a directory. Every `TermBuf::Input::` name is unchanged and lives there,
+  `src/termbuf/input.cr` is a `require "termbuf-input"` and the short spellings, and
+  `TermBuf::Key`, `TermBuf::Modifiers`, `TermBuf::Decoder`, `TermBuf::Event` and every
+  `TermBuf::Events::` name stay aliases onto it, so nothing written against either spelling has to
+  change. `Events::Resize` stays on this side because it carries a `ScreenSize`. It is termbuf's
+  only dependency and it has none of its own. The constraint is `~> 0.1` and stays tight until
+  termbuf reaches 1.0: `shard.lock` is not committed, since a library's lock is the application's
+  to write, so the constraint is the only thing saying which versions are meant.
+  `spec/independence.cr` and the CI step that compiled it are gone — a shard boundary keeps the
+  input side honest better than a compile check did.
 - The input side is all under `TermBuf::Input` now: `Input::Key`, `Input::Modifiers`,
   `Input::Decoder`, `Input::Utf8`, and `Input::Event` with `Input::Events::Key`, `Paste`, `Pasting`,
   `Mouse`, `Response`, `Timer`, `Signal`, `Warning`, `Failure` and `Closed`. It requires nothing
@@ -172,8 +183,7 @@ All notable changes to this project are documented here. The format follows
   written against the old spelling changes. `Events::Resize` is the one that stayed on the terminal
   side, because it carries a `ScreenSize`; it includes `Input::Event` and arrives on the same
   channel as the rest. `Unicode.utf8_length` is copied as `Input::Utf8.length` so the decoder does
-  not drag the width and grapheme tables along with it, and CI compiles
-  `spec/independence.cr` and checks `crystal tool dependencies` to keep it that way.
+  not drag the width and grapheme tables along with it.
 - `Key#to_s` upper cases a control character only when it is an ASCII letter. `Ctrl+C` is the
   convention and `Ctrl+c` is not, but upper casing outside ASCII changed the key rather than how it
   was spelled, which left `Key.parse` no way back to it.

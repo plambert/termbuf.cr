@@ -14,9 +14,14 @@ description: |
   paint, and only the difference goes out, encoded against what that particular
   terminal turned out to be able to do.
 
-# None. Everything outside the standard library is a development dependency, so
-# depending on this shard pulls in nothing else.
-dependencies: {}
+# The input side: bytes and signals from a terminal turned into events. It was
+# part of this shard and is now its own, because reading a keyboard is useful
+# without a screen buffer attached. Nothing else outside the standard library
+# is needed.
+dependencies:
+  termbuf-input:
+    github: plambert/termbuf-input.cr
+    version: "~> 0.1"
 
 development_dependencies:
   spectator:

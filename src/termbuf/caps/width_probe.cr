@@ -1,5 +1,5 @@
 require "../unicode/grapheme"
-require "../input/scanner"
+require "../input"
 
 module TermBuf
   # Asks the terminal how wide it thinks a grapheme cluster is.

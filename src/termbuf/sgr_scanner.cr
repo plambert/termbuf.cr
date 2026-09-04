@@ -1,4 +1,4 @@
-require "./input/scanner"
+require "./input"
 require "./core/style"
 
 module TermBuf

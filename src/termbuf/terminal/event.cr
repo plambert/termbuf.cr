@@ -1,5 +1,5 @@
 require "../caps/screen_size"
-require "../input/event"
+require "../input"
 
 module TermBuf
   # What the terminal tells the application about, delivered over one channel.

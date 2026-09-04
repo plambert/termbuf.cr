@@ -34,6 +34,9 @@ dependencies:
     github: plambert/termbuf.cr
 ```
 
+That pulls in [termbuf-input](https://github.com/plambert/termbuf-input.cr), which is the input
+side and termbuf's only dependency.
+
 ## Usage
 
 ```crystal
@@ -288,11 +291,12 @@ end
 is taken over by then.
 
 The input side — the reader, the decoder, keys, mouse reports, timers, signals, and every event
-above except `Resize` — lives under `TermBuf::Input` and depends on nothing else in termbuf. It is
-headed for a `termbuf-input` shard of its own, so that a terminal library can use it rather than
-contain it. `TermBuf::Key` is `TermBuf::Input::Key`, `TermBuf::Events::Key` is
-`TermBuf::Input::Events::Key`, and so on: the short spellings are aliases and stay. `Resize` is the
-one that did not move, because it carries a `ScreenSize`.
+above except `Resize` — is the
+[termbuf-input](https://github.com/plambert/termbuf-input.cr) shard, which termbuf depends on and
+which depends on nothing outside the standard library. A program that only wants to read a keyboard
+can use it without a screen buffer attached. `TermBuf::Key` is `TermBuf::Input::Key`,
+`TermBuf::Events::Key` is `TermBuf::Input::Events::Key`, and so on: the short spellings are aliases
+and stay. `Resize` is the one event that did not move, because it carries a `ScreenSize`.
 
 ### Keys
 

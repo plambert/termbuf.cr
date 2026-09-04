@@ -1,6 +1,6 @@
 require "./caps/capability"
 require "./caps/quirk"
-require "./input/scanner"
+require "./input"
 require "./caps/environment"
 require "./caps/overrides"
 require "./caps/prober"

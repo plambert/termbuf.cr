@@ -3,7 +3,7 @@ require "base64"
 require "../image_store"
 require "./capability"
 require "./environment"
-require "../input/scanner"
+require "../input"
 
 module TermBuf
   # Asks the terminal what it can do, rather than guessing from its name.
