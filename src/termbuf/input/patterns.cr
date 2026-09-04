@@ -98,9 +98,12 @@ module TermBuf
         Sequence.new bytes, kind, String.new(bytes[offset..]), final_byte(kind, bytes)
       end
 
+      # :nodoc:
       # The byte that ended the sequence, for the kinds that end with one. A
-      # string sequence ends with `ST` or a bell, which names nothing.
-      private def self.final_byte(kind : Prefix, bytes : Bytes) : Char?
+      # string sequence ends with `ST` or a bell, which names nothing. Not
+      # `private`: `crystal docs` cannot parse a private class method with a
+      # return type.
+      def self.final_byte(kind : Prefix, bytes : Bytes) : Char?
         return if kind.string? || bytes.empty?
 
         last = bytes[-1]
