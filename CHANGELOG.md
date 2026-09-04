@@ -106,6 +106,12 @@ All notable changes to this project are documented here. The format follows
 - `Commands::SetColors` is now `Commands::Quiet`: bytes sent after the current frame that move no
   cursor and set no attribute, so the encoder's idea of the screen survives them. The colour stack
   and the clipboard both issue through it, and the name no longer claims one of them.
+- A grapheme cluster can occupy up to `Cell::MAX_WIDTH` columns rather than exactly one or two.
+  `Cell#wide?` is now any width above one, `Grid` gained `#lead_of` and `#extent` and places,
+  detaches, clips and resizes over a cluster's whole run of cells, `Buffer#blit` treats a cluster
+  the source rectangle only partly holds as an orphan whatever its width, and the painter snaps a
+  segment's end to the last column of the cluster leading there. `Buffer#fill` now refuses any fill
+  character wider than one column, where it named only two.
 
 - `Events::Resize` carries `previous`, the size being left, alongside the new one. An application
   that scales or scrolls to follow a resize needs to know which way the window went, and asking the

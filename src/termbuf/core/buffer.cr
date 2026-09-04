@@ -126,8 +126,8 @@ module TermBuf
     # ------------------------------------------------------------- writing
 
     # Writes a single character at (*x*, *y*). Returns the columns it consumed:
-    # zero if it is zero width, if it is a control character, or if it is wide
-    # and the right edge is one column away.
+    # zero if it is zero width, if it is a control character, or if it takes
+    # more columns than are left before the right edge.
     #
     # With a *blend*, the style placed is what it answers for the cell rather
     # than *style* itself. See `#write`.
@@ -151,7 +151,7 @@ module TermBuf
     # what is already there and *style* — text over something already painted,
     # a label across a progress bar, without the caller working out where the
     # bar's colours change. `Style::KEEP_BACKGROUND` is that blend. A cluster
-    # covering two cells takes the style its first half lands on.
+    # covering several cells takes the style its first one lands on.
     def write(x : Int32, y : Int32, text : String, style : Style = Style::DEFAULT,
               blend : Blend? = nil) : Int32
       return 0 unless @back.contains? x, y
@@ -212,7 +212,7 @@ module TermBuf
              blend : Blend? = nil) : Nil
       columns = Unicode.char_width char, @policy.ambiguous
       raise ArgumentError.new "cannot fill with a zero width character" if columns.zero?
-      raise ArgumentError.new "cannot fill with a wide character" if columns == 2
+      raise ArgumentError.new "cannot fill with a wide character" if columns > 1
 
       return fill_blended rect, char, style, blend if blend
 
@@ -286,8 +286,8 @@ module TermBuf
     # than remeasured, so a panel keeps the layout it was drawn with even if
     # the two buffers measure clusters differently.
     #
-    # A wide character with only one half inside the copied rectangle arrives
-    # as a blank, since half of one cannot be drawn.
+    # A cluster only partly inside the copied rectangle arrives as a blank,
+    # since part of one cannot be drawn.
     def blit(source : Buffer, x : Int32, y : Int32, from : Rect? = nil) : Nil
       taken = (from || source.bounds).intersect source.bounds
       return if taken.empty?
@@ -309,12 +309,11 @@ module TermBuf
 
       styles = {} of StyleId => StyleId
       clusters = {} of UInt32 => UInt32
-      last = placed.width - 1
 
       placed.height.times do |row|
         placed.width.times do |column|
           cell = source.back[taken.x + column, taken.y + row]
-          cell = if orphan? cell, column, last
+          cell = if orphan? source.back, taken, taken.x + column, taken.y + row
                    blank
                  else
                    adopt cell, source, styles, clusters
@@ -325,11 +324,13 @@ module TermBuf
       end
     end
 
-    # Whether only one half of a wide character was taken: a continuation at
-    # the left edge lost its lead, and a lead at the right edge loses its
-    # continuation.
-    private def orphan?(cell : Cell, column : Int32, last : Int32) : Bool
-      (column.zero? && cell.continuation?) || (column == last && cell.wide?)
+    # Whether the cell at (*x*, *y*) belongs to a cluster the rectangle *taken*
+    # does not hold all of: a continuation whose lead was cut off the left, or
+    # a lead whose continuations were cut off the right.
+    private def orphan?(grid : Grid, taken : Rect, x : Int32, y : Int32) : Bool
+      span = grid.extent x, y
+
+      span.begin < taken.x || span.end > taken.right
     end
 
     # The same cell, with its style and cluster interned here instead. Both

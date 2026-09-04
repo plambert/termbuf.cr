@@ -187,10 +187,10 @@ module TermBuf
       return unless 0 <= x < @rect.width
       return unless 0 <= command.y < @rect.height
 
-      # A wide character needs both its cells inside, the same rule the grid
-      # applies at the screen edge.
+      # A character takes all its cells inside the view or none of them, the
+      # same rule the grid applies at the screen edge.
       columns = Unicode.char_width command.char, @policy.ambiguous
-      return if columns == 2 && x + 1 >= @rect.width
+      return if x + columns > @rect.width
 
       @target.issue Commands::WriteChar.new(@rect.x + x, @rect.y + command.y,
         command.char, styled(command.style), mixed(command.blend))

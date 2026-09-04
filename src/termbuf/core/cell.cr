@@ -6,9 +6,10 @@ module TermBuf
   # Sixteen bytes, fixed size, with no reference to anything on the heap, so a
   # `Grid` is one flat `Slice(Cell)` and a row is a `Slice` view into it.
   #
-  # A wide character occupies two cells: the first carries the character with
-  # `width` two, and the second is a continuation with `width` zero. Neither
-  # half is ever written without the other; `Grid` enforces that.
+  # A cluster wider than a column occupies several cells: the first carries the
+  # character with `width` set to how many columns it takes, and the rest are
+  # continuations with `width` zero. No part of one is ever written without the
+  # others; `Grid` enforces that.
   struct Cell
     # The most columns one grapheme cluster may occupy: a lead and up to three
     # continuations.
@@ -34,7 +35,8 @@ module TermBuf
     getter style : StyleId
 
     # Cells this character occupies: zero for a continuation, one for a narrow
-    # character, two for a wide one.
+    # character, and up to `MAX_WIDTH` for a cluster the terminal advances
+    # further for.
     getter width : UInt8
 
     def initialize(@char : Char,
@@ -49,19 +51,19 @@ module TermBuf
       new ' ', style, 1_u8
     end
 
-    # The second half of a wide character.
+    # A cell continuing the cluster to its left.
     def self.continuation(style : StyleId = StyleTable::DEFAULT) : Cell
       new '\0', style, 0_u8
     end
 
-    # Whether this is the right half of a wide character.
+    # Whether this cell continues the cluster to its left.
     def continuation? : Bool
       @width.zero?
     end
 
-    # Whether this is the left half of a wide character.
+    # Whether this cell leads a cluster taking more than its own column.
     def wide? : Bool
-      @width == 2
+      @width > 1
     end
 
     # Whether this cell's glyph may paint outside the columns it was given.
@@ -97,7 +99,7 @@ module TermBuf
       else
         io << "Cell(" << @char.inspect << ", style=" << @style
         io << ", cluster=" << @cluster unless @cluster == ClusterPool::NONE
-        io << ", wide" if wide?
+        io << ", width=" << @width if wide?
         io << ')'
       end
     end

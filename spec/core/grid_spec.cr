@@ -4,6 +4,13 @@ private def wide_cell(style : TermBuf::StyleId = 0_u32) : TermBuf::Cell
   TermBuf::Cell.new '漢', style, 2_u8
 end
 
+# A Devanagari conjunct carrying a spacing vowel sign, which iTerm2 3.6.11
+# advances three columns for. The cluster id is not resolved anywhere here, so
+# any of them will do.
+private def triple_cell(style : TermBuf::StyleId = 0_u32) : TermBuf::Cell
+  TermBuf::Cell.new 'क', style, 3_u8, 1_u32
+end
+
 Spectator.describe TermBuf::Rect do
   it "reports its far edges" do
     rect = TermBuf::Rect.new 2, 3, 4, 5
@@ -165,6 +172,19 @@ Spectator.describe TermBuf::Grid do
       expect(grid.damage.dirty?).to be_false
     end
 
+    it "writes a three column cluster into a cell and two continuations" do
+      expect(grid.place(1, 0, triple_cell)).to eq 3
+      expect(grid[1, 0].width).to eq 3
+      expect(grid[2, 0].continuation?).to be_true
+      expect(grid[3, 0].continuation?).to be_true
+      expect(grid[4, 0]).to eq TermBuf::Cell.blank
+    end
+
+    it "refuses a three column cluster with only two columns left" do
+      expect(grid.place(4, 0, triple_cell)).to eq 0
+      expect(grid.damage.dirty?).to be_false
+    end
+
     it "refuses a zero width cell" do
       expect(grid.place(0, 0, TermBuf::Cell.continuation)).to eq 0
     end
@@ -212,6 +232,24 @@ Spectator.describe TermBuf::Grid do
 
       expect(grid[1, 0]).to eq TermBuf::Cell.blank(3_u32)
       expect(grid[2, 0].char).to eq 'x'
+    end
+
+    it "blanks all three cells when the last continuation is overwritten" do
+      grid.place 1, 0, triple_cell
+      grid.place 3, 0, TermBuf::Cell.new('a')
+
+      expect(grid[1, 0]).to eq TermBuf::Cell.blank
+      expect(grid[2, 0]).to eq TermBuf::Cell.blank
+      expect(grid[3, 0].char).to eq 'a'
+    end
+
+    it "reports the lead and the extent of a cluster from any of its cells" do
+      grid.place 1, 0, triple_cell
+
+      expect(grid.lead_of(3, 0)).to eq 1
+      expect(grid.extent(3, 0)).to eq 1..3
+      expect(grid.lead_of(0, 0)).to eq 0
+      expect(grid.extent(0, 0)).to eq 0..0
     end
 
     it "never leaves a continuation without its lead" do
@@ -404,6 +442,16 @@ Spectator.describe TermBuf::Grid do
       grid.place 3, 0, wide_cell
       grid.resize 4, 3
 
+      expect(grid[3, 0]).to eq TermBuf::Cell.blank
+    end
+
+    # The lead is two columns in from the new edge, so a rule that only looked
+    # at the last column would keep a cluster with a continuation missing.
+    it "drops a three column cluster reaching past the new right edge" do
+      grid.place 2, 0, triple_cell
+      grid.resize 4, 3
+
+      expect(grid[2, 0]).to eq TermBuf::Cell.blank
       expect(grid[3, 0]).to eq TermBuf::Cell.blank
     end
 

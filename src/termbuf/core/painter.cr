@@ -324,10 +324,10 @@ module TermBuf
       cost
     end
 
-    # Widens each segment so that it never begins on the second half of a wide
-    # character or ends on the first, then merges any that now touch. Writing
-    # half a wide character would leave the terminal's cursor and the buffer's
-    # idea of it in different places.
+    # Widens each segment so that it never begins on a continuation or ends
+    # partway through a cluster, then merges any that now touch. Writing part
+    # of a cluster would leave the terminal's cursor and the buffer's idea of
+    # it in different places.
     private def merge_snapped(back : Grid, row : Int32,
                               segments : Array(Segment)) : Array(Segment)
       merged = [] of Segment
@@ -359,9 +359,12 @@ module TermBuf
       merged
     end
 
-    # *to*, moved off the first half of a wide character.
+    # *to*, moved to the last column of the cluster that leads there.
     private def snapped_end(back : Grid, row : Int32, to : Int32) : Int32
-      back[to, row].wide? && to + 1 < back.width ? to + 1 : to
+      columns = back[to, row].width.to_i
+      return to if columns <= 1
+
+      Math.min to + columns - 1, back.width - 1
     end
 
     # Where a trailing erase should start and the style to erase in, or `nil`
@@ -431,8 +434,8 @@ module TermBuf
       end
     end
 
-    # The text of a run. Segments are snapped to whole characters, so every
-    # continuation cell here belongs to a wide character already written.
+    # The text of a run. Segments are snapped to whole clusters, so every
+    # continuation cell here belongs to a cluster already written.
     private def run_text(buffer : Buffer, row : Int32, from : Int32, to : Int32) : String
       back = buffer.back
       pool = buffer.clusters

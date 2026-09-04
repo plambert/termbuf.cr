@@ -10,9 +10,9 @@ module TermBuf
   # row, recomputed lazily, which is what lets the painter recognise a scrolled
   # band without comparing cells.
   #
-  # The grid is the only place that knows a wide character occupies two cells,
-  # and it never lets those two get out of step: writing to either half blanks
-  # both first.
+  # The grid is the only place that knows a cluster can occupy more than one
+  # cell, and it never lets those cells get out of step: writing to any of them
+  # blanks all of them first.
   class Grid
     # Columns across.
     getter width : Int32
@@ -83,44 +83,62 @@ module TermBuf
       @cells[y * @width + rect.x, rect.width]
     end
 
-    # Places *cell* at (*x*, *y*), blanking the other half of any wide
-    # character it displaces. Returns the columns consumed, or zero when a wide
-    # character will not fit before the right edge and nothing was written.
+    # The column the cluster covering (*x*, *y*) begins at, which is *x* itself
+    # unless that cell is a continuation. Off the grid, *x*.
+    def lead_of(x : Int32, y : Int32) : Int32
+      return x unless contains? x, y
+
+      column = x
+      while column > 0 && self[column, y].continuation?
+        column -= 1
+      end
+
+      column
+    end
+
+    # The columns the cluster covering (*x*, *y*) occupies. A cell that leads
+    # nothing covers itself alone, and so does a continuation at the left edge
+    # with no lead left to walk to.
+    def extent(x : Int32, y : Int32) : Range(Int32, Int32)
+      lead = lead_of x, y
+      span = Math.max self[lead, y].width.to_i, 1
+
+      lead..(lead + span - 1)
+    end
+
+    # Places *cell* at (*x*, *y*), blanking every cell of any cluster it
+    # displaces. Returns the columns consumed, or zero when the cluster will
+    # not fit before the right edge and nothing was written.
     def place(x : Int32, y : Int32, cell : Cell, blank : Cell = Cell.blank) : Int32
       return 0 unless contains? x, y
 
       columns = cell.width.to_i
       return 0 if columns.zero?
-      return 0 if columns == 2 && x + 1 >= @width
+      return 0 if x + columns > @width
 
-      detach x, y, blank
-      detach x + 1, y, blank if columns == 2
+      columns.times { |offset| detach x + offset, y, blank }
 
       self[x, y] = cell
-      self[x + 1, y] = Cell.continuation cell.style if columns == 2
+      (1...columns).each { |offset| self[x + offset, y] = Cell.continuation cell.style }
 
       columns
     end
 
-    # Blanks both halves of the wide character overlapping column *x*, if one
-    # does. A cell that is neither half of a pair is left alone.
+    # Blanks every cell of the cluster overlapping column *x*, if one covers
+    # more than that column. A cell that leads nothing is left alone.
     #
-    # Both halves take *blank*, which for `#place` is the style being written:
-    # a terminal erases what it displaces in whatever the current style is,
-    # having no memory of what the cell used to be, and this follows it. The
-    # rectangle operations want a different answer and use `#clip_wide`.
+    # Every cell of it takes *blank*, which for `#place` is the style being
+    # written: a terminal erases what it displaces in whatever the current
+    # style is, having no memory of what the cell used to be, and this follows
+    # it. The rectangle operations want a different answer and use
+    # `#clip_wide`.
     def detach(x : Int32, y : Int32, blank : Cell = Cell.blank) : Nil
       return unless contains? x, y
 
-      cell = self[x, y]
+      span = extent x, y
+      return if span.size == 1 && !self[x, y].continuation?
 
-      if cell.continuation?
-        self[x - 1, y] = blank if x > 0
-        self[x, y] = blank
-      elsif cell.wide?
-        self[x, y] = blank
-        self[x + 1, y] = blank if x + 1 < @width
-      end
+      span.each { |column| self[column, y] = blank }
     end
 
     # Sets every cell of *rect* to *cell*.
@@ -128,9 +146,9 @@ module TermBuf
       area = rect.intersect bounds
       return if area.empty?
 
-      # The half of a straddling wide character that lies *outside* the
-      # rectangle has to be blanked, not filled: it is not part of what the
-      # caller asked to paint.
+      # The part of a straddling cluster that lies *outside* the rectangle has
+      # to be blanked, not filled: it is not part of what the caller asked to
+      # paint.
       clip_wide area, Cell.blank(cell.style)
 
       area.each_row do |row_index|
@@ -177,38 +195,38 @@ module TermBuf
       scroll(rect, lines, blank) { }
     end
 
-    # Blanks any wide character straddling the left or right edge of *rect*, so
-    # that filling or scrolling the rectangle cannot tear one in half.
+    # Blanks any cluster straddling the left or right edge of *rect*, so that
+    # filling or scrolling the rectangle cannot tear one apart.
     #
-    # The half lying outside *rect* keeps the style it had and loses only its
-    # glyph. A rectangle operation has no business changing how a cell outside
-    # it looks, and giving that half the incoming style would paint the
-    # rectangle a column wider than it is — on the rows where a wide character
+    # The cells lying outside *rect* keep the style they had and lose only
+    # their share of the glyph. A rectangle operation has no business changing
+    # how a cell outside it looks, and giving those cells the incoming style
+    # would paint the rectangle wider than it is — on the rows where a cluster
     # happens to straddle, and not on the others.
     def clip_wide(rect : Rect, blank : Cell = Cell.blank) : Nil
       return if rect.empty?
 
       rect.each_row do |row_index|
-        detach_at_edge rect.x, row_index, blank if self[rect.x, row_index].continuation?
-        detach_at_edge rect.right, row_index, blank if self[rect.right, row_index].wide?
+        clip_edge rect, row_index, rect.x, blank
+        clip_edge rect, row_index, rect.right, blank
       end
     end
 
-    # Blanks the pair straddling an edge, splitting the difference: the half
-    # inside takes *blank*, since the caller is about to paint over it anyway,
-    # and the half outside keeps its own style.
+    # Blanks the cluster covering *column* when its extent leaves *rect*,
+    # splitting the difference: the cells inside take *blank*, since the caller
+    # is about to paint over them anyway, and the cells outside keep the style
+    # the cluster had.
     #
-    # A continuation carries its lead's style, so either half answers for both.
-    private def detach_at_edge(x : Int32, y : Int32, blank : Cell) : Nil
-      cell = self[x, y]
-      kept = Cell.blank cell.style
+    # A continuation carries its lead's style, so any cell of it answers for
+    # all of them.
+    private def clip_edge(rect : Rect, y : Int32, column : Int32, blank : Cell) : Nil
+      span = extent column, y
+      return if span.begin >= rect.x && span.end <= rect.right
 
-      if cell.continuation?
-        self[x - 1, y] = kept if x > 0
-        self[x, y] = blank
-      elsif cell.wide?
-        self[x, y] = blank
-        self[x + 1, y] = kept if x + 1 < @width
+      kept = Cell.blank self[span.begin, y].style
+
+      span.each do |current|
+        self[current, y] = rect.x <= current <= rect.right ? blank : kept
       end
     end
 
@@ -256,11 +274,17 @@ module TermBuf
       @hashed = Slice(Bool).new height, false
       @damage.resize height
 
-      # A wide character whose lead now sits in the last column lost its
-      # continuation to the narrower grid, so it has to go. A continuation in
-      # the last column is fine: its lead is still beside it.
+      # A cluster reaching past the new right edge lost continuations to the
+      # narrower grid, so it has to go. Only the last `Cell::MAX_WIDTH - 1`
+      # columns can hold such a lead; a continuation in any of them is fine,
+      # since its lead is still to its left.
+      first = Math.max width - Cell::MAX_WIDTH + 1, 0
+
       kept_height.times do |row_index|
-        detach width - 1, row_index, blank if self[width - 1, row_index].wide?
+        (first...width).each do |column|
+          cell = self[column, row_index]
+          detach column, row_index, blank if column + cell.width > width
+        end
       end
 
       @damage.touch_all width
