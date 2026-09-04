@@ -42,25 +42,27 @@ TermBuf::Terminal.open do |terminal|
     select
     when event = terminal.events.receive?
       case event
-      in TermBuf::Events::Key
+      when TermBuf::Events::Key
         break if event.key.is? 'q'
         seen << "key       #{event.key}  #{String.new(event.bytes).inspect}"
-      in TermBuf::Events::Paste
+      when TermBuf::Events::Paste
         seen << "paste     #{event.text.inspect}#{event.complete ? "" : "  (never closed)"}"
-      in TermBuf::Events::Pasting
+      when TermBuf::Events::Pasting
         seen << "pasting   #{event.bytes} bytes so far"
-      in TermBuf::Events::Response
+      when TermBuf::Events::Response
         seen << "response  #{String.new(event.bytes).inspect}"
-      in TermBuf::Events::Resize
+      when TermBuf::Events::Resize
         seen << "resize    #{event.size}"
-      in TermBuf::Events::Warning
+      when TermBuf::Events::Warning
         seen << "warning   #{event.message}"
-      in TermBuf::Events::Failure
+      when TermBuf::Events::Failure
         seen << "failure   #{event.error.message}"
-      in TermBuf::Events::Closed
+      when TermBuf::Events::Closed
         break
-      in Nil
+      when Nil
         break
+      else
+        seen << "event     #{event.class}"
       end
     when timeout 50.milliseconds
       # Nothing happened; the scheduler keeps the screen current.

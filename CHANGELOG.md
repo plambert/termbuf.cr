@@ -55,6 +55,12 @@ All notable changes to this project are documented here. The format follows
   terminal after the fact only ever gives the size it is already at. Constructing the event by hand
   takes the second argument.
 
+- `Event` is a marker module every event type includes rather than a closed union of the ones this
+  shard defines, so a shard with an event of its own can include it and send it down the same
+  channel. Channels, signatures and instance variables typed `Event` are unaffected. A module type
+  is open, so a `case` over events can no longer be exhaustive: the handlers in `Field`, and the
+  examples, take a `when`/`else` and an `else` that leaves an unrecognised event alone.
+
 - Kitty no longer claims `Capability::Overline` or `Capability::Conceal`. Measured against 0.48.2:
   SGR 53 leaves the text unmarked where SGR 4 underlines it, and SGR 8 leaves it visible. Kitty's
   own terminfo agrees, declaring `blink` and `smxx` and neither an overline nor `invis` — where

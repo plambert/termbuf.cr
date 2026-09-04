@@ -1211,16 +1211,17 @@ module Validate
 
     private def handle(event) : Nil
       case event
-      in Events::Key     then press event.key, event.bytes
-      in Events::Resize  then @rebuild = true
-      in Events::Closed  then @running = false
-      in Events::Failure then @running = false
-      in Events::Paste   then pasted event.text, event.complete
-      in Events::Pasting then arriving event.bytes
-      in Events::Response, Events::Warning
-        # Nothing here asks the terminal anything.
-      in Nil
+      when Events::Key     then press event.key, event.bytes
+      when Events::Resize  then @rebuild = true
+      when Events::Closed  then @running = false
+      when Events::Failure then @running = false
+      when Events::Paste   then pasted event.text, event.complete
+      when Events::Pasting then arriving event.bytes
+      when Nil
         @running = false
+      else
+        # Responses, warnings, and anything another shard defines: nothing
+        # here asks the terminal anything.
       end
     end
 

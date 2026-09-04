@@ -9,8 +9,8 @@ module TermBuf
   # fight whatever else was painting. So the decoder reports and this draws:
   # `Events::Pasting` opens it and `Events::Paste` closes it.
   #
-  #     in TermBuf::Events::Pasting then notice.arriving event.bytes
-  #     in TermBuf::Events::Paste   then notice.finished
+  #     when TermBuf::Events::Pasting then notice.arriving event.bytes
+  #     when TermBuf::Events::Paste   then notice.finished
   #
   # and `#draw` does nothing at all while nothing is arriving.
   class PasteNotice

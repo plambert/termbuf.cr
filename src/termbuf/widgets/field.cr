@@ -324,13 +324,15 @@ module TermBuf
       event = terminal.events.receive?
 
       case event
-      in Events::Key     then handle event.key
-      in Events::Paste   then finish_paste notice, event.text
-      in Events::Pasting then keep_waiting notice, event.bytes
-      in Events::Resize  then Editor::Outcome::Continue
-      in Events::Closed, Events::Failure, Nil
+      when Events::Key     then handle event.key
+      when Events::Paste   then finish_paste notice, event.text
+      when Events::Pasting then keep_waiting notice, event.bytes
+      when Events::Resize  then Editor::Outcome::Continue
+      when Events::Closed, Events::Failure, Nil
         Editor::Outcome::Ended
-      in Events::Response, Events::Warning
+      else
+        # A response, a warning, or an event another shard defined: none of
+        # them are input, so the field is left alone.
         Editor::Outcome::Continue
       end
     end
