@@ -132,6 +132,19 @@ All notable changes to this project are documented here. The format follows
   `Ctrl+Backspace` and `0x7F` as a bare `Backspace`, and a keyboard with both keys sends both bytes.
   Anything else — an empty description, an unknown name or modifier, a trailing `+`, more than one
   character that is not a name — is an `ArgumentError` that names what it could not read.
+- `Sink`, one output of a `Buffer`: the grid that terminal is believed to be showing, the damage it
+  has yet to paint, and the `Painter` and `Encoder` that get it there. `Buffer#attach` and
+  `#detach` take them on and let them go, and a buffer with two sinks drives two displays that
+  paint at different moments under different capability masks — a web terminal alongside the local
+  one, without a second buffer kept in step with the first. A sink attached to a buffer that
+  already holds content knows nothing about the screen and has to be invalidated before its first
+  paint.
+- `Grid#watch` and `#unwatch`, marking a `Damage` alongside the grid's own on every write. One sink
+  is one watcher: two outputs cannot share a record of what is left to draw, because one committing
+  would tell the other its rows are clean.
+- `ScrollHint#serial`, and `Buffer#scroll_hints_since`. Hints are a log rather than a queue now:
+  each sink remembers the serial it read up to and takes only what is newer, and the log is trimmed
+  to the oldest of those, so a hint survives until every sink has had it.
 
 ### Changed
 
@@ -196,6 +209,13 @@ All notable changes to this project are documented here. The format follows
   This is what a resume was missing: `Tty#enter` re-applies every registered mode, where before it
   knew only about the modes written into it, and anything the application had turned on came back
   from a suspend turned off.
+- `Painter#paint` now takes the sink to paint as well as the buffer, and holds nothing about which
+  screen it is diffing: the front grid, the damage and the scroll hints all come from that sink.
+  `Buffer#invalidate` fans out to every attached sink and `Buffer#resize` resizes their fronts and
+  encoders with the back grid.
+- `Terminal` paints through one `Sink` rather than owning a painter and an encoder directly.
+  `#clear_overhang=` and the composed-drift reporting address that sink; `#last_paint_bytes` and
+  `#total_paint_bytes` stay on the terminal, which is what writes the bytes.
 
 ### Removed
 
@@ -222,6 +242,9 @@ All notable changes to this project are documented here. The format follows
 - `ResponseScanner` is `Input::SequenceScanner` and lives in `src/termbuf/input/scanner.cr`. It was
   always the input decoder's as much as the capability probe's, and the probe is not where the
   splitting of a byte stream into escape sequences belongs.
+- `Buffer#front`, `#commit_paint`, `#painted?`, and `#take_scroll_hints`. The front grid belongs to
+  a sink, and so does committing one: `Sink#front`, `#commit`, `#painted?` and `#take_scroll_hints`
+  replace them. A buffer holds the cells an application drew and nothing about where they go.
 
 ### Removed
 

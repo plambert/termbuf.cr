@@ -508,18 +508,32 @@ TERMBUF_WIDTHS=-joined_emoji,-emoji_presentation
 
 ### The core layer
 
-`Buffer`, `Painter`, and `Encoder` work without a device attached, which is how they are tested:
+`Buffer` and `Sink` work without a device attached, which is how they are tested:
 
 ```crystal
 buffer = TermBuf::Buffer.new 80, 24
+sink = TermBuf::Sink.new buffer, TermBuf::Capabilities::XTERM
+
 buffer.write 0, 0, "hello", TermBuf::Style::DEFAULT.bold
 
-painter = TermBuf::Painter.new TermBuf::Capabilities::XTERM
-encoder = TermBuf::Encoder.new buffer.styles, TermBuf::Capabilities::XTERM, 80, 24
-
-encoder.encode painter.paint(buffer)  # => "\e[?7l\e[1;1H\e[0;1mhello\e[?7h"
-buffer.commit_paint
+sink.encoder.encode sink.paint  # => "\e[?7l\e[1;1H\e[0;1mhello\e[?7h"
+sink.commit
 ```
+
+The buffer holds the cells. A `Sink` holds one output of them: the grid that terminal is believed
+to be showing, the damage it has yet to paint, and the `Painter` and `Encoder` that turn the
+difference into bytes. Attach a second sink and the same buffer drives a second display, painted
+whenever that display asks and under whatever that terminal turned out to be able to do:
+
+```crystal
+web = TermBuf::Sink.new buffer, TermBuf::Capabilities::MODERN
+
+bytes = web.encoder.encode web.paint
+web.commit
+```
+
+A sink attached to a buffer that already holds content starts knowing nothing about the screen, so
+call `Sink#invalidate` before its first paint. Detach it with `Sink#detach` when the display goes.
 
 ## Hyperlinks, images, and the terminal's colours
 
