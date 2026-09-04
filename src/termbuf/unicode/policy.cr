@@ -50,13 +50,23 @@ module TermBuf::Unicode
     # The companion of `joined_emoji_wide`, and the same kind of question.
     getter? conjunct_wide : Bool
 
+    # Whether a spacing mark beside a conjunct adds a column on top of the two
+    # the conjunct already takes, rather than fitting inside them.
+    #
+    # `क्षि` is a conjunct with a vowel sign, and iTerm2 3.6.11 advances three
+    # columns for it where ghostty and Terminal.app advance two. Every other
+    # rule here tops out at a cell pair; this is the one reading that needs a
+    # third cell, and `Cell::MAX_WIDTH` is as far as any of them may go.
+    getter? conjunct_spacing_adds : Bool
+
     def initialize(@ambiguous : Int32 = 1,
                    @emoji_presentation : Bool = true,
                    @joined_emoji : Bool = true,
                    @joined_emoji_wide : Bool = true,
                    @regional_indicators : Bool = true,
                    @spacing_marks : Bool = true,
-                   @conjunct_wide : Bool = true)
+                   @conjunct_wide : Bool = true,
+                   @conjunct_spacing_adds : Bool = false)
       raise ArgumentError.new "ambiguous width #{@ambiguous} is not 1 or 2" unless @ambiguous.in? 1, 2
     end
 
@@ -69,9 +79,11 @@ module TermBuf::Unicode
                   joined_emoji_wide : Bool = @joined_emoji_wide,
                   regional_indicators : Bool = @regional_indicators,
                   spacing_marks : Bool = @spacing_marks,
-                  conjunct_wide : Bool = @conjunct_wide) : WidthPolicy
+                  conjunct_wide : Bool = @conjunct_wide,
+                  conjunct_spacing_adds : Bool = @conjunct_spacing_adds) : WidthPolicy
       WidthPolicy.new ambiguous, emoji_presentation, joined_emoji,
-        joined_emoji_wide, regional_indicators, spacing_marks, conjunct_wide
+        joined_emoji_wide, regional_indicators, spacing_marks, conjunct_wide,
+        conjunct_spacing_adds
     end
 
     # The flags by the names `TERMBUF_WIDTHS` uses.
@@ -84,14 +96,17 @@ module TermBuf::Unicode
       when "regional_indicators" then copy_with regional_indicators: enabled
       when "spacing_marks"       then copy_with spacing_marks: enabled
       when "conjunct_wide"       then copy_with conjunct_wide: enabled
-      else                            raise ArgumentError.new "unknown width rule #{name.inspect}"
+      when "conjunct_spacing_adds"
+        copy_with conjunct_spacing_adds: enabled
+      else
+        raise ArgumentError.new "unknown width rule #{name.inspect}"
       end
     end
 
     # Every rule by name, for diagnostics and for `TERMBUF_WIDTHS` to check
     # against.
     NAMES = %w[ambiguous_wide emoji_presentation joined_emoji joined_emoji_wide
-      regional_indicators spacing_marks conjunct_wide]
+      regional_indicators spacing_marks conjunct_wide conjunct_spacing_adds]
 
     def to_s(io : IO) : Nil
       io << "WidthPolicy(ambiguous=" << @ambiguous
@@ -107,14 +122,15 @@ module TermBuf::Unicode
     # though it is stored as a count.
     def enabled?(name : String) : Bool
       case name
-      when "ambiguous_wide"      then @ambiguous == 2
-      when "emoji_presentation"  then @emoji_presentation
-      when "joined_emoji"        then @joined_emoji
-      when "joined_emoji_wide"   then @joined_emoji_wide
-      when "regional_indicators" then @regional_indicators
-      when "spacing_marks"       then @spacing_marks
-      when "conjunct_wide"       then @conjunct_wide
-      else                            raise ArgumentError.new "unknown width rule #{name.inspect}"
+      when "ambiguous_wide"        then @ambiguous == 2
+      when "emoji_presentation"    then @emoji_presentation
+      when "joined_emoji"          then @joined_emoji
+      when "joined_emoji_wide"     then @joined_emoji_wide
+      when "regional_indicators"   then @regional_indicators
+      when "spacing_marks"         then @spacing_marks
+      when "conjunct_wide"         then @conjunct_wide
+      when "conjunct_spacing_adds" then @conjunct_spacing_adds
+      else                              raise ArgumentError.new "unknown width rule #{name.inspect}"
       end
     end
   end

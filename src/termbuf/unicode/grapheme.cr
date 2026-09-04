@@ -1,3 +1,4 @@
+require "../core/cell"
 require "./width"
 require "./policy"
 
@@ -20,7 +21,7 @@ module TermBuf::Unicode
     # Length of the cluster in bytes.
     getter bytesize : Int32
 
-    # Terminal cells the cluster occupies: zero, one, or two.
+    # Terminal cells the cluster occupies, from zero up to `Cell::MAX_WIDTH`.
     getter width : Int32
 
     # The cluster's only character, when it consists of a single code point.
@@ -231,8 +232,8 @@ module TermBuf::Unicode
         # The one kind of mark that takes a cell of its own. The Tamil vowel
         # sign of `நி` sits beside its consonant rather than over it, and a
         # terminal advances the cursor for it; the same goes for the vowel
-        # sign in a Devanagari conjunct. Two cells is as far as this goes,
-        # since a lead and one continuation is all a pair of cells can hold.
+        # sign in a Devanagari conjunct. How far that may push the cluster is
+        # `#spacing_cap`.
         @spacing += measure char
       end
 
@@ -275,7 +276,7 @@ module TermBuf::Unicode
 
     private def collapsed : Int32
       base = floor @base_width
-      base = Math.min base + @spacing, 2 if @policy.spacing_marks? && !base.zero?
+      base = Math.min base + @spacing, spacing_cap if @policy.spacing_marks? && !base.zero?
 
       case @presentation
       when EMOJI_PRESENTATION
@@ -286,6 +287,16 @@ module TermBuf::Unicode
       when TEXT_PRESENTATION then base.zero? ? 0 : 1
       else                        base
       end
+    end
+
+    # How far a spacing mark may push a cluster.
+    #
+    # A cell pair, which is all any terminal charges for a base and its vowel
+    # sign — except for a conjunct, where iTerm2 3.6.11 adds the vowel sign on
+    # top of the two the conjunct itself takes. That reading needs a third
+    # cell, and `Cell::MAX_WIDTH` is where it stops.
+    private def spacing_cap : Int32
+      @conjunct && @policy.conjunct_spacing_adds? ? Cell::MAX_WIDTH : 2
     end
 
     # Two columns is the least a cluster drawn as one glyph gets, whatever the

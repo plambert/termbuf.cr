@@ -52,6 +52,15 @@ All notable changes to this project are documented here. The format follows
   wherever the view is moved to and however deeply it is nested. A draw call's own blend still runs,
   on what the view's answered, the way a write's style wins over the view's.
 
+- `Unicode::WidthPolicy#conjunct_spacing_adds?`, off by default, and the `WidthProbe` sample that
+  settles it: whether a spacing vowel sign beside a conjunct adds a column on top of the two the
+  conjunct itself takes. iTerm2 3.6.11 advances three columns for `क्षि` where ghostty and Terminal.app
+  advance two, and three is a column more than the buffer could hold. `TERMBUF_WIDTHS` parses it
+  like any other rule.
+- `Cell::MAX_WIDTH`, four: the most columns one grapheme cluster may occupy. A cluster is now a lead
+  and up to three continuations rather than a lead and one, throughout the grid, the buffer, the
+  painter and the views.
+
 - `Unicode::WidthPolicy#conjunct_wide?`, on by default, and a `WidthProbe` sample that settles it:
   whether a consonant conjunct joined by a virama is two columns whatever it opens with. A conjunct
   ligates into one glyph and what a terminal charges for that glyph is its own decision — ghostty

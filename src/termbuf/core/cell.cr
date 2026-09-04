@@ -10,6 +10,17 @@ module TermBuf
   # `width` two, and the second is a continuation with `width` zero. Neither
   # half is ever written without the other; `Grid` enforces that.
   struct Cell
+    # The most columns one grapheme cluster may occupy: a lead and up to three
+    # continuations.
+    #
+    # Two is what a cluster costs almost everywhere, and the buffer was built
+    # for a pair. iTerm2 3.6.11 advances three for a Devanagari conjunct
+    # carrying a spacing vowel sign, so a pair is not enough — see
+    # `Unicode::WidthPolicy#conjunct_spacing_adds?`. Four leaves room above the
+    # widest reading anyone has measured without letting a bad measurement run
+    # away with a row.
+    MAX_WIDTH = 4
+
     # The cell's character, or `'\0'` when this cell continues a wide one.
     # When `cluster` is set, this is the cluster's first code point and the
     # full text lives in the pool.

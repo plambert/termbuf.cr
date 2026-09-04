@@ -106,11 +106,10 @@ Spectator.describe TermBuf::WidthProbe do
       expect(result.disagreements).to be_empty
     end
 
-    # iTerm2 3.6.11 adds the conjunct and the vowel sign up to three, where
-    # every rule in this design tops out at two — a cluster occupies a cell or
-    # a pair of them and there is no third to put anything in. Naming the
-    # cluster is what can be done about it; modelling it wrong is not.
-    it "reports a cluster the terminal charges more than a cell pair can hold" do
+    # iTerm2 3.6.11 adds the conjunct and the vowel sign up to three, which is
+    # a column more than any other terminal charges and one the buffer now has
+    # a cell for.
+    it "reads back a terminal that charges a conjunct for its vowel sign" do
       answers = String.build do |io|
         TermBuf::WidthProbe::SAMPLES.each do |sample|
           columns = sample.text == "क्षि" ? 3 : TermBuf::Unicode.string_width(sample.text)
@@ -119,12 +118,16 @@ Spectator.describe TermBuf::WidthProbe do
       end
 
       result, _ = probe answers
-      left = result.disagreements
 
-      expect(left.size).to eq 1
-      expect(left.first.measured).to eq 3
-      expect(left.first.sample.text).to eq "क्षि"
-      expect(left.first.sample.rule).to be_nil
+      expect(result.policy.conjunct_spacing_adds?).to be_true
+      expect(result.disagreements).to be_empty
+    end
+
+    it "leaves the rule off for a terminal that fits the vowel sign in the pair" do
+      result, _ = probe replies(Policy::DEFAULT)
+
+      expect(result.policy.conjunct_spacing_adds?).to be_false
+      expect(result.disagreements).to be_empty
     end
 
     it "notices a terminal that gives a spacing mark no cell of its own" do
@@ -220,6 +223,13 @@ Spectator.describe TermBuf::Unicode::WidthOverrides do
       expect(result.policy.ambiguous).to eq 2
     end
 
+    it "parses the conjunct spacing rule like any other" do
+      expect(described_class.apply(Policy::DEFAULT, "+conjunct_spacing_adds").policy
+        .conjunct_spacing_adds?).to be_true
+      expect(described_class.apply(Policy::DEFAULT.with("conjunct_spacing_adds", true),
+        "-conjunct_spacing_adds").policy.conjunct_spacing_adds?).to be_false
+    end
+
     it "overrides what was measured" do
       measured = Policy::DEFAULT.with "spacing_marks", false
       result = described_class.apply measured, "+spacing_marks"
@@ -262,6 +272,23 @@ Spectator.describe TermBuf::Unicode::WidthPolicy do
 
   it "refuses an ambiguous width that is neither one nor two" do
     expect { Policy.new ambiguous: 3 }.to raise_error ArgumentError
+  end
+
+  it "adds a conjunct's vowel sign to it when told to" do
+    conjunct = "क्षि"
+
+    expect(TermBuf::Unicode.string_width(conjunct, Policy::DEFAULT)).to eq 2
+    expect(TermBuf::Unicode.string_width(conjunct,
+      Policy::DEFAULT.with("conjunct_spacing_adds", true))).to eq 3
+  end
+
+  # The rule is about conjuncts, so a bare consonant with a vowel sign beside
+  # it stays in the cell pair it always had.
+  it "leaves a spacing mark on its own base in the pair" do
+    adds = Policy::DEFAULT.with "conjunct_spacing_adds", true
+
+    expect(TermBuf::Unicode.string_width("நி", adds)).to eq 2
+    expect(TermBuf::Unicode.string_width("क्ष", adds)).to eq 2
   end
 
   it "prints the rules it carries" do
