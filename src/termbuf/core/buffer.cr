@@ -129,14 +129,14 @@ module TermBuf
     # zero if it is zero width, if it is a control character, or if it is wide
     # and the right edge is one column away.
     #
-    # With *keep_background*, the cell keeps whatever colour is behind it and
-    # *style* supplies everything else. See `#write`.
+    # With a *blend*, the style placed is what it answers for the cell rather
+    # than *style* itself. See `#write`.
     def write_char(x : Int32, y : Int32, char : Char, style : Style = Style::DEFAULT,
-                   keep_background : Bool = false) : Int32
+                   blend : Blend? = nil) : Int32
       columns = Unicode.char_width char, @policy.ambiguous
       return 0 if columns.zero?
 
-      style_id = @styles.id keep_background ? behind(style, x, y) : style
+      style_id = @styles.id blend ? blended(blend, style, x, y) : style
       @back.place x, y, Cell.new(char, style_id, columns.to_u8), Cell.blank(style_id)
     end
 
@@ -147,14 +147,13 @@ module TermBuf
     # in front of it has nothing to attach to, and a control character is never
     # stored in the buffer.
     #
-    # With *keep_background*, each cell keeps the colour already behind it and
-    # *style* supplies the rest — text over something already painted, a label
-    # across a progress bar, without the caller working out where the bar's
-    # colours change. A background named in *style* is ignored; everything else
-    # in it applies as usual. A cluster covering two cells takes the colour of
-    # the cell its first half lands on.
+    # With a *blend*, each cell gets the style the blend answers for it from
+    # what is already there and *style* — text over something already painted,
+    # a label across a progress bar, without the caller working out where the
+    # bar's colours change. `Style::KEEP_BACKGROUND` is that blend. A cluster
+    # covering two cells takes the style its first half lands on.
     def write(x : Int32, y : Int32, text : String, style : Style = Style::DEFAULT,
-              keep_background : Bool = false) : Int32
+              blend : Blend? = nil) : Int32
       return 0 unless @back.contains? x, y
 
       style_id = @styles.id style
@@ -165,8 +164,8 @@ module TermBuf
         next if grapheme.width.zero?
         break if column >= @width
 
-        if keep_background
-          style_id = @styles.id behind(style, column, y)
+        if blend
+          style_id = @styles.id blended(blend, style, column, y)
           blank = Cell.blank style_id
         end
 
@@ -180,14 +179,15 @@ module TermBuf
       column - x
     end
 
-    # *style* wearing the background already at (*x*, *y*). Off the grid there
-    # is nothing behind, so *style* stands as it is and the write is dropped
+    # What *blend* answers for the cell at (*x*, *y*), which it is given along
+    # with the style already there and *style*. Off the grid there is nothing
+    # behind to blend with, so *style* stands as it is and the write is dropped
     # further down anyway.
-    private def behind(style : Style, x : Int32, y : Int32) : Style
+    private def blended(blend : Blend, style : Style, x : Int32, y : Int32) : Style
       cell = @back[x, y]?
       return style unless cell
 
-      style.bg @styles[cell.style].background
+      blend.call @styles[cell.style], style, x, y
     end
 
     private def build_cell(grapheme : Unicode::Grapheme, source : String, style : StyleId) : Cell
@@ -202,18 +202,45 @@ module TermBuf
     # ------------------------------------------------------------- clearing
 
     # Sets every cell of *rect* to *char*.
-    def fill(rect : Rect, char : Char = ' ', style : Style = Style::DEFAULT) : Nil
+    #
+    # With a *blend*, each cell gets the style the blend answers for it rather
+    # than *style*, which is what a wash over what is already painted wants: a
+    # faded rectangle, or a tint that leaves the colours under it showing. The
+    # rectangle is read before any of it is written, so a blend sees the cells
+    # as they were rather than as this fill is leaving them.
+    def fill(rect : Rect, char : Char = ' ', style : Style = Style::DEFAULT,
+             blend : Blend? = nil) : Nil
       columns = Unicode.char_width char, @policy.ambiguous
       raise ArgumentError.new "cannot fill with a zero width character" if columns.zero?
       raise ArgumentError.new "cannot fill with a wide character" if columns == 2
+
+      return fill_blended rect, char, style, blend if blend
 
       style_id = @styles.id style
       @back.fill rect, Cell.new(char, style_id, 1_u8)
     end
 
+    # `#fill` a cell at a time, which is what a blend needs: the style differs
+    # per cell, so there is no one cell to hand `Grid#fill`.
+    private def fill_blended(rect : Rect, char : Char, style : Style, blend : Blend) : Nil
+      area = rect.intersect bounds
+      return if area.empty?
+
+      area.each_row do |row_index|
+        ids = Array(StyleId).new(area.width) do |offset|
+          @styles.id blended(blend, style, area.x + offset, row_index)
+        end
+
+        ids.each_with_index do |style_id, offset|
+          @back.place area.x + offset, row_index, Cell.new(char, style_id, 1_u8),
+            Cell.blank(style_id)
+        end
+      end
+    end
+
     # Blanks every cell.
-    def clear(style : Style = Style::DEFAULT) : Nil
-      fill bounds, ' ', style
+    def clear(style : Style = Style::DEFAULT, blend : Blend? = nil) : Nil
+      fill bounds, ' ', style, blend
     end
 
     # ------------------------------------------------------------ scrolling

@@ -38,6 +38,11 @@ module TermBuf
   # anything, and dismissing a panel means the next frame does not draw it —
   # the paint diff then sends the cells it covered and nothing else.
   #
+  # A `Blend` passes through as it is. The view translates the write before the
+  # buffer runs the blend, so the position a blend is given is the cell's in the
+  # buffer rather than in the view — the same coordinates a blend sees when
+  # nothing was drawn through a view at all.
+  #
   # Two commands pass through untouched, because neither is addressed in cells
   # of this view: `#passthrough`, which is aimed at the terminal, and
   # `#scroll_region`, since a `Region` carries its own rectangle in the
@@ -86,8 +91,8 @@ module TermBuf
       case command
       in Commands::Write     then clip_write command
       in Commands::WriteChar then clip_write_char command
-      in Commands::Fill      then clip_fill command.rect, command.char, command.style
-      in Commands::Clear     then clip_fill bounds, ' ', command.style
+      in Commands::Fill      then clip_fill command.rect, command.char, command.style, command.blend
+      in Commands::Clear     then clip_fill bounds, ' ', command.style, command.blend
       in Commands::Scroll    then clip_scroll command
       in Commands::Blit      then clip_blit command
       in Commands::Batch     then command.commands.each { |inner| issue inner }
@@ -105,7 +110,7 @@ module TermBuf
 
       start, text = shown
       @target.issue Commands::Write.new(@rect.x + start, @rect.y + command.y, text,
-        styled(command.style), command.keep_background)
+        styled(command.style), command.blend)
     end
 
     # The part of *text* that lands inside the view when it is drawn at column
@@ -153,14 +158,15 @@ module TermBuf
       return if columns == 2 && x + 1 >= @rect.width
 
       @target.issue Commands::WriteChar.new(@rect.x + x, @rect.y + command.y,
-        command.char, styled(command.style), command.keep_background)
+        command.char, styled(command.style), command.blend)
     end
 
-    private def clip_fill(rect : Rect, char : Char, style : Style) : Nil
+    private def clip_fill(rect : Rect, char : Char, style : Style,
+                          blend : Blend? = nil) : Nil
       area = rect.intersect bounds
       return if area.empty?
 
-      @target.issue Commands::Fill.new(translate(area), char, styled(style))
+      @target.issue Commands::Fill.new(translate(area), char, styled(style), blend)
     end
 
     private def clip_scroll(command : Commands::Scroll) : Nil

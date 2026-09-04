@@ -29,6 +29,15 @@ private STYLES = [
   TermBuf::Style::DEFAULT.underlined(TermBuf::Underline::Curly),
 ]
 
+# A blend is answered per cell, so a write or a fill carrying one places its
+# cells one at a time rather than going through `Grid#fill`. The pairing and
+# damage invariants have to survive that path as well.
+private BLENDS = [
+  TermBuf::Style::KEEP_BACKGROUND,
+  TermBuf::Style::OVER,
+  TermBuf::Style.blend { |under, over| under.merge(over).faint },
+]
+
 private def check_pairing(grid : TermBuf::Grid) : String?
   grid.height.times do |row|
     grid.width.times do |column|
@@ -129,7 +138,7 @@ Spectator.describe "core buffer invariants" do
 end
 
 private def apply_operation(buffer : TermBuf::Buffer, random : Random) : Nil
-  case random.rand 10
+  case random.rand 12
   when 0, 1, 2, 3, 4
     buffer.write random.rand(buffer.width), random.rand(buffer.height),
       ALPHABET.sample(random), STYLES.sample(random)
@@ -140,6 +149,12 @@ private def apply_operation(buffer : TermBuf::Buffer, random : Random) : Nil
     buffer.scroll random_rect(buffer, random), random.rand(-3..3), STYLES.sample(random)
   when 8
     buffer.fill random_rect(buffer, random), '#', STYLES.sample(random)
+  when 9
+    buffer.write random.rand(buffer.width), random.rand(buffer.height),
+      ALPHABET.sample(random), STYLES.sample(random), blend: BLENDS.sample(random)
+  when 10
+    buffer.fill random_rect(buffer, random), '.', STYLES.sample(random),
+      blend: BLENDS.sample(random)
   else
     buffer.clear STYLES.sample(random)
   end

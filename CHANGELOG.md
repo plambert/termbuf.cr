@@ -18,6 +18,16 @@ All notable changes to this project are documented here. The format follows
 - `Capability::Osc52Clipboard`, reading and writing the system clipboard through the terminal.
   Reserved: nothing sets it and nothing reads it yet, and `TERMBUF_CAPS=+osc52_clipboard` is the
   only way to turn it on.
+- `Blend`, a per cell rule for what style a write, fill or clear places: given the style already in
+  the cell, the style being written, and the cell's position in the buffer, it returns the style to
+  put there. `Style::KEEP_BACKGROUND` keeps the colour already behind each cell, `Style::OVER`
+  merges the write onto what is there the way a view does, and `Style.blend { |under, over| ... }`
+  wraps the blends that answer from the two styles alone. `Buffer#write`, `#write_char`, `#fill` and
+  `#clear` take `blend:`, as do the same methods on `Drawing`, and a `View` passes it through — the
+  position a blend is handed is the cell's in the buffer, since the view has already translated the
+  write. Styles are interned and `StyleTable` only grows, so a blend returning a colour computed per
+  cell interns a style per cell: bounded by the screen for one frame, unbounded across an animation.
+
 - `Unicode::WidthPolicy#conjunct_wide?`, on by default, and a `WidthProbe` sample that settles it:
   whether a consonant conjunct joined by a virama is two columns whatever it opens with. A conjunct
   ligates into one glyph and what a terminal charges for that glyph is its own decision — ghostty
@@ -108,6 +118,13 @@ All notable changes to this project are documented here. The format follows
   This is what a resume was missing: `Tty#enter` re-applies every registered mode, where before it
   knew only about the modes written into it, and anything the application had turned on came back
   from a suspend turned off.
+
+### Removed
+
+- `keep_background` on `#write` and `#write_char`, replaced by `blend: Style::KEEP_BACKGROUND`,
+  which does the same thing and is one of many rather than the only one. The flag could only ever
+  answer the one question; a blend answers whatever the caller asks, and `#fill` and `#clear` now
+  take it too, which the flag never did.
 
 ## [0.2.1] - 2026-09-02
 

@@ -132,13 +132,18 @@ Spectator.describe TermBuf::Buffer do
     end
   end
 
-  describe "keeping the background" do
+  describe "blending with what is already there" do
     private def background_at(buffer, x, y)
       buffer.styles[buffer.back[x, y].style].background
     end
 
+    private def style_at(buffer, x, y)
+      buffer.styles[buffer.back[x, y].style]
+    end
+
     let(green) { TermBuf::Color::GREEN }
     let(blue) { TermBuf::Color::BLUE }
+    let(keep) { TermBuf::Style::KEEP_BACKGROUND }
 
     # Two colours side by side, which is what a half-full progress bar is.
     before_each do
@@ -147,7 +152,7 @@ Spectator.describe TermBuf::Buffer do
     end
 
     it "takes each cell's own colour across a run" do
-      buffer.write 2, 0, "abcd", TermBuf::Style::DEFAULT, keep_background: true
+      buffer.write 2, 0, "abcd", TermBuf::Style::DEFAULT, blend: keep
 
       expect(background_at(buffer, 2, 0)).to eq green
       expect(background_at(buffer, 3, 0)).to eq green
@@ -158,9 +163,9 @@ Spectator.describe TermBuf::Buffer do
 
     it "applies everything else in the style" do
       red = TermBuf::Style::DEFAULT.fg(TermBuf::Color::RED).bold
-      buffer.write 0, 0, "ab", red, keep_background: true
+      buffer.write 0, 0, "ab", red, blend: keep
 
-      style = buffer.styles[buffer.back[0, 0].style]
+      style = style_at buffer, 0, 0
 
       expect(style.foreground).to eq TermBuf::Color::RED
       expect(style.has?(TermBuf::Attributes::Bold)).to be_true
@@ -168,41 +173,119 @@ Spectator.describe TermBuf::Buffer do
     end
 
     it "ignores a background named in the style" do
-      buffer.write 0, 0, "a", TermBuf::Style::DEFAULT.bg(TermBuf::Color::RED),
-        keep_background: true
+      buffer.write 0, 0, "a", TermBuf::Style::DEFAULT.bg(TermBuf::Color::RED), blend: keep
 
       expect(background_at(buffer, 0, 0)).to eq green
     end
 
-    it "replaces the background when it is not asked to keep it" do
+    it "replaces the background when there is no blend" do
       buffer.write 0, 0, "ab"
 
       expect(background_at(buffer, 0, 0)).to eq TermBuf::Color.default
     end
 
     it "gives a wide cluster the colour its first half lands on" do
-      buffer.write 3, 0, "世", TermBuf::Style::DEFAULT, keep_background: true
+      buffer.write 3, 0, "世", TermBuf::Style::DEFAULT, blend: keep
 
       # Straddles the join: the lead is on green, so both halves are.
       expect(background_at(buffer, 3, 0)).to eq green
       expect(background_at(buffer, 4, 0)).to eq green
     end
 
-    it "keeps the background for a single character too" do
-      buffer.write_char 5, 0, 'x', TermBuf::Style::DEFAULT.bold, keep_background: true
+    it "blends a single character too" do
+      buffer.write_char 5, 0, 'x', TermBuf::Style::DEFAULT.bold, blend: keep
 
       expect(background_at(buffer, 5, 0)).to eq blue
-      expect(buffer.styles[buffer.back[5, 0].style].has?(TermBuf::Attributes::Bold)).to be_true
+      expect(style_at(buffer, 5, 0).has?(TermBuf::Attributes::Bold)).to be_true
     end
 
     it "blanks a displaced wide character in the colour it took" do
       buffer.write 4, 0, "世", TermBuf::Style::DEFAULT.bg(green)
-      buffer.write 5, 0, "x", TermBuf::Style::DEFAULT, keep_background: true
+      buffer.write 5, 0, "x", TermBuf::Style::DEFAULT, blend: keep
 
       # Writing over the second half detaches the pair, and the blank left
       # behind carries the colour the write ended up with.
       expect(buffer.to_text.lines[0]).to eq "     x  "
       expect(background_at(buffer, 4, 0)).to eq green
+    end
+
+    it "dims what is under it" do
+      dim = TermBuf::Style.blend { |under, over| under.merge(over).faint }
+      buffer.write 0, 0, "a", TermBuf::Style::DEFAULT, blend: dim
+
+      expect(style_at(buffer, 0, 0).background).to eq green
+      expect(style_at(buffer, 0, 0).has?(TermBuf::Attributes::Faint)).to be_true
+    end
+
+    it "italicises what is under it" do
+      buffer.write 0, 0, "ab", TermBuf::Style::DEFAULT.bg(blue).italic,
+        blend: TermBuf::Style::OVER
+
+      # `OVER` lets the written style win every field it names, background
+      # included, and adds its attributes to the ones already there.
+      expect(style_at(buffer, 0, 0).background).to eq blue
+      expect(style_at(buffer, 0, 0).has?(TermBuf::Attributes::Italic)).to be_true
+    end
+
+    it "keeps the attributes already in the cell when it merges over them" do
+      buffer.write 0, 0, "a", TermBuf::Style::DEFAULT.bold
+      buffer.write 0, 0, "a", TermBuf::Style::DEFAULT.italic, blend: TermBuf::Style::OVER
+
+      expect(style_at(buffer, 0, 0).has?(TermBuf::Attributes::Bold)).to be_true
+      expect(style_at(buffer, 0, 0).has?(TermBuf::Attributes::Italic)).to be_true
+    end
+
+    it "gives the blend the cell's own position" do
+      seen = [] of {Int32, Int32}
+      recorder = TermBuf::Blend.new do |_under, over, column, row|
+        seen << {column, row}
+        over
+      end
+
+      buffer.write 2, 0, "abc", TermBuf::Style::DEFAULT, blend: recorder
+      buffer.write_char 1, 1, 'z', TermBuf::Style::DEFAULT, blend: recorder
+
+      expect(seen).to eq [{2, 0}, {3, 0}, {4, 0}, {1, 1}]
+    end
+
+    it "fills a cell at a time, one style per background under it" do
+      before = buffer.styles.size
+      buffer.fill TermBuf::Rect.new(0, 0, 8, 1), '.', TermBuf::Style::DEFAULT.bold,
+        blend: keep
+
+      expect(background_at(buffer, 0, 0)).to eq green
+      expect(background_at(buffer, 7, 0)).to eq blue
+      expect(buffer.to_text.lines[0]).to eq "........"
+
+      # Two backgrounds under the fill, so two styles: bold on green and bold
+      # on blue, and nothing else interned.
+      expect(buffer.styles.size - before).to eq 2
+    end
+
+    it "interns one style per distinct background a blend answers with" do
+      wide = TermBuf::Buffer.new 6, 1
+      colours = [
+        TermBuf::Color::RED, TermBuf::Color::GREEN, TermBuf::Color::BLUE,
+        TermBuf::Color::CYAN, TermBuf::Color::MAGENTA, TermBuf::Color::YELLOW,
+      ]
+      colours.each_with_index do |colour, column|
+        wide.write_char column, 0, ' ', TermBuf::Style::DEFAULT.bg(colour)
+      end
+
+      wide.write 0, 0, "abcdef", TermBuf::Style::DEFAULT.bold, blend: keep
+
+      placed = (0...colours.size).map { |column| wide.back[column, 0].style }
+
+      expect(placed.uniq.size).to eq colours.size
+      expect(placed.map { |id| wide.styles[id].background }).to eq colours
+    end
+
+    it "leaves the fill to the grid when there is no blend" do
+      before = buffer.styles.size
+      buffer.fill TermBuf::Rect.new(0, 0, 8, 1), '.', TermBuf::Style::DEFAULT.bold
+
+      expect(buffer.styles.size - before).to eq 1
+      expect(background_at(buffer, 0, 0)).to eq TermBuf::Color.default
     end
   end
 

@@ -11,17 +11,17 @@ module TermBuf
   module Commands
     # Text from (*x*, *y*) rightwards, one grapheme cluster per cell.
     record Write, x : Int32, y : Int32, text : String, style : Style,
-      keep_background : Bool
+      blend : Blend? = nil
 
     # One cluster at (*x*, *y*).
     record WriteChar, x : Int32, y : Int32, char : Char, style : Style,
-      keep_background : Bool
+      blend : Blend? = nil
 
     # Every cell of *rect* set to *char*.
-    record Fill, rect : Rect, char : Char, style : Style
+    record Fill, rect : Rect, char : Char, style : Style, blend : Blend? = nil
 
     # The whole screen blanked.
-    record Clear, style : Style
+    record Clear, style : Style, blend : Blend? = nil
 
     # *rect* moved by *lines* rows, positive moving content up.
     record Scroll, rect : Rect, lines : Int32, style : Style
@@ -92,29 +92,31 @@ module TermBuf
     # Writes *text* starting at (*x*, *y*), one grapheme cluster per cell,
     # stopping at the right edge of the row.
     #
-    # With *keep_background*, each cell keeps the colour already behind it and
-    # *style* supplies the rest — a label across a progress bar. See
-    # `Buffer#write`.
+    # With a *blend*, each cell gets the style the blend answers for it from
+    # what is already there and *style* — `Style::KEEP_BACKGROUND` for a label
+    # across a progress bar. See `Buffer#write` and `Blend`.
     def write(x : Int32, y : Int32, text : String, style : Style = Style::DEFAULT,
-              keep_background : Bool = false) : Nil
-      issue Commands::Write.new(x, y, text, style, keep_background)
+              blend : Blend? = nil) : Nil
+      issue Commands::Write.new(x, y, text, style, blend)
     end
 
-    # Writes one character at (*x*, *y*), keeping the colour already behind it
-    # when *keep_background* is set.
+    # Writes one character at (*x*, *y*), settled by *blend* against what is
+    # already in the cell when there is one.
     def write_char(x : Int32, y : Int32, char : Char, style : Style = Style::DEFAULT,
-                   keep_background : Bool = false) : Nil
-      issue Commands::WriteChar.new(x, y, char, style, keep_background)
+                   blend : Blend? = nil) : Nil
+      issue Commands::WriteChar.new(x, y, char, style, blend)
     end
 
-    # Sets every cell of *rect* to *char*.
-    def fill(rect : Rect, char : Char = ' ', style : Style = Style::DEFAULT) : Nil
-      issue Commands::Fill.new(rect, char, style)
+    # Sets every cell of *rect* to *char*, each cell's style settled by *blend*
+    # against what is already there when there is one.
+    def fill(rect : Rect, char : Char = ' ', style : Style = Style::DEFAULT,
+             blend : Blend? = nil) : Nil
+      issue Commands::Fill.new(rect, char, style, blend)
     end
 
     # Blanks the whole screen.
-    def clear(style : Style = Style::DEFAULT) : Nil
-      issue Commands::Clear.new(style)
+    def clear(style : Style = Style::DEFAULT, blend : Blend? = nil) : Nil
+      issue Commands::Clear.new(style, blend)
     end
 
     # Scrolls *rect* by *lines* rows, positive moving content up.
@@ -199,11 +201,12 @@ module TermBuf
     def self.apply(command : Command, buffer : Buffer) : Bool
       case command
       in Commands::Write then buffer.write command.x, command.y, command.text,
-        command.style, command.keep_background
+        command.style, command.blend
       in Commands::WriteChar then buffer.write_char command.x, command.y, command.char,
-        command.style, command.keep_background
-      in Commands::Fill         then buffer.fill command.rect, command.char, command.style
-      in Commands::Clear        then buffer.clear command.style
+        command.style, command.blend
+      in Commands::Fill then buffer.fill command.rect, command.char, command.style,
+        command.blend
+      in Commands::Clear        then buffer.clear command.style, command.blend
       in Commands::Scroll       then buffer.scroll command.rect, command.lines, command.style
       in Commands::ScrollRegion then buffer.scroll_region command.region, command.lines, command.style
       in Commands::Blit         then buffer.blit command.source, command.x, command.y, command.from

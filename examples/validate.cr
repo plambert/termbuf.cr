@@ -979,7 +979,7 @@ module Validate
 
       label = " 50% of #{width} cells "
       row.write Math.max((width - label.size) // 2, 0), 0, label,
-        Style::DEFAULT.bold, keep_background: true
+        Style::DEFAULT.bold, blend: Style::KEEP_BACKGROUND
 
       screen.write_char 2 + filled, y + 1, '^', Style::DEFAULT.faint
       screen.write 2, y + 2,

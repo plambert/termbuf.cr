@@ -154,18 +154,31 @@ have no value meaning "leave the panel's alone" — a bold write inside a faint 
 merge is `Style#merge`, usable on its own.
 
 That covers one background for a whole row. When the background varies *under* the text — a label
-across a progress bar — the cells themselves have the answer, and `keep_background` takes it from
-them per cell:
+across a progress bar — the cells themselves have the answer, and a `blend:` asks them per cell:
 
 ```crystal
 screen.fill TermBuf::Rect.new(0, y, filled, 1), ' ', TermBuf::Style::DEFAULT.bg(bar)
-screen.write x, y, "#{percent}%", TermBuf::Style::DEFAULT.bold, keep_background: true
+screen.write x, y, "#{percent}%", TermBuf::Style::DEFAULT.bold,
+  blend: TermBuf::Style::KEEP_BACKGROUND
 ```
 
-Each cell keeps the colour already behind it and the style supplies everything else; a background
-named in the style is ignored. A cluster covering two cells takes the colour of the cell its first
-half lands on. `#write_char` takes the same argument, and it survives a view's translation and
-clipping.
+A blend is given the style already in the cell, the style being written, and the cell's position in
+the buffer, and returns the style to place. `Style::KEEP_BACKGROUND` keeps the colour already there
+and takes everything else from the write; `Style::OVER` merges the two the way a view does; and
+`Style.blend { |under, over| ... }` wraps anything else:
+
+```crystal
+screen.fill panel, ' ', TermBuf::Style::DEFAULT,
+  blend: TermBuf::Style.blend { |under, over| under.merge(over).faint }
+```
+
+A cluster covering two cells takes the style its first half lands on. `#write_char`, `#fill` and
+`#clear` take the same argument, and it survives a view's translation and clipping — the position a
+blend is handed is the cell's in the buffer, not in the view.
+
+One caution: styles are interned and the table only grows, so a blend returning a colour computed
+per cell interns a style per cell. That is bounded by the screen for one frame; across an animation
+it is not, and such a blend should draw from a fixed palette instead.
 
 A `fill`, `scroll`, or `blit` whose edge falls inside a wide character takes the whole character —
 half of one cannot be drawn — and the half lying outside the rectangle keeps the style it had,

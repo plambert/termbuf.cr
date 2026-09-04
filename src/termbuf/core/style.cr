@@ -126,6 +126,33 @@ module TermBuf
         other.link.zero? ? @link : other.link)
     end
 
+    # A blend that keeps the colour already behind each cell and takes
+    # everything else from the style being written — a label across a progress
+    # bar, without the caller working out where the bar's colours change. A
+    # background named in the written style is ignored.
+    #
+    # The position is ignored: this blend answers the same way wherever the
+    # cell is, which is why the two arguments it does use are named and the
+    # rest are not.
+    KEEP_BACKGROUND = Blend.new { |under, over, _column, _row| over.bg under.background }
+
+    # A blend laying the written style over what is already there, field by
+    # field, the way a view lays its own style under a write. See `#merge`.
+    #
+    # The position is ignored, as it is for `KEEP_BACKGROUND`.
+    OVER = Blend.new { |under, over, _column, _row| under.merge over }
+
+    # Wraps a two argument block as a `Blend`, for the blends that answer from
+    # the two styles alone.
+    #
+    #     dim = TermBuf::Style.blend { |under, over| under.merge(over).faint }
+    #
+    # The position the `Blend` signature carries is dropped rather than named,
+    # since a block written this way has nowhere to receive it.
+    def self.blend(&block : Style, Style -> Style) : Blend
+      Blend.new { |under, over, _column, _row| block.call under, over }
+    end
+
     # Returns a copy with *flags* added.
     def with(flags : Attributes) : Style
       copy_with attributes: @attributes | flags
@@ -193,4 +220,26 @@ module TermBuf
       io << ')'
     end
   end
+
+  # How a write settles the style of each cell it lands on: given the style
+  # already there, the style being written, and the cell's position, it returns
+  # the style to place.
+  #
+  #     dim = TermBuf::Style.blend { |under, over| under.merge(over).faint }
+  #     screen.write 0, 0, "over a shadow", Style::DEFAULT, blend: dim
+  #
+  # `Style::KEEP_BACKGROUND` and `Style::OVER` cover the two common answers,
+  # and `Style.blend` wraps a block that only wants the two styles.
+  #
+  # The position is in the *buffer's* coordinates, not those of whatever view
+  # the write went through: a view translates the write before the buffer runs
+  # the blend, so a blend keyed on position sees where the cell actually is.
+  #
+  # A blend is run per cell and its answer is interned, and `StyleTable` only
+  # grows. One returning a colour computed from the position — a gradient —
+  # therefore interns a style per cell. That is bounded by the screen for a
+  # single frame and fine; recomputed every frame from different colours it is
+  # unbounded, and an animation wanting that should draw from a fixed palette
+  # of styles instead.
+  alias Blend = Proc(Style, Style, Int32, Int32, Style)
 end

@@ -293,11 +293,27 @@ Spectator.describe TermBuf::View do
         row.clear
         # A bar painted inside the row, then a label across the join.
         row.fill Rect.new(0, 0, 3, 1), ' ', TermBuf::Style::DEFAULT.bg(TermBuf::Color::GREEN)
-        row.write 2, 0, "ab", TermBuf::Style::DEFAULT.bold, keep_background: true
+        row.write 2, 0, "ab", TermBuf::Style::DEFAULT.bold,
+          blend: TermBuf::Style::KEEP_BACKGROUND
 
         expect(buffer.styles[buffer.back[2, 0].style].background).to eq TermBuf::Color::GREEN
         expect(buffer.styles[buffer.back[3, 0].style].background).to eq TermBuf::Color::BLUE
         expect(buffer.styles[buffer.back[2, 0].style].has?(TermBuf::Attributes::Bold)).to be_true
+      end
+    end
+
+    it "hands the blend the cell's position in the buffer, not in the view" do
+      with_screen do |screen, buffer|
+        seen = [] of {Int32, Int32}
+        recorder = TermBuf::Blend.new do |_under, over, column, row|
+          seen << {column, row}
+          over
+        end
+
+        screen.view(Rect.new(3, 2, 4, 2)).write 1, 1, "ab", blend: recorder
+
+        expect(seen).to eq [{4, 3}, {5, 3}]
+        expect(buffer.back[4, 3].char).to eq 'a'
       end
     end
 
@@ -335,11 +351,20 @@ Spectator.describe TermBuf::View do
       expect({command.x, command.y, command.text}).to eq({4, 3, "abc"})
     end
 
-    it "carries the keep-background flag through unchanged" do
+    it "carries the blend through unchanged" do
       batcher = TermBuf::Batcher.new
-      batcher.view(Rect.new(1, 0, 4, 1)).write 0, 0, "ab", keep_background: true
+      blend = TermBuf::Style::KEEP_BACKGROUND
+      batcher.view(Rect.new(1, 0, 4, 1)).write 0, 0, "ab", blend: blend
 
-      expect(batcher.commands.first.as(TermBuf::Commands::Write).keep_background).to be_true
+      expect(batcher.commands.first.as(TermBuf::Commands::Write).blend).to eq blend
+    end
+
+    it "carries a blend through a fill too" do
+      batcher = TermBuf::Batcher.new
+      blend = TermBuf::Style::OVER
+      batcher.view(Rect.new(1, 0, 4, 1)).fill Rect.new(0, 0, 2, 1), '.', blend: blend
+
+      expect(batcher.commands.first.as(TermBuf::Commands::Fill).blend).to eq blend
     end
   end
 end
