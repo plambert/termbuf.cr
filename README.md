@@ -287,6 +287,13 @@ end
 `Warning` carries anything detection wanted to report — these never go to stderr, since the screen
 is taken over by then.
 
+The input side — the reader, the decoder, keys, mouse reports, timers, signals, and every event
+above except `Resize` — lives under `TermBuf::Input` and depends on nothing else in termbuf. It is
+headed for a `termbuf-input` shard of its own, so that a terminal library can use it rather than
+contain it. `TermBuf::Key` is `TermBuf::Input::Key`, `TermBuf::Events::Key` is
+`TermBuf::Input::Events::Key`, and so on: the short spellings are aliases and stay. `Resize` is the
+one that did not move, because it carries a `ScreenSize`.
+
 ### Keys
 
 `Key` is a value: which key, which modifiers, and for an ordinary character which character.

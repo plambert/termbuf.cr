@@ -83,5 +83,12 @@ require "./termbuf/widgets"
 # See `Decoder` for what separates the three, and `Input::Stream` for the
 # fibres that run it. An application wanting a reply as something other than
 # its bytes registers with `Input::Patterns` itself.
+#
+# All of it lives under `TermBuf::Input` and depends on nothing else here,
+# because it is on its way out into a `termbuf-input` shard. `Key` is
+# `Input::Key`, `Events::Key` is `Input::Events::Key`, and so on for every name
+# on the input side: the short spellings are aliases and are not going
+# anywhere. The one event that stayed behind is `Events::Resize`, which carries
+# a `ScreenSize` and so belongs to the terminal rather than to the keyboard.
 module TermBuf
 end

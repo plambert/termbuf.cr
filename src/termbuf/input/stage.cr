@@ -1,4 +1,4 @@
-require "../terminal/event"
+require "./event"
 
 module TermBuf
   module Input
@@ -16,8 +16,10 @@ module TermBuf
     # Emitting hands the event to the *next* stage, not back to this one, so a
     # stage that emits what it was given cannot loop.
     #
-    #     handler = ->(event : TermBuf::Event, emit : Proc(TermBuf::Event, Nil)) do
-    #       signal = event.as? TermBuf::Events::Signal
+    #     alias Event = TermBuf::Input::Event
+    #
+    #     handler = ->(event : Event, emit : Proc(Event, Nil)) do
+    #       signal = event.as? TermBuf::Input::Events::Signal
     #
     #       if signal && signal.signal.winch?
     #         # Consumed: something else answers a window change.

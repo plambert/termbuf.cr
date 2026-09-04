@@ -1,4 +1,4 @@
-require "../terminal/event"
+require "./event"
 require "./patterns"
 
 module TermBuf

@@ -1,4 +1,4 @@
-module TermBuf
+module TermBuf::Input
   # What was held down alongside the key.
   #
   # The values are the xterm encoding minus one: a terminal sends `1` for no

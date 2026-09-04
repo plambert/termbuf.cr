@@ -212,11 +212,11 @@ Spectator.describe TermBuf::Input::Stage do
 
       keyboard.type "a"
       expect(said(keyboard.event))
-        .to eq "original still ran for TermBuf::Events::Key"
+        .to eq "original still ran for TermBuf::Input::Events::Key"
 
       keyboard.type "b"
       expect(said(keyboard.event))
-        .to eq "replacement saw TermBuf::Events::Key"
+        .to eq "replacement saw TermBuf::Input::Events::Key"
     end
   end
 end

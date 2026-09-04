@@ -28,6 +28,22 @@ jobs:
       - name: Run specs
         run: crystal spec --error-trace
 
+      # `src/termbuf/input/` is going to be a shard of its own, so it has to
+      # compile with nothing else of termbuf's alongside it. The build proves
+      # it links; the grep proves it did not reach for the rest of termbuf on
+      # the way.
+      - name: Check the input side stands alone
+        run: |
+          set -euo pipefail
+          crystal build --no-codegen --error-trace spec/independence.cr
+          reached=$(crystal tool dependencies spec/independence.cr |
+            grep -E 'src/termbuf/(terminal|caps|unicode)/' || true)
+          if [ -n "$reached" ]; then
+            echo "termbuf/input reached outside itself:" >&2
+            echo "$reached" >&2
+            exit 1
+          fi
+
       # The specs drive the whole driver over a pipe rather than a device, so
       # they run without a terminal. This is the check that the parts needing
       # one still compile.

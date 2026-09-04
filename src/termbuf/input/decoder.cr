@@ -1,10 +1,10 @@
 require "./scanner"
-require "../unicode/utf8"
-require "../terminal/event"
+require "./utf8"
+require "./event"
 require "./patterns"
 require "./key"
 
-module TermBuf
+module TermBuf::Input
   # Turns the bytes a terminal sends into events.
   #
   # Three things arrive on the same stream and have to be told apart: replies
@@ -90,10 +90,10 @@ module TermBuf
     # This is the seam the pattern registry hangs off. The decoder deliberately
     # does not own it: which replies an application is waiting for changes while
     # it runs, and the decoder's own state does not.
-    property on_sequence : (Input::Sequence -> Event?)? = nil
+    property on_sequence : (Sequence -> Event?)? = nil
 
     def initialize
-      @scanner = Input::SequenceScanner.new
+      @scanner = SequenceScanner.new
       @partial = IO::Memory.new
       @paste = IO::Memory.new
       @pasting = false
@@ -198,7 +198,7 @@ module TermBuf
 
     # ------------------------------------------------------------ dispatch
 
-    private def dispatch(kind : Input::SequenceScanner::Kind, chunk : Bytes, emit : Event ->) : Nil
+    private def dispatch(kind : SequenceScanner::Kind, chunk : Bytes, emit : Event ->) : Nil
       # The scanner hands out slices of a buffer it reuses, so anything kept
       # past this call has to be copied.
       kind.sequence? ? sequence(chunk.dup, emit) : text(chunk, emit)
@@ -212,7 +212,7 @@ module TermBuf
       return paste_marker bytes, emit if @pasting
 
       if handler = @on_sequence
-        if event = handler.call Input::Sequence.parse(bytes)
+        if event = handler.call Sequence.parse(bytes)
           emit.call event
           return
         end
@@ -312,7 +312,7 @@ module TermBuf
       lead = data[offset]
       return control lead, emit if lead < 0x80
 
-      length = Unicode.utf8_length lead
+      length = Utf8.length lead
       return replacement(data, offset, 1, emit) if length.zero?
       return 0 if offset + length > data.size
 

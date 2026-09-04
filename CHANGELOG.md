@@ -163,6 +163,17 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- The input side is all under `TermBuf::Input` now: `Input::Key`, `Input::Modifiers`,
+  `Input::Decoder`, `Input::Utf8`, and `Input::Event` with `Input::Events::Key`, `Paste`, `Pasting`,
+  `Mouse`, `Response`, `Timer`, `Signal`, `Warning`, `Failure` and `Closed`. It requires nothing
+  else in termbuf, which is the point: it is on its way out into a `termbuf-input` shard.
+  `TermBuf::Key`, `TermBuf::Modifiers`, `TermBuf::Decoder`, `TermBuf::Event` and every
+  `TermBuf::Events::` name are aliases for the new ones and are not going anywhere, so nothing
+  written against the old spelling changes. `Events::Resize` is the one that stayed on the terminal
+  side, because it carries a `ScreenSize`; it includes `Input::Event` and arrives on the same
+  channel as the rest. `Unicode.utf8_length` is copied as `Input::Utf8.length` so the decoder does
+  not drag the width and grapheme tables along with it, and CI compiles
+  `spec/independence.cr` and checks `crystal tool dependencies` to keep it that way.
 - `Key#to_s` upper cases a control character only when it is an ASCII letter. `Ctrl+C` is the
   convention and `Ctrl+c` is not, but upper casing outside ASCII changed the key rather than how it
   was spelled, which left `Key.parse` no way back to it.

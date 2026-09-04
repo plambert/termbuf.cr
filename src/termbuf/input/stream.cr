@@ -1,4 +1,4 @@
-require "../terminal/event"
+require "./event"
 require "./decoder"
 require "./mouse"
 require "./patterns"
