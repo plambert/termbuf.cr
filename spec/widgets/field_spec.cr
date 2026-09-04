@@ -9,15 +9,14 @@ private alias Growth = TermBuf::Field::Growth
 # what the buffer happens to hold.
 private def render(field : TermBuf::Field, columns = 30, rows = 6) : Array(String)
   buffer = TermBuf::Buffer.new columns, rows
+  sink = TermBuf::Sink.new buffer, TermBuf::Capabilities::XTERM
   surface = TermBuf::BufferSurface.new buffer
   buffer.clear
   field.draw surface
 
-  painter = TermBuf::Painter.new TermBuf::Capabilities::XTERM
-  encoder = TermBuf::Encoder.new buffer.styles, TermBuf::Capabilities::XTERM, columns, rows
   model = ModelTerminal.new columns, rows
-  model.feed encoder.encode(painter.paint(buffer))
-  buffer.commit_paint
+  model.feed sink.encoder.encode(sink.paint)
+  sink.commit
 
   model.to_text.split('\n').map &.rstrip
 end

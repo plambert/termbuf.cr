@@ -68,6 +68,11 @@ end
 Spectator.describe TermBuf::Buffer do
   subject(buffer) { TermBuf::Buffer.new 8, 4 }
 
+  # What the buffer is painted to. The front grid, the damage a paint is built
+  # from, and the record of which scroll hints have been read all live here
+  # rather than on the buffer.
+  let(sink) { TermBuf::Sink.new buffer, TermBuf::Capabilities::XTERM }
+
   describe "#write_char" do
     it "writes a narrow character and reports one column" do
       expect(buffer.write_char(1, 1, 'a')).to eq 1
@@ -411,7 +416,7 @@ Spectator.describe TermBuf::Buffer do
 
     it "records nothing when a write changes nothing" do
       buffer.write 2, 1, "abc"
-      buffer.commit_paint
+      sink.commit
       buffer.write 2, 1, "abc"
 
       expect(buffer.dirty?).to be_false
@@ -419,7 +424,7 @@ Spectator.describe TermBuf::Buffer do
 
     it "notices a change of style even when the text is the same" do
       buffer.write 2, 1, "abc"
-      buffer.commit_paint
+      sink.commit
       buffer.write 2, 1, "abc", RED
 
       expect(buffer.dirty?).to be_true
@@ -450,7 +455,12 @@ Spectator.describe TermBuf::Buffer do
   end
 
   describe "#scroll" do
-    before_each { 4.times { |row| buffer.write 0, row, ('a' + row).to_s } }
+    # The sink has to exist before the scroll: one attached afterwards starts
+    # caught up, since it is about to be told to redraw everything anyway.
+    before_each do
+      sink
+      4.times { |row| buffer.write 0, row, ('a' + row).to_s }
+    end
 
     it "moves content and records a hint" do
       buffer.scroll buffer.bounds, 1
@@ -473,10 +483,23 @@ Spectator.describe TermBuf::Buffer do
       expect(buffer.scroll_hints.first.rect).to eq buffer.bounds
     end
 
-    it "hands the hints over once" do
+    it "hands the hints to a sink once" do
       buffer.scroll buffer.bounds, 1
 
-      expect(buffer.take_scroll_hints.size).to eq 1
+      expect(sink.take_scroll_hints.size).to eq 1
+      expect(sink.take_scroll_hints).to be_empty
+    end
+
+    it "keeps a hint until every sink has read it" do
+      other = TermBuf::Sink.new buffer, TermBuf::Capabilities::ANSI
+      buffer.scroll buffer.bounds, 1
+
+      sink.commit
+
+      expect(buffer.scroll_hints.size).to eq 1
+
+      other.commit
+
       expect(buffer.scroll_hints).to be_empty
     end
   end
@@ -524,28 +547,50 @@ Spectator.describe TermBuf::Buffer do
     end
   end
 
-  describe "#commit_paint" do
+  describe "Sink#commit" do
     it "brings the front grid up to date and clears what it was built from" do
       buffer.write 0, 0, "abc"
       buffer.scroll buffer.bounds, 1
 
-      buffer.commit_paint
+      sink.commit
 
-      expect(buffer.painted?).to be_true
+      expect(sink.painted?).to be_true
+      expect(sink.dirty?).to be_false
       expect(buffer.dirty?).to be_false
       expect(buffer.scroll_hints).to be_empty
+    end
+  end
+
+  describe "#attach and #detach" do
+    it "paints a sink only while it is attached" do
+      sink.commit
+      buffer.write 0, 0, "abc"
+
+      expect(sink.dirty?).to be_true
+
+      sink.commit
+      buffer.detach sink
+      buffer.write 0, 1, "def"
+
+      expect(sink.dirty?).to be_false
+    end
+
+    it "takes a sink back on without duplicating it" do
+      buffer.attach sink
+
+      expect(buffer.sinks.size).to eq 1
     end
   end
 
   describe "#invalidate" do
     it "makes the next paint a full one" do
       buffer.write 0, 0, "abc"
-      buffer.commit_paint
+      sink.commit
 
       buffer.invalidate
 
       expect(buffer.dirty?).to be_true
-      expect(buffer.painted?).to be_false
+      expect(sink.painted?).to be_false
       expect(buffer.damage.rows).to eq 4
       expect(buffer.damage.span(0)).to eq 0..7
     end
@@ -559,16 +604,16 @@ Spectator.describe TermBuf::Buffer do
   end
 
   describe "#resize" do
-    it "resizes both grids and forces a full repaint" do
+    it "resizes the back grid and every sink and forces a full repaint" do
       buffer.write 0, 0, "abc"
-      buffer.commit_paint
+      sink.commit
 
       buffer.resize 4, 2
 
       expect(buffer.width).to eq 4
       expect(buffer.height).to eq 2
       expect(buffer.back.width).to eq 4
-      expect(buffer.front.width).to eq 4
+      expect(sink.front.width).to eq 4
       expect(buffer.damage.rows).to eq 2
     end
 
@@ -588,7 +633,7 @@ Spectator.describe TermBuf::Buffer do
 
     it "does nothing when the size is unchanged" do
       buffer.write 0, 0, "abc"
-      buffer.commit_paint
+      sink.commit
       buffer.resize 8, 4
 
       expect(buffer.dirty?).to be_false
@@ -638,7 +683,7 @@ Spectator.describe TermBuf::Buffer do
 
     it "does nothing when nothing lands on the destination" do
       buffer.clear
-      buffer.commit_paint
+      sink.commit
       buffer.blit panel, 20, 20
       buffer.blit panel, -9, 0
 
@@ -708,7 +753,7 @@ Spectator.describe TermBuf::Buffer do
 
     it "reports the cells it changed as damage" do
       buffer.clear
-      buffer.commit_paint
+      sink.commit
       buffer.blit panel, 2, 1
 
       expect(buffer.damage.span(1)).to eq(2..5)

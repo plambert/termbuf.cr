@@ -34,10 +34,12 @@ require "./termbuf/widgets"
 # `Terminal` is the one to reach for. It owns the device, runs a fibre that owns
 # the buffer, and delivers keystrokes and resizes on `Terminal#events`.
 #
-# `Buffer`, `Painter`, and `Encoder` are that fibre's insides, usable on their
-# own: a buffer of cells, a diff of what changed, and an encoding of that diff
-# as escape sequences. Nothing in this layer touches a device, which is what
-# makes it testable against a model terminal.
+# `Buffer` and `Sink` are that fibre's insides, usable on their own: a buffer of
+# cells, and one output of it holding what that terminal is believed to be
+# showing along with the `Painter` and `Encoder` that get it there. A second
+# sink over the same buffer is a second display, painted independently.
+# Nothing in this layer touches a device, which is what makes it testable
+# against a model terminal.
 #
 # `Capabilities` decides what the encoder may emit. It is settled once at
 # startup from the environment, from asking the terminal directly, and from

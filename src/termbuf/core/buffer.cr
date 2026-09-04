@@ -15,7 +15,13 @@ module TermBuf
     # Rows scrolled, positive meaning content moved up.
     getter lines : Int32
 
-    def initialize(@rect : Rect, @lines : Int32)
+    # Where this hint sits in the buffer's log of them. Sinks paint at
+    # different times, so a hint cannot be handed over and forgotten: each
+    # remembers the serial it read up to, and the log is trimmed to the oldest
+    # of those.
+    getter serial : Int64
+
+    def initialize(@rect : Rect, @lines : Int32, @serial : Int64 = 0_i64)
     end
 
     def to_s(io : IO) : Nil
@@ -25,10 +31,11 @@ module TermBuf
 
   # The in-memory terminal screen.
   #
-  # Two grids: *back* is what the application has drawn, *front* is what the
-  # terminal is believed to be showing. Every write lands in the back grid and
-  # marks damage; a paint diffs the two, and `#commit_paint` brings the front
-  # grid up to date once the bytes have gone out.
+  # The buffer holds one grid: *back*, what the application has drawn. What a
+  # terminal is believed to be showing lives in a `Sink`, one per output, along
+  # with the painter and encoder that put it there. Attaching a second sink is
+  # what lets the same buffer drive two displays that paint at different times
+  # and know different things about what they can do.
   #
   # A single dirty-flag scheme would be smaller, but it leaves nothing to diff
   # against after a forced repaint or a resize, and nothing for the scroll
@@ -45,9 +52,6 @@ module TermBuf
 
     # What the application has drawn.
     getter back : Grid
-
-    # What the terminal is believed to be showing.
-    getter front : Grid
 
     # The interned styles both grids refer to by id.
     getter styles : StyleTable
@@ -69,17 +73,67 @@ module TermBuf
     # width they were placed with. Invalidate and redraw after changing it.
     property policy : Unicode::WidthPolicy = Unicode::WidthPolicy::DEFAULT
 
-    # Scrolls performed since the last paint, oldest first.
+    # Scrolls no attached sink has consumed yet, oldest first.
     getter scroll_hints : Array(ScrollHint)
+
+    # The outputs painting this buffer.
+    getter sinks : Array(Sink)
+
+    # The serial given to the last scroll recorded. A sink that has read up to
+    # this has nothing left to catch up on.
+    getter scroll_serial : Int64 = 0_i64
 
     def initialize(@width : Int32, @height : Int32)
       @styles = StyleTable.new
       @clusters = ClusterPool.new
       @links = LinkTable.new
       @back = Grid.new @width, @height
-      @front = Grid.new @width, @height
       @regions = [] of Region
       @scroll_hints = [] of ScrollHint
+      @sinks = [] of Sink
+    end
+
+    # ------------------------------------------------------------- sinks
+
+    # Starts painting this buffer to *sink*. Called by `Sink` itself, so an
+    # application builds a sink rather than attaching one.
+    def attach(sink : Sink) : Nil
+      return if @sinks.includes? sink
+
+      @sinks << sink
+      @back.watch sink.damage
+    end
+
+    # Stops painting this buffer to *sink*.
+    def detach(sink : Sink) : Nil
+      return unless @sinks.delete sink
+
+      @back.unwatch sink.damage
+      trim_scroll_hints
+    end
+
+    # The hints recorded after *serial*, oldest first.
+    def scroll_hints_since(serial : Int64) : Array(ScrollHint)
+      @scroll_hints.select { |hint| hint.serial > serial }
+    end
+
+    # Drops the damage and the hints every attached sink has painted. Called by
+    # `Sink#commit`.
+    protected def settled : Nil
+      trim_scroll_hints
+      @back.damage.clear if @sinks.all? &.painted?
+    end
+
+    # Forgets the hints no attached sink still has to read. With none attached
+    # there is nobody left to read any of them.
+    private def trim_scroll_hints : Nil
+      oldest = @sinks.min_of?(&.consumed_serial) || @scroll_serial
+      @scroll_hints.reject! { |hint| hint.serial <= oldest }
+    end
+
+    private def record_scroll(rect : Rect, lines : Int32) : Nil
+      @scroll_serial += 1
+      @scroll_hints << ScrollHint.new rect, lines, @scroll_serial
     end
 
     # The rectangle covering every cell.
@@ -87,12 +141,14 @@ module TermBuf
       Rect.full @width, @height
     end
 
-    # What has changed since the last paint.
+    # What no attached sink has painted yet. Each sink keeps its own record as
+    # well, since they paint at different moments; this one is cleared once
+    # every one of them has caught up.
     def damage : Damage
       @back.damage
     end
 
-    # Whether anything has changed since the last paint.
+    # Whether anything is left for a sink to paint.
     def dirty? : Bool
       @back.damage.dirty? || !@scroll_hints.empty?
     end
@@ -254,7 +310,7 @@ module TermBuf
       return if area.empty?
 
       @back.scroll area, lines, Cell.blank(@styles.id style)
-      @scroll_hints << ScrollHint.new area, lines
+      record_scroll area, lines
     end
 
     # Scrolls a region, keeping the rows that leave the top if the region has
@@ -273,7 +329,7 @@ module TermBuf
         @back.scroll area, lines, blank
       end
 
-      @scroll_hints << ScrollHint.new area, lines
+      record_scroll area, lines
     end
 
     # Copies cells out of *source*, its top left landing at (*x*, *y*), taking
@@ -350,48 +406,26 @@ module TermBuf
 
     # ------------------------------------------------------------- lifecycle
 
-    # Resizes both grids, keeping whatever content still fits anchored at the
-    # top left. Leaves everything dirty and drops any scroll hints, since the
-    # next paint has to redraw the screen outright.
+    # Resizes the back grid and every attached sink, keeping whatever content
+    # still fits anchored at the top left. Leaves everything dirty and drops
+    # any scroll hints, since the next paint has to redraw the screen outright.
     def resize(width : Int32, height : Int32, style : Style = Style::DEFAULT) : Nil
       return if width == @width && height == @height
 
       blank = Cell.blank @styles.id(style)
       @back.resize width, height, blank
-      @front.resize width, height, blank
       @width = width
       @height = height
       @scroll_hints.clear
+      @sinks.each &.resize(width, height, blank)
       invalidate
     end
 
-    # Marks the whole screen dirty and forgets what the terminal was showing,
-    # so the next paint rewrites every cell.
+    # Marks the whole screen dirty and has every sink forget what its terminal
+    # was showing, so the next paint rewrites every cell.
     def invalidate : Nil
-      @front.clear Cell.new('￿', StyleTable::DEFAULT, 1_u8)
-      @front.damage.clear
       @back.damage.touch_all @width
-    end
-
-    # Brings the front grid up to date after a paint has been written out, and
-    # clears the damage and scroll hints it was built from.
-    def commit_paint : Nil
-      @front.copy_from @back
-      @back.damage.clear
-      @scroll_hints.clear
-    end
-
-    # Takes the scroll hints recorded since the last paint, leaving none
-    # behind.
-    def take_scroll_hints : Array(ScrollHint)
-      taken = @scroll_hints
-      @scroll_hints = [] of ScrollHint
-      taken
-    end
-
-    # Whether the two grids agree, which is to say a paint would emit nothing.
-    def painted? : Bool
-      @back == @front
+      @sinks.each &.invalidate
     end
 
     # The back grid as text, one line per row, for specs and debugging.

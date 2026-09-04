@@ -52,32 +52,63 @@ end
 # screen and the buffer.
 private class Harness
   getter buffer : TermBuf::Buffer
-  getter terminal : ModelTerminal
-  getter bytes = 0
+  getter sink : Sink
 
   def initialize(width : Int32, height : Int32, capabilities : TermBuf::Capabilities,
                  policy : TermBuf::Unicode::WidthPolicy = TermBuf::Unicode::WidthPolicy::DEFAULT)
     @buffer = TermBuf::Buffer.new width, height
     @buffer.policy = policy
-    @terminal = ModelTerminal.new width, height, policy, links: @buffer.links
-    @painter = TermBuf::Painter.new capabilities
-    @encoder = TermBuf::Encoder.new @buffer.styles, capabilities, width, height, @buffer.links
+    @sink = Sink.new @buffer, capabilities, policy
+  end
+
+  def terminal : ModelTerminal
+    @sink.terminal
+  end
+
+  def bytes : Int32
+    @sink.bytes
   end
 
   # Paints, feeds the result to the model terminal, and reports what still
   # differs. `nil` means the screen matches the buffer.
   def cycle : String?
-    emit
-    @terminal.diff @buffer, @encoder
+    @sink.cycle @buffer
   end
 
   # Paints and returns the bytes, without checking the result.
   def emit : String
-    output = @encoder.encode @painter.paint(@buffer)
+    @sink.emit
+  end
+end
+
+# One output of the buffer, paired with the terminal it is driving. Two of
+# these over one buffer is the case a second display has to survive.
+private class Sink
+  getter sink : TermBuf::Sink
+  getter terminal : ModelTerminal
+  getter bytes = 0
+
+  def initialize(buffer : TermBuf::Buffer, capabilities : TermBuf::Capabilities,
+                 policy : TermBuf::Unicode::WidthPolicy = TermBuf::Unicode::WidthPolicy::DEFAULT)
+    @sink = TermBuf::Sink.new buffer, capabilities
+    @terminal = ModelTerminal.new buffer.width, buffer.height, policy, links: buffer.links
+  end
+
+  def cycle(buffer : TermBuf::Buffer) : String?
+    emit
+    @terminal.diff buffer, @sink.encoder
+  end
+
+  def emit : String
+    output = @sink.encoder.encode @sink.paint
     @bytes += output.bytesize
     @terminal.feed output
-    @buffer.commit_paint
+    @sink.commit
     output
+  end
+
+  def invalidate : Nil
+    @sink.invalidate
   end
 end
 
@@ -252,5 +283,112 @@ Spectator.describe "paint round trip" do
     harness.cycle
 
     expect(harness.emit).to eq ""
+  end
+
+  # Two outputs over one buffer, with different capability masks, so they make
+  # different decisions about the same cells: one may scroll a band the other
+  # rewrites, one erases where the other writes spaces. Both have to end every
+  # step showing what the buffer holds.
+  describe "two sinks over one buffer" do
+    {% for widths in [{"DEFAULT_POLICY", "the default policy"},
+                      {"WIDE_CONJUNCT_POLICY", "a three column cluster"}] %}
+      sample [1_u64, 2_u64, 3_u64, 4_u64, 5_u64, 6_u64] do |seed|
+        it "keeps both in step under {{ widths[1].id }} (seed #{seed})" do
+          random = Random.new seed
+          buffer = TermBuf::Buffer.new 16, 6
+          buffer.policy = {{ widths[0].id }}
+          modern = Sink.new buffer, TermBuf::Capabilities::MODERN, {{ widths[0].id }}
+          ansi = Sink.new buffer, TermBuf::Capabilities::ANSI, {{ widths[0].id }}
+
+          60.times do |step|
+            random.rand(1..4).times { apply_operation buffer, random }
+
+            if failure = modern.cycle buffer
+              fail "seed #{seed}, step #{step}, modern: #{failure}"
+            end
+
+            if failure = ansi.cycle buffer
+              fail "seed #{seed}, step #{step}, ansi: #{failure}"
+            end
+          end
+        end
+      end
+    {% end %}
+
+    it "leaves the buffer clean only once both have painted" do
+      buffer = TermBuf::Buffer.new 12, 4
+      modern = Sink.new buffer, TermBuf::Capabilities::MODERN
+      ansi = Sink.new buffer, TermBuf::Capabilities::ANSI
+
+      buffer.write 0, 0, "hello"
+      modern.emit
+
+      expect(buffer.dirty?).to be_true
+
+      ansi.emit
+
+      expect(buffer.dirty?).to be_false
+    end
+
+    it "keeps a scroll hint until the slower sink has read it" do
+      buffer = TermBuf::Buffer.new 12, 4
+      modern = Sink.new buffer, TermBuf::Capabilities::MODERN
+      ansi = Sink.new buffer, TermBuf::Capabilities::ANSI
+
+      4.times { |row| buffer.write 0, row, "line #{row}" }
+      modern.emit
+      ansi.emit
+
+      buffer.scroll buffer.bounds, 1
+      modern.emit
+
+      expect(buffer.scroll_hints.size).to eq 1
+
+      ansi.emit
+
+      expect(buffer.scroll_hints).to be_empty
+    end
+
+    it "a sink attached mid-sequence catches up" do
+      random = Random.new 7_u64
+      buffer = TermBuf::Buffer.new 16, 6
+      first = Sink.new buffer, TermBuf::Capabilities::MODERN
+      second = nil.as(Sink?)
+
+      60.times do |step|
+        if step == 30
+          second = Sink.new buffer, TermBuf::Capabilities::ANSI
+          second.try &.invalidate
+        end
+
+        random.rand(1..4).times { apply_operation buffer, random }
+
+        if failure = first.cycle buffer
+          fail "step #{step}, first: #{failure}"
+        end
+
+        if later = second
+          if failure = later.cycle buffer
+            fail "step #{step}, second: #{failure}"
+          end
+        end
+      end
+    end
+
+    it "detaching leaves the other sink painting" do
+      buffer = TermBuf::Buffer.new 12, 4
+      kept = Sink.new buffer, TermBuf::Capabilities::MODERN
+      going = Sink.new buffer, TermBuf::Capabilities::ANSI
+
+      buffer.write 0, 0, "both"
+      kept.cycle buffer
+      going.cycle buffer
+      going.sink.detach
+
+      buffer.write 0, 1, "one"
+
+      expect(kept.cycle(buffer)).to be_nil
+      expect(buffer.dirty?).to be_false
+    end
   end
 end

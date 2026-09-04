@@ -10,10 +10,14 @@ module TermBuf
   # asks the terminal to scroll them rather than sending them again. The second
   # walks the rows that are still different and emits the changed runs.
   #
-  # The painter mutates the buffer's front grid as it extracts scrolls, so that
+  # The painter mutates the sink's front grid as it extracts scrolls, so that
   # the second pass diffs against the post-scroll state. That means the bytes it
   # returns have to actually reach the terminal; a caller that throws them away
-  # must call `Buffer#invalidate` before painting again.
+  # must call `Sink#invalidate` before painting again.
+  #
+  # It holds nothing about which screen it is diffing: the front grid, the
+  # damage and the scroll hints all come from the `Sink` it is handed, so one
+  # painter is one output rather than one buffer.
   class Painter
     # Roughly what a scroll costs in bytes: margins, the scroll itself, and
     # releasing the margins again.
@@ -100,15 +104,15 @@ module TermBuf
       @capabilities = capabilities
     end
 
-    # The operations that bring the terminal up to date. Empty when there is
-    # nothing to do. The caller writes them out and then calls
-    # `Buffer#commit_paint`.
-    def paint(buffer : Buffer) : Array(Op)
+    # The operations that bring *sink*'s terminal up to date with *buffer*.
+    # Empty when there is nothing to do. The caller writes them out and then
+    # calls `Sink#commit`.
+    def paint(buffer : Buffer, sink : Sink) : Array(Op)
       body = [] of Op
 
-      if buffer.dirty?
-        extract_scrolls buffer, body
-        paint_rows buffer, body
+      if sink.dirty?
+        extract_scrolls buffer, sink, body
+        paint_rows buffer, sink, body
       end
 
       tail = place_cursor body.empty?
@@ -156,11 +160,11 @@ module TermBuf
 
     # ------------------------------------------------------------ scrolling
 
-    private def extract_scrolls(buffer : Buffer, ops : Array(Op)) : Nil
-      hints = buffer.take_scroll_hints
+    private def extract_scrolls(buffer : Buffer, sink : Sink, ops : Array(Op)) : Nil
+      hints = sink.take_scroll_hints
       return unless @capabilities.includes? Capability::ScrollRegion
 
-      hints.each { |hint| consider_scroll buffer, hint, ops }
+      hints.each { |hint| consider_scroll buffer, sink, hint, ops }
     end
 
     # A hint says the buffer scrolled a rectangle. Whether the terminal should
@@ -168,38 +172,41 @@ module TermBuf
     # terminal's margins run the full width, so a narrower rectangle is out —
     # and that it pays, meaning the shift brings enough rows into agreement to
     # beat the cost of the escape sequences.
-    private def consider_scroll(buffer : Buffer, hint : ScrollHint, ops : Array(Op)) : Nil
+    private def consider_scroll(buffer : Buffer, sink : Sink, hint : ScrollHint,
+                                ops : Array(Op)) : Nil
       rect = hint.rect
       lines = hint.lines
 
       return unless rect.x.zero? && rect.width == buffer.width
       return if rect.height < 2
       return if lines.zero? || lines.abs >= rect.height
-      return if scroll_benefit(buffer, rect, lines) * ROW_COST <= SCROLL_OVERHEAD
+      return if scroll_benefit(buffer, sink, rect, lines) * ROW_COST <= SCROLL_OVERHEAD
 
-      emit_scroll buffer, rect, lines, ops
+      emit_scroll buffer, sink, rect, lines, ops
     end
 
     # How many more rows of the rectangle would agree after the shift than
     # agree now. Comparing row hashes rather than cells is what the grid keeps
     # them for.
-    private def scroll_benefit(buffer : Buffer, rect : Rect, lines : Int32) : Int32
+    private def scroll_benefit(buffer : Buffer, sink : Sink, rect : Rect,
+                               lines : Int32) : Int32
+      front = sink.front
       before = 0
       after = 0
 
       rect.each_row do |row|
-        before += 1 if buffer.front.row_hash(row) == buffer.back.row_hash(row)
+        before += 1 if front.row_hash(row) == buffer.back.row_hash(row)
 
         source = row + lines
         next unless rect.y <= source <= rect.bottom
 
-        after += 1 if buffer.front.row_hash(source) == buffer.back.row_hash(row)
+        after += 1 if front.row_hash(source) == buffer.back.row_hash(row)
       end
 
       after - before
     end
 
-    private def emit_scroll(buffer : Buffer, rect : Rect, lines : Int32,
+    private def emit_scroll(buffer : Buffer, sink : Sink, rect : Rect, lines : Int32,
                             ops : Array(Op)) : Nil
       whole_screen = rect.y.zero? && rect.height == buffer.height
 
@@ -212,23 +219,23 @@ module TermBuf
       ops << (lines > 0 ? Ops::ScrollUp.new(lines) : Ops::ScrollDown.new(-lines))
       ops << Ops::ResetScrollRegion.new unless whole_screen
 
-      buffer.front.scroll rect, lines, Cell.blank(StyleTable::DEFAULT)
-      buffer.front.damage.clear
+      sink.front.scroll rect, lines, Cell.blank(StyleTable::DEFAULT)
     end
 
     # ----------------------------------------------------------- row diffing
 
-    private def paint_rows(buffer : Buffer, ops : Array(Op)) : Nil
-      buffer.damage.each { |row, span| paint_row buffer, row, span, ops }
+    private def paint_rows(buffer : Buffer, sink : Sink, ops : Array(Op)) : Nil
+      sink.damage.each { |row, span| paint_row buffer, sink, row, span, ops }
     end
 
-    private def paint_row(buffer : Buffer, row : Int32, span : Range(Int32, Int32),
-                          ops : Array(Op)) : Nil
-      first, last = changed_range buffer, row, span
+    private def paint_row(buffer : Buffer, sink : Sink, row : Int32,
+                          span : Range(Int32, Int32), ops : Array(Op)) : Nil
+      first, last = changed_range buffer, sink, row, span
       return unless start = first
 
-      segments = merge_snapped buffer.back, row, build_segments(buffer, row, start, last)
-      erase = trailing_erase buffer, row, segments
+      segments = merge_snapped buffer.back, row,
+        build_segments(buffer, sink, row, start, last)
+      erase = trailing_erase buffer, sink, row, segments
 
       if erase
         limit = erase[0]
@@ -248,10 +255,10 @@ module TermBuf
     end
 
     # The first and last columns of *span* where the two grids disagree.
-    private def changed_range(buffer : Buffer, row : Int32,
+    private def changed_range(buffer : Buffer, sink : Sink, row : Int32,
                               span : Range(Int32, Int32)) : {Int32?, Int32}
       back = buffer.back
-      front = buffer.front
+      front = sink.front
       first = nil.as(Int32?)
       last = 0
 
@@ -270,10 +277,10 @@ module TermBuf
 
     # Groups the changed columns into runs, absorbing a gap of unchanged cells
     # whenever reprinting it costs less than moving the cursor over it.
-    private def build_segments(buffer : Buffer, row : Int32, start : Int32,
-                               finish : Int32) : Array(Segment)
+    private def build_segments(buffer : Buffer, sink : Sink, row : Int32,
+                               start : Int32, finish : Int32) : Array(Segment)
       back = buffer.back
-      front = buffer.front
+      front = sink.front
       segments = [] of Segment
       from = start
       previous = start
@@ -373,7 +380,7 @@ module TermBuf
     # An erase only reliably reproduces the default background — terminals
     # disagree about whether it honours the current one — so a run tinted any
     # other colour has to be written out.
-    private def trailing_erase(buffer : Buffer, row : Int32,
+    private def trailing_erase(buffer : Buffer, sink : Sink, row : Int32,
                                segments : Array(Segment)) : {Int32, StyleId}?
       last = segments.last?
       return unless last && last.to == buffer.width - 1
@@ -401,7 +408,7 @@ module TermBuf
       return unless buffer.width - start > ERASE_THRESHOLD
 
       # Only worth it if the cells being erased are actually stale.
-      front = buffer.front
+      front = sink.front
       stale = (start...buffer.width).any? { |column| back[column, row] != front[column, row] }
       return unless stale
 

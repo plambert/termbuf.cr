@@ -150,21 +150,24 @@ Spectator.describe "core buffer invariants" do
     random = Random.new 99_u64
     operations = Array.new(40) { {random.rand(12), random.rand(6), ALPHABET.sample(random)} }
 
+    sink = TermBuf::Sink.new buffer, TermBuf::Capabilities::XTERM
+
     operations.each { |(x, y, text)| buffer.write x, y, text }
-    buffer.commit_paint
+    sink.commit
     operations.each { |(x, y, text)| buffer.write x, y, text }
 
-    expect(buffer.painted?).to be_true
+    expect(sink.painted?).to be_true
   end
 
   it "reports no damage when non-overlapping writes are replayed" do
     buffer = TermBuf::Buffer.new 12, 6
+    sink = TermBuf::Sink.new buffer, TermBuf::Capabilities::XTERM
 
     buffer.height.times do |row|
       buffer.width.times { |column| buffer.write_char column, row, 'a' + column }
     end
 
-    buffer.commit_paint
+    sink.commit
 
     buffer.height.times do |row|
       buffer.width.times { |column| buffer.write_char column, row, 'a' + column }

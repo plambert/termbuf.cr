@@ -6,20 +6,26 @@ require "../spec_helper"
 # they happen at all.
 private class Session
   getter buffer : TermBuf::Buffer
-  getter painter : TermBuf::Painter
-  getter encoder : TermBuf::Encoder
+  getter sink : TermBuf::Sink
 
   def initialize(width = 20, height = 6,
                  capabilities = TermBuf::Capabilities::XTERM)
     @buffer = TermBuf::Buffer.new width, height
-    @painter = TermBuf::Painter.new capabilities
-    @encoder = TermBuf::Encoder.new @buffer.styles, capabilities, width, height
+    @sink = TermBuf::Sink.new @buffer, capabilities
+  end
+
+  def painter : TermBuf::Painter
+    @sink.painter
+  end
+
+  def encoder : TermBuf::Encoder
+    @sink.encoder
   end
 
   # Paints and commits, returning the operations without the frame wrapper.
   def paint : Array(TermBuf::Op)
-    ops = @painter.paint @buffer
-    @buffer.commit_paint
+    ops = @sink.paint
+    @sink.commit
     ops.reject do |op|
       op.is_a?(TermBuf::Ops::SetAutowrap) || op.is_a?(TermBuf::Ops::BeginSync) ||
         op.is_a?(TermBuf::Ops::EndSync)
@@ -27,15 +33,14 @@ private class Session
   end
 
   def bytes : String
-    ops = @painter.paint @buffer
-    output = @encoder.encode ops
-    @buffer.commit_paint
+    output = @sink.encoder.encode @sink.paint
+    @sink.commit
     output
   end
 
   def settle : Nil
-    @encoder.encode @painter.paint(@buffer)
-    @buffer.commit_paint
+    @sink.encoder.encode @sink.paint
+    @sink.commit
   end
 end
 
@@ -347,7 +352,7 @@ Spectator.describe TermBuf::Painter do
     it "turns wrapping off for the duration and back on afterwards" do
       session = Session.new
       session.buffer.write 0, 0, "x"
-      ops = session.painter.paint session.buffer
+      ops = session.sink.paint
 
       wraps = ops.compact_map(&.as?(TermBuf::Ops::SetAutowrap)).map(&.enabled)
       expect(wraps).to eq [false, true]
@@ -356,7 +361,7 @@ Spectator.describe TermBuf::Painter do
     it "brackets the frame when the terminal can synchronize" do
       session = Session.new capabilities: TermBuf::Capabilities::MODERN
       session.buffer.write 0, 0, "x"
-      ops = session.painter.paint session.buffer
+      ops = session.sink.paint
 
       expect(ops.first).to be_a TermBuf::Ops::BeginSync
       expect(ops.last).to be_a TermBuf::Ops::EndSync
@@ -366,7 +371,7 @@ Spectator.describe TermBuf::Painter do
       session = Session.new
       session.settle
 
-      expect(session.painter.paint(session.buffer)).to be_empty
+      expect(session.sink.paint).to be_empty
     end
   end
 

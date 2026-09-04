@@ -3,6 +3,7 @@ require "../cursor"
 require "../core/buffer"
 require "../core/encoder"
 require "../core/painter"
+require "../core/sink"
 require "../input/stream"
 require "./command"
 require "./event"
@@ -138,8 +139,7 @@ module TermBuf
     @screen : Region
     @cursor : Cursor?
     @hardware_cursor : Cursor?
-    @painter : Painter
-    @encoder : Encoder
+    @sink : Sink
     @meter : Meter
     @commands : Channel(Command)
     @scheduler : Fiber?
@@ -161,10 +161,8 @@ module TermBuf
       @size = size || @tty.size
       @buffer = Buffer.new @size.columns, @size.rows
       @screen = Region.new Rect.full(@size.columns, @size.rows)
-      @painter = Painter.new @capabilities
-      @painter.clear_overhang = clear_overhang
-      @encoder = Encoder.new @buffer.styles, @capabilities, @size.columns, @size.rows,
-        @buffer.links
+      @sink = Sink.new @buffer, @capabilities
+      @sink.clear_overhang = clear_overhang
       @meter = Meter.new @tty.output
       @commands = Channel(Command).new COMMAND_CAPACITY
       @input = Input::Stream.new @tty.input, blocking: @tty.managed?
@@ -270,12 +268,12 @@ module TermBuf
     # over a neighbouring cell without repainting it, so ink left there stays
     # until something writes that cell again.
     def clear_overhang? : Bool
-      @painter.clear_overhang?
+      @sink.clear_overhang?
     end
 
     # :ditto:
     def clear_overhang=(value : Bool) : Bool
-      @painter.clear_overhang = value
+      @sink.clear_overhang = value
     end
 
     # Whether to give the screen back and say so on stderr the first time a
@@ -345,8 +343,8 @@ module TermBuf
 
       @widths = overrides.policy
       @buffer.policy = @widths
-      @painter.watch_composed_drift = @detect_composed_drift &&
-                                      @quirks.per_code_point_columns?
+      @sink.watch_composed_drift = @detect_composed_drift &&
+                                   @quirks.per_code_point_columns?
     end
 
     # Terminals reach conclusions this design has no rule for. Naming what is
@@ -452,12 +450,12 @@ module TermBuf
       queued.each { |text| @meter << text }
       # Each placement had to move the cursor to get there, so where the
       # encoder last left it is no longer where it is.
-      @encoder.forget_cursor
+      @sink.encoder.forget_cursor
 
       # And the one the application is having the terminal follow has to be put
       # back, or it spends the frame sitting under the last picture drawn.
       if following
-        @encoder.encode [Ops::MoveTo.new(following.x, following.y)] of Op, @meter
+        @sink.encoder.encode [Ops::MoveTo.new(following.x, following.y)] of Op, @meter
       end
 
       @tty.flush
@@ -771,21 +769,20 @@ module TermBuf
     private def perform_paint(command : Commands::Paint) : Nil
       if command.forced
         @buffer.invalidate
-        @encoder.reset_state
-        @painter.reset_state
+        @sink.reset_state
       end
 
       # Read here rather than on whichever fibre moved the cursor, so a frame
       # carries one position rather than half of two.
       following = @hardware_cursor
-      @painter.hardware_cursor = following && {following.x, following.y}
+      @sink.hardware_cursor = following && {following.x, following.y}
 
-      ops = @painter.paint @buffer
+      ops = @sink.paint
 
       @meter.bytes = 0
 
       unless ops.empty?
-        @encoder.encode ops, @meter
+        @sink.encoder.encode ops, @meter
         @tty.flush
       end
 
@@ -794,7 +791,7 @@ module TermBuf
       @last_paint_bytes = @meter.bytes
       @total_paint_bytes += @meter.bytes
 
-      @buffer.commit_paint
+      @sink.commit
       report_composed_drift
       command.reply.try &.send nil
     rescue error
@@ -810,7 +807,7 @@ module TermBuf
     # events would otherwise watch the display come apart with no explanation.
     # `#warn_composed_drift=` turns the screen half off and leaves the event.
     private def report_composed_drift : Nil
-      cluster = @painter.take_composed_drift
+      cluster = @sink.take_composed_drift
       return unless cluster
 
       message = composed_drift_message cluster
@@ -878,8 +875,7 @@ module TermBuf
     # command and wait for it.
     private def repaint_in_place : Nil
       @buffer.invalidate
-      @encoder.reset_state
-      @painter.reset_state
+      @sink.reset_state
       perform_paint Commands::Paint.new(false, nil)
     end
 
@@ -976,8 +972,6 @@ module TermBuf
       previous = @size
       @size = size
       @buffer.resize size.columns, size.rows
-      @encoder.resize size.columns, size.rows
-      @painter.reset_state
 
       # The screen-wide region has to follow the screen. A region an
       # application made covers a pane it chose, and moving that is its
@@ -1044,8 +1038,8 @@ module TermBuf
     private def write_through(bytes : Bytes) : Nil
       @tty.output.write bytes
       @tty.flush
-      @encoder.reset_state
-      @encoder.forget_link_state
+      @sink.encoder.reset_state
+      @sink.encoder.forget_link_state
     end
 
     # --------------------------------------------------------------- signals
