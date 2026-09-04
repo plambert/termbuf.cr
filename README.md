@@ -523,7 +523,7 @@ buffer.commit_paint
 
 ## Hyperlinks, images, and the terminal's colours
 
-Three things a modern terminal will do that a cell grid cannot express, each behind the capability
+Four things a modern terminal will do that a cell grid cannot express, each behind the capability
 that says whether asking is safe.
 
 ### Hyperlinks
@@ -555,6 +555,25 @@ stops on a signal, still gives the terminal back the colours it was found with.
 Fewer terminals have it than claim to, and there is no query to settle it: ghostty parses
 `XTPUSHCOLORS` and `XTPOPCOLORS` and does nothing with them, so it is denied the capability by name.
 Check `Terminal#colors.available?` if it matters which way a terminal went.
+
+### The clipboard
+
+```crystal
+terminal.clipboard.copy "the selected text"
+terminal.clipboard.copy "a middle-click paste", :primary
+```
+
+OSC 52, behind `Capability::Osc52Clipboard`. The terminal is the only thing in the picture with a
+connection to the window system, so a program on the far end of an ssh session sets the clipboard of
+the machine the human is sitting at. Copies go out in order with the frames around them, the way a
+colour change does.
+
+Nothing comes back: the terminal answers nothing on a write, so a refusal and a success look the
+same from here. Nor is there anything to chunk into — OSC 52 carries one payload, and the limit on
+it is the terminal's rather than the protocol's — so a caller moving more than a few kilobytes
+should not expect it to arrive, and cannot find out that it did not. The capability is a table
+entry for kitty, ghostty, WezTerm and foot rather than something measured; xterm supports the write
+and ships it off, which from here is the same as not having it.
 
 ### Images
 

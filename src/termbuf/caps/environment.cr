@@ -37,6 +37,17 @@ module TermBuf
     # has exited.
     COLOR_STACK = Capability::KittyColorStack
 
+    # Writing the system clipboard with OSC 52.
+    #
+    # A table entry rather than a measurement: OSC 52 answers nothing on a
+    # write, so there is no query and no probe, only the terminal's
+    # documentation and its source. Kitty, ghostty, WezTerm and foot all
+    # document the write, and all four ship it enabled; xterm supports it and
+    # ships it *off*, which is indistinguishable from not having it, so it
+    # stays out. `TERMBUF_CAPS=+osc52_clipboard` covers a terminal that has it
+    # and is not named here.
+    CLIPBOARD_WRITE = Capability::Osc52Clipboard
+
     # What kitty does not draw.
     #
     # Measured against 0.48.2: SGR 53 leaves the text unmarked where SGR 4
@@ -48,21 +59,28 @@ module TermBuf
 
     # kitty, whose protocols the other current terminals borrowed, less the two
     # attributes it does not draw.
-    KITTY = (Capabilities::MODERN.flags | KITTY_EXTRAS) & ~KITTY_MISSING
+    KITTY = (Capabilities::MODERN.flags | KITTY_EXTRAS | CLIPBOARD_WRITE) & ~KITTY_MISSING
 
     # A current terminal that neither blinks nor keeps colours for you.
     # `Capabilities.normalize` drops the rapid variant along with the slow one,
     # so taking both off here is belt and braces.
-    GHOSTTY = (Capabilities::MODERN.flags | KITTY_EXTRAS) & ~(BLINKING | COLOR_STACK)
+    GHOSTTY = (Capabilities::MODERN.flags | KITTY_EXTRAS | CLIPBOARD_WRITE) &
+              ~(BLINKING | COLOR_STACK)
+
+    # WezTerm, which took kitty's graphics protocol and not the rest of it.
+    WEZTERM = Capabilities::MODERN.flags | Capability::KittyGraphics | CLIPBOARD_WRITE
+
+    # foot, a current terminal with no protocols borrowed from kitty.
+    FOOT = Capabilities::MODERN.flags | CLIPBOARD_WRITE
 
     # Matched against `TERM`, most specific first.
     TERM_PATTERNS = [
       {/\Adumb/, Capability::None},
       {/kitty/, KITTY},
       {/ghostty/, GHOSTTY},
-      {/wezterm/, Capabilities::MODERN.flags | Capability::KittyGraphics},
+      {/wezterm/, WEZTERM},
       {/alacritty/, Capabilities::MODERN.flags},
-      {/\Afoot/, Capabilities::MODERN.flags},
+      {/\Afoot/, FOOT},
       {/\Acontour/, Capabilities::MODERN.flags},
       {/\Ario/, Capabilities::MODERN.flags},
       {/(256color|direct)/, Capabilities::XTERM.flags},
@@ -77,7 +95,7 @@ module TermBuf
     # terminal names itself here rather than naming its terminfo entry.
     PROGRAM_PATTERNS = [
       {"ghostty", GHOSTTY},
-      {"WezTerm", Capabilities::MODERN.flags | Capability::KittyGraphics},
+      {"WezTerm", WEZTERM},
       # iTerm2 blinks, behind a per-profile `Blink Allowed` that ships off. That
       # is the user's setting rather than the terminal's ceiling, and a
       # capability describes what the terminal can be asked to do.
@@ -100,8 +118,8 @@ module TermBuf
     MARKER_VARIABLES = [
       {"KITTY_WINDOW_ID", "kitty", KITTY},
       {"GHOSTTY_RESOURCES_DIR", "ghostty", GHOSTTY},
-      {"WEZTERM_PANE", "wezterm", Capabilities::MODERN.flags | Capability::KittyGraphics},
-      {"WEZTERM_EXECUTABLE", "wezterm", Capabilities::MODERN.flags | Capability::KittyGraphics},
+      {"WEZTERM_PANE", "wezterm", WEZTERM},
+      {"WEZTERM_EXECUTABLE", "wezterm", WEZTERM},
       {"ALACRITTY_WINDOW_ID", "alacritty", Capabilities::MODERN.flags},
       {"KONSOLE_VERSION", "konsole", Capabilities::XTERM.flags | Capability::TrueColor |
                                      Capability::Osc8Links},

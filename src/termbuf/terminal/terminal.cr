@@ -453,7 +453,18 @@ module TermBuf
     getter colors : ColorStack { build_color_stack }
 
     private def build_color_stack : ColorStack
-      ColorStack.new(@capabilities) { |bytes| issue Commands::SetColors.new(bytes) }
+      ColorStack.new(@capabilities) { |bytes| issue Commands::Quiet.new(bytes) }
+    end
+
+    # The system clipboard, written through the terminal with OSC 52.
+    #
+    # A copy goes out in order with the frames around it, the way a colour
+    # change does. See `Clipboard` for what a terminal will take and for why
+    # nothing comes back to say whether it took it.
+    getter clipboard : Clipboard { build_clipboard }
+
+    private def build_clipboard : Clipboard
+      Clipboard.new(@capabilities) { |bytes| issue Commands::Quiet.new(bytes) }
     end
 
     # Interns a hyperlink and returns the id a `Style` carries it by.
@@ -705,7 +716,7 @@ module TermBuf
 
       case command
       in Commands::Passthrough then write_through command.bytes
-      in Commands::SetColors   then write_colors command.bytes
+      in Commands::Quiet       then write_quiet command.bytes
       in Commands::Mode        then write_mode command
       in Commands::Paint       then perform_paint command
       in Commands::Resize      then perform_resize command.size
@@ -984,9 +995,9 @@ module TermBuf
       end
     end
 
-    # A colour change moves no cursor and sets no attribute, so unlike a
-    # passthrough it leaves what the encoder knows about the screen intact.
-    private def write_colors(bytes : Bytes) : Nil
+    # These move no cursor and set no attribute, so unlike a passthrough they
+    # leave what the encoder knows about the screen intact.
+    private def write_quiet(bytes : Bytes) : Nil
       @tty.output.write bytes
       @tty.flush
     end

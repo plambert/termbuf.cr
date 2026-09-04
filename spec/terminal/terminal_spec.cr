@@ -1060,6 +1060,40 @@ Spectator.describe TermBuf::Terminal do
     end
   end
 
+  describe "the clipboard" do
+    private CLIPPING = TermBuf::Capabilities.new(
+      TermBuf::Capabilities::MODERN.flags | TermBuf::Capability::Osc52Clipboard)
+
+    it "sends a copy in order with the frames around it" do
+      with_harness capabilities: CLIPPING do |harness|
+        harness.drain
+        harness.terminal.write 0, 0, "before"
+        harness.terminal.paint
+        harness.terminal.clipboard.copy "x"
+        harness.terminal.write 0, 1, "after"
+        harness.terminal.paint
+
+        written = harness.drain
+        expect(written).to contain "\e]52;c;eA==\e\\"
+
+        leading, _, trailing = written.partition "\e]52;"
+        expect(leading).to contain "before"
+        expect(leading).not_to contain "after"
+        expect(trailing).to contain "after"
+      end
+    end
+
+    it "says nothing on a terminal without OSC 52" do
+      with_harness do |harness|
+        harness.drain
+        harness.terminal.clipboard.copy "x"
+        harness.terminal.paint
+
+        expect(harness.drain).not_to contain "\e]52;"
+      end
+    end
+  end
+
   describe "images" do
     private GRAPHICAL = TermBuf::Capabilities.new(
       TermBuf::Capabilities::MODERN.flags | TermBuf::Capability::KittyGraphics)

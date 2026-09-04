@@ -36,10 +36,11 @@ module TermBuf
     # Forget what the terminal is showing, so the next paint rewrites it all.
     record Invalidate
 
-    # A change to the terminal's own colours, sent once the current frame is
-    # out. Unlike `Passthrough` these move no cursor and set no attribute, so
-    # the encoder's idea of the screen survives them.
-    record SetColors, bytes : Bytes
+    # Bytes sent once the current frame is out that move no cursor and set no
+    # attribute: a change to the terminal's own colours, a clipboard write.
+    # Unlike `Passthrough` the encoder's idea of the screen survives them, so
+    # the next frame carries on from where the last one left off.
+    record Quiet, bytes : Bytes
 
     # Bytes to send to the terminal untouched, once the current frame is out.
     record Passthrough, bytes : Bytes
@@ -50,7 +51,7 @@ module TermBuf
     record Paint, forced : Bool, reply : Channel(Exception?)?
 
     # A terminal mode turned on or off, once the current frame is out. Like
-    # `SetColors` these move no cursor and set no attribute, so the encoder's
+    # `Quiet` these move no cursor and set no attribute, so the encoder's
     # idea of the screen survives them.
     record Mode, mode : Tty::Mode, enabled : Bool
 
@@ -75,7 +76,7 @@ module TermBuf
   alias Command = Commands::Write | Commands::WriteChar | Commands::Fill |
                   Commands::Clear | Commands::Scroll | Commands::ScrollRegion |
                   Commands::Blit | Commands::Invalidate | Commands::Passthrough |
-                  Commands::SetColors | Commands::Mode | Commands::Paint |
+                  Commands::Quiet | Commands::Mode | Commands::Paint |
                   Commands::Resize | Commands::Apply | Commands::Batch |
                   Commands::Stop
 
@@ -227,7 +228,7 @@ module TermBuf
       in Commands::ScrollRegion then buffer.scroll_region command.region, command.lines, command.style
       in Commands::Blit         then buffer.blit command.source, command.x, command.y, command.from
       in Commands::Invalidate   then buffer.invalidate
-      in Commands::Passthrough, Commands::SetColors, Commands::Mode, Commands::Paint,
+      in Commands::Passthrough, Commands::Quiet, Commands::Mode, Commands::Paint,
          Commands::Resize, Commands::Apply, Commands::Batch, Commands::Stop
         return false
       end

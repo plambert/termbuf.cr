@@ -16,8 +16,19 @@ All notable changes to this project are documented here. The format follows
   and the widths this shard works from were measured with it off. No environment table claims it and
   it is not in `Capabilities::MODERN`.
 - `Capability::Osc52Clipboard`, reading and writing the system clipboard through the terminal.
-  Reserved: nothing sets it and nothing reads it yet, and `TERMBUF_CAPS=+osc52_clipboard` is the
-  only way to turn it on.
+- `Clipboard` and `Terminal#clipboard`, writing the system clipboard with OSC 52.
+  `terminal.clipboard.copy "text"` puts the base64 of the text's UTF-8 bytes on the wire in order
+  with the frames around it, and `Clipboard::Target::Primary` sends it to the X11 primary selection
+  instead. Gated on `Capability::Osc52Clipboard`: without it a copy writes nothing, since a terminal
+  that does not take the sequence prints it. Nothing chunks and nothing is read back — OSC 52
+  carries one payload, the limit on it belongs to the terminal, and a write is answered by nothing
+  at all, so a caller moving more than a few kilobytes should not expect it to arrive and cannot
+  find out that it did not.
+- kitty, ghostty, WezTerm and foot now come out of `EnvironmentDetector` with
+  `Capability::Osc52Clipboard`. Table entries pending live verification: OSC 52 answers nothing on a
+  write, so there is no probe to settle it, and the evidence is each terminal's documentation and
+  source rather than having watched a paste. xterm supports the write and ships it off, so it stays
+  out. `TERMBUF_CAPS=+osc52_clipboard` still covers a terminal that is not named.
 - `Blend`, a per cell rule for what style a write, fill or clear places: given the style already in
   the cell, the style being written, and the cell's position in the buffer, it returns the style to
   put there. `Style::KEEP_BACKGROUND` keeps the colour already behind each cell, `Style::OVER`
@@ -82,6 +93,10 @@ All notable changes to this project are documented here. The format follows
   registrations, so taking the terminal back re-applies them.
 
 ### Changed
+
+- `Commands::SetColors` is now `Commands::Quiet`: bytes sent after the current frame that move no
+  cursor and set no attribute, so the encoder's idea of the screen survives them. The colour stack
+  and the clipboard both issue through it, and the name no longer claims one of them.
 
 - `Events::Resize` carries `previous`, the size being left, alongside the new one. An application
   that scales or scrolls to follow a resize needs to know which way the window went, and asking the

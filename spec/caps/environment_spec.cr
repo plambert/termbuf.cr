@@ -267,6 +267,32 @@ Spectator.describe TermBuf::EnvironmentDetector do
     end
   end
 
+  # OSC 52 answers nothing on a write, so there is no probe to settle this and
+  # the table is all there is. These four document the write and ship it on;
+  # xterm supports it and ships it off, which comes to the same thing.
+  describe "the clipboard" do
+    it "gives OSC 52 to the terminals that write the clipboard" do
+      expect(detect({"TERM" => "xterm-kitty"}).includes?(Cap::Osc52Clipboard)).to be_true
+      expect(detect({"TERM" => "xterm-ghostty"}).includes?(Cap::Osc52Clipboard)).to be_true
+      expect(detect({"TERM" => "wezterm"}).includes?(Cap::Osc52Clipboard)).to be_true
+      expect(detect({"TERM" => "foot"}).includes?(Cap::Osc52Clipboard)).to be_true
+    end
+
+    it "gives it to the same terminals by the name they call themselves" do
+      expect(detect({"TERM_PROGRAM" => "ghostty"}).includes?(Cap::Osc52Clipboard)).to be_true
+      expect(detect({"TERM_PROGRAM" => "WezTerm"}).includes?(Cap::Osc52Clipboard)).to be_true
+      expect(detect({"KITTY_WINDOW_ID" => "1"}).includes?(Cap::Osc52Clipboard)).to be_true
+    end
+
+    it "withholds it from terminals that have not been shown to write" do
+      expect(detect({"TERM" => "xterm-256color"}).includes?(Cap::Osc52Clipboard)).to be_false
+
+      apple = detect({"TERM" => "xterm-256color", "TERM_PROGRAM" => "Apple_Terminal",
+                      "TERM_PROGRAM_VERSION" => "470.2"})
+      expect(apple.includes?(Cap::Osc52Clipboard)).to be_false
+    end
+  end
+
   # Starting one terminal from a shell that had another's environment leaves
   # the first one's marker behind. Terminal.app opened from ghostty came back
   # claiming the kitty graphics protocol and 24 bit colour.
