@@ -323,27 +323,36 @@ class ModelTerminal
       line_feed
     end
 
-    detach @cursor_x
-    detach @cursor_x + 1 if columns == 2
+    columns.times { |offset| detach @cursor_x + offset }
 
     self[@cursor_x, @cursor_y] = ModelCell.new text, @style, columns
-    self[@cursor_x + 1, @cursor_y] = ModelCell.continuation @style if columns == 2
+    (1...columns).each do |offset|
+      self[@cursor_x + offset, @cursor_y] = ModelCell.continuation @style
+    end
 
     @cursor_x += columns
     @cursor_x = @width - 1 if @cursor_x >= @width && !autowrap?
   end
 
+  # Blanks the whole cluster overlapping *column*, however many cells it holds.
+  # A cell that is neither a lead nor a continuation is left alone.
   private def detach(column : Int32) : Nil
     return unless 0 <= column < @width
 
-    cell = self[column, @cursor_y]
+    lead = column
+    while lead > 0 && self[lead, @cursor_y].continuation?
+      lead -= 1
+    end
 
-    if cell.continuation?
-      self[column - 1, @cursor_y] = ModelCell.blank @style if column > 0
-      self[column, @cursor_y] = ModelCell.blank @style
-    elsif cell.width == 2
-      self[column, @cursor_y] = ModelCell.blank @style
-      self[column + 1, @cursor_y] = ModelCell.blank @style if column + 1 < @width
+    cell = self[lead, @cursor_y]
+    return if cell.width == 1
+
+    # Zero is a continuation at the left edge with no lead left to walk to, so
+    # it answers for itself alone.
+    span = Math.max cell.width, 1
+
+    span.times do |offset|
+      self[lead + offset, @cursor_y] = ModelCell.blank @style if lead + offset < @width
     end
   end
 

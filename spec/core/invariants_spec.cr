@@ -2,10 +2,11 @@ require "../spec_helper"
 
 # Randomized checks on the two properties the paint algorithm will lean on.
 #
-# The first is that a wide character always occupies exactly two adjacent
-# cells. Getting that wrong produces a grid the painter can encode faithfully
-# and still leave the screen corrupt, because the terminal's idea of where the
-# cursor is diverges from the buffer's.
+# The first is that a cluster of width N always occupies exactly N adjacent
+# cells: a lead and N-1 continuations, all on the grid. Getting that wrong
+# produces a grid the painter can encode faithfully and still leave the screen
+# corrupt, because the terminal's idea of where the cursor is diverges from the
+# buffer's.
 #
 # The second is that damage is *sound*: every cell that changed is inside the
 # damage span recorded for its row. The painter only scans those spans, so a
@@ -17,9 +18,15 @@ private ALPHABET = [
   "é", "á̂",            # combining
   "😀", "☀️",            # emoji, with and without a variation selector
   "\u{1F1FA}\u{1F1F8}", # a flag, two code points in one wide cell
-  "क्ष",                # an Indic conjunct
+  "क्ष", "क्षि",        # an Indic conjunct, and one carrying a vowel sign
   "ab", "a漢b", "x́y",
 ]
+
+# The default, and the one a terminal charging three columns for `क्षि` gets:
+# the same grid has to hold a cluster wider than a pair.
+private DEFAULT_POLICY       = TermBuf::Unicode::WidthPolicy::DEFAULT
+private WIDE_CONJUNCT_POLICY =
+  TermBuf::Unicode::WidthPolicy::DEFAULT.with "conjunct_spacing_adds", true
 
 private STYLES = [
   TermBuf::Style::DEFAULT,
@@ -41,22 +48,46 @@ private BLENDS = [
 private def check_pairing(grid : TermBuf::Grid) : String?
   grid.height.times do |row|
     grid.width.times do |column|
-      cell = grid[column, row]
+      if failure = check_cell grid, column, row
+        return failure
+      end
+    end
+  end
 
-      if cell.continuation?
-        return "continuation at #{column},#{row} with no lead" if column.zero?
+  nil
+end
 
-        lead = grid[column - 1, row]
-        return "continuation at #{column},#{row} follows #{lead}" unless lead.wide?
-      elsif cell.wide?
-        if column + 1 >= grid.width
-          return "wide character at #{column},#{row} in the last column"
-        end
+# A lead of width N is followed by exactly N-1 continuations and its whole
+# extent is on the grid; a continuation belongs to the lead found by walking
+# left, whose extent covers it.
+private def check_cell(grid : TermBuf::Grid, column : Int32, row : Int32) : String?
+  cell = grid[column, row]
 
-        follower = grid[column + 1, row]
-        unless follower.continuation?
-          return "wide character at #{column},#{row} followed by #{follower}"
-        end
+  if cell.continuation?
+    lead_column = column
+    while lead_column > 0 && grid[lead_column, row].continuation?
+      lead_column -= 1
+    end
+
+    if lead_column == column
+      return "continuation at #{column},#{row} with no lead"
+    end
+
+    lead = grid[lead_column, row]
+    unless lead.wide? && lead_column + lead.width > column
+      return "continuation at #{column},#{row} is not covered by #{lead} at #{lead_column}"
+    end
+  elsif cell.wide?
+    span = cell.width.to_i
+
+    if column + span > grid.width
+      return "#{span} column cluster at #{column},#{row} runs off the grid"
+    end
+
+    (1...span).each do |offset|
+      follower = grid[column + offset, row]
+      unless follower.continuation?
+        return "#{span} column cluster at #{column},#{row} followed by #{follower}"
       end
     end
   end
@@ -81,28 +112,34 @@ end
 
 Spectator.describe "core buffer invariants" do
   # A fixed seed so a failure is reproducible; widen the range when hunting.
-  sample [1_u64, 2_u64, 3_u64, 4_u64, 5_u64, 6_u64, 7_u64, 8_u64] do |seed|
-    it "holds across a random sequence of operations (seed #{seed})" do
-      random = Random.new seed
-      buffer = TermBuf::Buffer.new 12, 6
-      snapshot = TermBuf::Grid.new 12, 6
+  {% for widths in [{"DEFAULT_POLICY", "the default policy"},
+                    {"WIDE_CONJUNCT_POLICY", "a three column cluster"}] %}
+    describe "under {{ widths[1].id }}" do
+      sample [1_u64, 2_u64, 3_u64, 4_u64, 5_u64, 6_u64, 7_u64, 8_u64] do |seed|
+        it "holds across a random sequence of operations (seed #{seed})" do
+          random = Random.new seed
+          buffer = TermBuf::Buffer.new 12, 6
+          buffer.policy = {{ widths[0].id }}
+          snapshot = TermBuf::Grid.new 12, 6
 
-      300.times do |step|
-        snapshot.copy_from buffer.back
-        buffer.back.damage.clear
+          300.times do |step|
+            snapshot.copy_from buffer.back
+            buffer.back.damage.clear
 
-        apply_operation buffer, random
+            apply_operation buffer, random
 
-        if failure = check_pairing buffer.back
-          fail "seed #{seed}, step #{step}: #{failure}"
-        end
+            if failure = check_pairing buffer.back
+              fail "seed #{seed}, step #{step}: #{failure}"
+            end
 
-        if failure = check_damage buffer.back, snapshot
-          fail "seed #{seed}, step #{step}: #{failure}"
+            if failure = check_damage buffer.back, snapshot
+              fail "seed #{seed}, step #{step}: #{failure}"
+            end
+          end
         end
       end
     end
-  end
+  {% end %}
 
   # Damage is monotone within a paint cycle: a write that changes a cell and a
   # later one that puts it back both mark it, so replaying an overlapping

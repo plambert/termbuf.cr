@@ -14,9 +14,16 @@ private ALPHABET = [
   "é", "á̂",
   "😀", "☀️",
   "\u{1F1FA}\u{1F1F8}",
-  "क्ष",
+  "क्ष", "क्षि",
   "hello", "a漢b", "x́y", "  ",
 ]
+
+# The default, and a terminal that charges three columns for `क्षि`. The whole
+# paint algorithm has to hold for a cluster wider than a cell pair, so every
+# case below runs under both.
+private DEFAULT_POLICY       = TermBuf::Unicode::WidthPolicy::DEFAULT
+private WIDE_CONJUNCT_POLICY =
+  TermBuf::Unicode::WidthPolicy::DEFAULT.with "conjunct_spacing_adds", true
 
 private STYLES = [
   TermBuf::Style::DEFAULT,
@@ -48,9 +55,11 @@ private class Harness
   getter terminal : ModelTerminal
   getter bytes = 0
 
-  def initialize(width : Int32, height : Int32, capabilities : TermBuf::Capabilities)
+  def initialize(width : Int32, height : Int32, capabilities : TermBuf::Capabilities,
+                 policy : TermBuf::Unicode::WidthPolicy = TermBuf::Unicode::WidthPolicy::DEFAULT)
     @buffer = TermBuf::Buffer.new width, height
-    @terminal = ModelTerminal.new width, height, links: @buffer.links
+    @buffer.policy = policy
+    @terminal = ModelTerminal.new width, height, policy, links: @buffer.links
     @painter = TermBuf::Painter.new capabilities
     @encoder = TermBuf::Encoder.new @buffer.styles, capabilities, width, height, @buffer.links
   end
@@ -124,96 +133,100 @@ end
 
 Spectator.describe "paint round trip" do
   {% for mask in %w[MODERN XTERM ANSI NONE] %}
-    describe "against a {{ mask.downcase.id }} terminal" do
-      let(caps) { TermBuf::Capabilities::{{ mask.id }} }
+    {% for widths in [{"DEFAULT_POLICY", "the default policy"},
+                      {"WIDE_CONJUNCT_POLICY", "a three column cluster"}] %}
+      describe "against a {{ mask.downcase.id }} terminal under {{ widths[1].id }}" do
+        let(caps) { TermBuf::Capabilities::{{ mask.id }} }
+        let(widths) { {{ widths[0].id }} }
 
-      it "reproduces a screen written once" do
-        harness = Harness.new 20, 6, caps
-        harness.buffer.write 0, 0, "hello world"
-        harness.buffer.write 3, 2, "漢字テスト", STYLES[2]
-        harness.buffer.write 0, 4, "😀 flags \u{1F1FA}\u{1F1F8}", STYLES[4]
+        it "reproduces a screen written once" do
+          harness = Harness.new 20, 6, caps, widths
+          harness.buffer.write 0, 0, "hello world"
+          harness.buffer.write 3, 2, "漢字テスト", STYLES[2]
+          harness.buffer.write 0, 4, "😀 flags \u{1F1FA}\u{1F1F8}", STYLES[4]
 
-        expect(harness.cycle).to be_nil
-      end
+          expect(harness.cycle).to be_nil
+        end
 
-      it "reproduces a screen changed a little at a time" do
-        harness = Harness.new 20, 6, caps
-        harness.buffer.write 0, 0, "the quick brown fox"
-        expect(harness.cycle).to be_nil
+        it "reproduces a screen changed a little at a time" do
+          harness = Harness.new 20, 6, caps, widths
+          harness.buffer.write 0, 0, "the quick brown fox"
+          expect(harness.cycle).to be_nil
 
-        harness.buffer.write 4, 0, "slow", STYLES[1]
-        expect(harness.cycle).to be_nil
+          harness.buffer.write 4, 0, "slow", STYLES[1]
+          expect(harness.cycle).to be_nil
 
-        harness.buffer.write 0, 3, "and back again"
-        expect(harness.cycle).to be_nil
-      end
+          harness.buffer.write 0, 3, "and back again"
+          expect(harness.cycle).to be_nil
+        end
 
-      it "reproduces a scrolled screen" do
-        harness = Harness.new 20, 6, caps
-        6.times { |row| harness.buffer.write 0, row, "line #{row}" }
-        expect(harness.cycle).to be_nil
+        it "reproduces a scrolled screen" do
+          harness = Harness.new 20, 6, caps, widths
+          6.times { |row| harness.buffer.write 0, row, "line #{row}" }
+          expect(harness.cycle).to be_nil
 
-        harness.buffer.scroll harness.buffer.bounds, 2
-        harness.buffer.write 0, 4, "line 6"
-        harness.buffer.write 0, 5, "line 7"
-        expect(harness.cycle).to be_nil
-      end
+          harness.buffer.scroll harness.buffer.bounds, 2
+          harness.buffer.write 0, 4, "line 6"
+          harness.buffer.write 0, 5, "line 7"
+          expect(harness.cycle).to be_nil
+        end
 
-      it "reproduces a partially scrolled screen" do
-        harness = Harness.new 20, 6, caps
-        6.times { |row| harness.buffer.write 0, row, "line #{row}" }
-        expect(harness.cycle).to be_nil
+        it "reproduces a partially scrolled screen" do
+          harness = Harness.new 20, 6, caps, widths
+          6.times { |row| harness.buffer.write 0, row, "line #{row}" }
+          expect(harness.cycle).to be_nil
 
-        harness.buffer.scroll TermBuf::Rect.new(0, 1, 20, 4), 1
-        expect(harness.cycle).to be_nil
-      end
+          harness.buffer.scroll TermBuf::Rect.new(0, 1, 20, 4), 1
+          expect(harness.cycle).to be_nil
+        end
 
-      it "reproduces a cleared screen" do
-        harness = Harness.new 20, 6, caps
-        6.times { |row| harness.buffer.write 0, row, "filled #{row}" }
-        expect(harness.cycle).to be_nil
+        it "reproduces a cleared screen" do
+          harness = Harness.new 20, 6, caps, widths
+          6.times { |row| harness.buffer.write 0, row, "filled #{row}" }
+          expect(harness.cycle).to be_nil
 
-        harness.buffer.clear
-        expect(harness.cycle).to be_nil
-      end
+          harness.buffer.clear
+          expect(harness.cycle).to be_nil
+        end
 
-      it "reproduces a screen tinted with a background" do
-        harness = Harness.new 20, 6, caps
-        harness.buffer.clear STYLES[4]
-        harness.buffer.write 2, 2, "on a tint", STYLES[4]
+        it "reproduces a screen tinted with a background" do
+          harness = Harness.new 20, 6, caps, widths
+          harness.buffer.clear STYLES[4]
+          harness.buffer.write 2, 2, "on a tint", STYLES[4]
 
-        expect(harness.cycle).to be_nil
-      end
+          expect(harness.cycle).to be_nil
+        end
 
-      it "reproduces a panel tinted by a gradient" do
-        harness = Harness.new 20, 6, caps
-        panel = TermBuf::Rect.new 2, 1, 12, 4
-        ramp = TermBuf::Gradient.new TermBuf::Color.rgb(0x102080), TermBuf::Color.rgb(0xE04010),
-          TermBuf::Rect.new(0, 0, panel.width, panel.height), :vertical
-        screen = TermBuf::BufferSurface.new harness.buffer
+        it "reproduces a panel tinted by a gradient" do
+          harness = Harness.new 20, 6, caps, widths
+          panel = TermBuf::Rect.new 2, 1, 12, 4
+          ramp = TermBuf::Gradient.new TermBuf::Color.rgb(0x102080), TermBuf::Color.rgb(0xE04010),
+            TermBuf::Rect.new(0, 0, panel.width, panel.height), :vertical
+          screen = TermBuf::BufferSurface.new harness.buffer
 
-        screen.view(panel, blend: ramp.background).clear
-        screen.view(panel).write 1, 1, "over the ramp", TermBuf::Style::DEFAULT.bold,
-          blend: TermBuf::Style::KEEP_BACKGROUND
+          screen.view(panel, blend: ramp.background).clear
+          screen.view(panel).write 1, 1, "over the ramp", TermBuf::Style::DEFAULT.bold,
+            blend: TermBuf::Style::KEEP_BACKGROUND
 
-        expect(harness.cycle).to be_nil
-      end
+          expect(harness.cycle).to be_nil
+        end
 
-      sample [1_u64, 2_u64, 3_u64, 4_u64, 5_u64, 6_u64] do |seed|
-        it "holds across a random sequence (seed #{seed})" do
-          random = Random.new seed
-          harness = Harness.new 16, 6, caps
+        sample [1_u64, 2_u64, 3_u64, 4_u64, 5_u64, 6_u64] do |seed|
+          it "holds across a random sequence (seed #{seed})" do
+            random = Random.new seed
+            harness = Harness.new 16, 6, caps, widths
 
-          60.times do |step|
-            random.rand(1..4).times { apply_operation harness.buffer, random }
+            60.times do |step|
+              random.rand(1..4).times { apply_operation harness.buffer, random }
 
-            if failure = harness.cycle
-              fail "seed #{seed}, step #{step}: #{failure}"
+              if failure = harness.cycle
+                fail "seed #{seed}, step #{step}: #{failure}"
+              end
             end
           end
         end
       end
-    end
+    {% end %}
   {% end %}
 
   # A panel with a border down the right of the screen leaves blanks in the
