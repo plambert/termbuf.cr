@@ -1,4 +1,6 @@
 module TermBuf
+  # Stability: stable — changes only in a major release.
+  #
   # A foreground, background, or underline colour.
   #
   # Colours are stored exactly as the application supplied them. Reducing a

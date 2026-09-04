@@ -1,14 +1,21 @@
 module TermBuf
+  # Stability: stable — changes only in a major release.
+  #
   # What the terminal on the other end can be asked to do.
   #
   # Detection fills this in; the encoder only reads it. Anything not known to
   # be supported is treated as unsupported, so a terminal nobody recognises
   # gets plain text rather than a screen full of escape sequences.
   #
-  # This enum is append-only. A flags enum numbers its members by position, so
-  # inserting or reordering one silently renumbers every member after it, and
-  # a mask persisted or written down by bit value stops meaning what it meant.
-  # New capabilities go on the end, and a retired one keeps its place.
+  # This enum is append-only, and stays that way across major releases. A
+  # flags enum numbers its members by position, so inserting or reordering one
+  # silently renumbers every member after it, and a mask persisted or written
+  # down by bit value stops meaning what it meant. New capabilities go on the
+  # end, and a retired one keeps its place rather than being deleted.
+  #
+  # Appending is therefore not a breaking change and can happen in a minor
+  # release; the names, the numbering, and the snake case spellings
+  # `TERMBUF_CAPS` accepts are what is frozen.
   @[Flags]
   enum Capability : UInt64
     # The eight colours of SGR 30-37 and 40-47.
@@ -82,12 +89,28 @@ module TermBuf
     # terminal counts clusters, and the width probe measured this terminal
     # with it off; enabling it afterwards would invalidate every width already
     # established. Knowing whether the terminal has it is still worth having.
+    #
+    # Detected but not in any preset: `Prober` asks for it with DECRQM and
+    # `TERMBUF_CAPS=+grapheme_clusters` sets it by hand, but no member of
+    # `Capabilities` below carries it, because which terminals answer yes has
+    # not been measured across enough of them to write down. A mask built from
+    # `Capabilities::MODERN` rather than from detection will not have it.
     GraphemeClusters
 
     # OSC 52, reading and writing the system clipboard through the terminal.
+    #
+    # Detected but not in any preset, for the same reason as
+    # `GraphemeClusters` and a different mechanism: OSC 52 answers nothing on
+    # a write, so there is no query to ask and detection is
+    # `EnvironmentDetector`'s table of terminals that document it. That table
+    # is what will grow; `Capabilities::MODERN` stays out of it, since a
+    # terminal being modern says nothing about whether it will touch the
+    # clipboard.
     Osc52Clipboard
   end
 
+  # Stability: stable — changes only in a major release.
+  #
   # A capability mask that keeps itself consistent.
   #
   # Support is capped, not limited: a terminal that can do 24 bit colour can
@@ -168,6 +191,9 @@ module TermBuf
     # encoder steps a rapid blink down to an ordinary one rather than dropping
     # it, so asking for it still blinks; a terminal measured doing better can
     # be given the flag by name.
+    # No `Osc52Clipboard` or `GraphemeClusters` either, for the reasons given
+    # on those two: both are detected, neither is presumed from a terminal
+    # being modern.
     MODERN = new XTERM.flags | Capability::TrueColor | Capability::ExtendedUnderline |
                  Capability::UnderlineColor | Capability::Overline |
                  Capability::SynchronizedOutput |

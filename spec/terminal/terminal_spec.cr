@@ -37,8 +37,8 @@ private class Harness
     @output = IO::Memory.new
     tty = TermBuf::Tty.new reader, @output, managed: false
 
-    @terminal = TermBuf::Terminal.new tty, capabilities,
-      TermBuf::ScreenSize.new(columns, rows), pending,
+    @terminal = TermBuf::Terminal.new tty, capabilities: capabilities,
+      size: TermBuf::ScreenSize.new(columns, rows), pending_input: pending,
       quirks: quirks, detect_composed_drift: detect_composed_drift
     @terminal.start
   end
@@ -116,8 +116,8 @@ private def with_probing_harness(answers : String, spec : String? = nil, &)
   keyboard.print answers
   keyboard.flush
 
-  terminal = TermBuf::Terminal.new tty, TermBuf::Capabilities::XTERM,
-    TermBuf::ScreenSize.new(20, 6),
+  terminal = TermBuf::Terminal.new tty, capabilities: TermBuf::Capabilities::XTERM,
+    size: TermBuf::ScreenSize.new(20, 6),
     width_spec: spec, probe_widths: true
   terminal.start
 
@@ -202,8 +202,8 @@ Spectator.describe TermBuf::Terminal do
       reader, keyboard = IO.pipe
       output = IO::Memory.new
       tty = TermBuf::Tty.new reader, output, managed: false
-      terminal = TermBuf::Terminal.new tty, TermBuf::Capabilities::XTERM,
-        TermBuf::ScreenSize.new(20, 6)
+      terminal = TermBuf::Terminal.new tty, capabilities: TermBuf::Capabilities::XTERM,
+        size: TermBuf::ScreenSize.new(20, 6)
       terminal.enable TermBuf::Tty::FOCUS_EVENTS
 
       expect(output.to_s).to eq ""
@@ -1318,8 +1318,8 @@ Spectator.describe TermBuf::Terminal do
       output = IO::Memory.new
       reader, writer = IO.pipe
       tty = TermBuf::Tty.new reader, output, managed: false
-      terminal = TermBuf::Terminal.new tty, TermBuf::Capabilities::XTERM,
-        TermBuf::ScreenSize.new(20, 6)
+      terminal = TermBuf::Terminal.new tty, capabilities: TermBuf::Capabilities::XTERM,
+        size: TermBuf::ScreenSize.new(20, 6)
       terminal.start
 
       begin
@@ -1382,8 +1382,9 @@ Spectator.describe TermBuf::Terminal do
       output = IO::Memory.new
       reader, writer = IO.pipe
       tty = TermBuf::Tty.new reader, output, managed: false
-      terminal = TermBuf::Terminal.new tty, TermBuf::Capabilities::NONE,
-        TermBuf::ScreenSize.new(20, 6), Bytes.empty, ["something was off"]
+      terminal = TermBuf::Terminal.new tty, capabilities: TermBuf::Capabilities::NONE,
+        size: TermBuf::ScreenSize.new(20, 6), pending_input: Bytes.empty,
+        warnings: ["something was off"]
       terminal.start
 
       select
@@ -1713,8 +1714,8 @@ private def with_signalling_harness(columns = 3, rows = 2, &)
   output = IO::Memory.new
   tty = TermBuf::Tty.new reader, output, managed: false
 
-  terminal = TermBuf::Terminal.new tty, TermBuf::Capabilities::XTERM,
-    TermBuf::ScreenSize.new(columns, rows), signals: true
+  terminal = TermBuf::Terminal.new tty, capabilities: TermBuf::Capabilities::XTERM,
+    size: TermBuf::ScreenSize.new(columns, rows), signals: true
   terminal.start
 
   begin
@@ -1763,8 +1764,8 @@ Spectator.describe TermBuf::Terminal do
       output = IO::Memory.new
       tty = TermBuf::Tty.new reader, output, managed: false
 
-      terminal = TermBuf::Terminal.new tty, TermBuf::Capabilities::XTERM,
-        TermBuf::ScreenSize.new(3, 2), signals: true
+      terminal = TermBuf::Terminal.new tty, capabilities: TermBuf::Capabilities::XTERM,
+        size: TermBuf::ScreenSize.new(3, 2), signals: true
       terminal.start
 
       begin

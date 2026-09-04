@@ -1,6 +1,8 @@
 require "./core/color"
 
 module TermBuf
+  # Stability: stable — changes only in a major release.
+  #
   # The terminal's own colours: the default foreground and background, the
   # cursor, and the 256 entry palette everything indexed resolves through.
   #

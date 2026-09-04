@@ -1,4 +1,6 @@
 module TermBuf
+  # Stability: internal
+  #
   # Counts the bytes going to the terminal on their way past.
   #
   # Wrapping rather than buffering keeps the write path one pass: the encoder

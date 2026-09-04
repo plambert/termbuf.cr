@@ -1,7 +1,11 @@
 module TermBuf
+  # Stability: stable — changes only in a major release.
+  #
   # Identifies an interned `Link`. Zero always means no link.
   alias LinkId = UInt32
 
+  # Stability: stable — changes only in a major release.
+  #
   # A hyperlink a range of cells carries, as OSC 8 describes one.
   #
   # *id* is the protocol's own grouping parameter, not this shard's. Two ranges
@@ -38,6 +42,8 @@ module TermBuf
     end
   end
 
+  # Stability: internal
+  #
   # Interns links so a `Style` can carry a four byte id rather than a string.
   #
   # Guarded, because an application interns a link on whatever fibre it happens

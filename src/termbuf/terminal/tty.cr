@@ -2,6 +2,8 @@ require "../caps/capability"
 require "../caps/screen_size"
 
 module TermBuf
+  # Stability: internal
+  #
   # The terminal device itself: the modes it is in, the screen it is showing,
   # and how big it is.
   #
@@ -36,6 +38,8 @@ module TermBuf
     # capability set settled afterwards says should have been.
     getter? alternate : Bool = false
 
+    # Stability: stable — changes only in a major release.
+    #
     # A terminal mode that can be turned on and off, and the sequences that do
     # it.
     #
@@ -44,6 +48,9 @@ module TermBuf
     # pushes onto a stack the terminal itself keeps, so a second push against
     # the one pop that `#leave` sends would leave the keyboard changed after
     # the program has gone.
+    #
+    # The record and the mode constants below it are the stable part of `Tty`;
+    # the class around them is internal.
     record Mode, name : String, set : String, reset : String
 
     # Pasted text arrives marked as pasted, rather than as a very fast typist

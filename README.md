@@ -659,6 +659,97 @@ To regenerate the Unicode tables against a newer UCD:
 crystal run scripts/gen_unicode.cr
 ```
 
+## Stability
+
+The shard is not at 1.0 yet, and this is what 1.0 will freeze — written down ahead of the tag so
+the shape can be argued with while changing it is still cheap. Every public type says the same
+thing in its API documentation, as a `Stability:` line at the top of its doc comment.
+
+### Tier 1: stable
+
+Changes only in a major release. Something here may gain a keyword argument that defaults; nothing
+here is renamed, removed, or given a new required argument without the major version going up.
+
+* **The terminal.** `Terminal` and its methods: taking the terminal over and giving it back
+  (`open`, `start`, `close`, `restore`); drawing and painting (`batch`, `paint`, `paint!`,
+  `paint_async`, `sync`); what the terminal turned out to be (`capabilities`, `quirks`, `widths`,
+  `size`); the cursor (`cursor`, `hardware_cursor=`, `hide_cursor`); input (`events`, `input`,
+  `stages`, `signals`, `after`, `cancel`, `expect_response`, `forget_response`, and the decoder
+  timing properties); resizing (`on_resize`, `forget_resize`, `window_resized`,
+  `resize_interval`); the extras (`link`, `images`, `colors`, `clipboard`, `enable`, `disable`);
+  hit testing (`hit`); the frame scheduler; the paint byte counters; and the two drawing switches
+  `clear_overhang=` and `warn_composed_drift=`.
+* **Drawing.** The `Drawing` module and everything that mixes it in — `Terminal`, `Batcher`,
+  `BufferSurface`, `View` — so a method written against one surface keeps working against all of
+  them.
+* **The buffer.** `Buffer`, `Sink`, `Cursor`, `CursorIO`, `Region`, `Rect`.
+* **Appearance.** `Style`, `Blend`, `Gradient`, `Color`, `Attributes`, `Underline`, `Link`,
+  `LinkId`.
+* **What a terminal is.** `Capability`, `Capabilities`, `Quirk`, `ScreenSize`, and `Tty::Mode`
+  with the mode constants beside it — `BRACKETED_PASTE`, `FOCUS_EVENTS`, `MOUSE_SGR`,
+  `KITTY_KEYBOARD`.
+* **Talking to the terminal itself.** `ColorStack`, `Clipboard`, `ImageStore`, `Image`,
+  `Placement`.
+* **Unicode.** `Unicode.string_width`, `.each_grapheme`, `.graphemes`, `.truncate`, `.ellipsize`,
+  `.fit`, `.window`, and `WidthPolicy`.
+* **Events.** Everything in `TermBuf::Events`, `Events::Resize` included.
+
+### Tier 2: internal
+
+May change in a minor release. These are how the shard is built rather than how it is used; they
+are documented because reading them explains the thing, not because an application should be
+holding one. Anything reached only through tier 1 is free to move.
+
+* **The paint pipeline.** `Grid`, `Cell`, `Damage`, `Painter`, `Encoder`, `Ops` and `Op`,
+  `StyleTable`, `ClusterPool`, `LinkTable`, `SgrScanner`.
+* **Detection.** `Prober`, `EnvironmentDetector`, `CapabilityResolver`, `CapabilityOverrides`,
+  `QuirkOverrides`, `WidthProbe`, `SizeDetector`. What they conclude is tier 1; how they conclude
+  it is not.
+* **The device and the driver.** The `Tty` class — its `Mode` record and mode constants are tier
+  1, the class around them is not — along with `Meter`, `Commands` and `Command`.
+
+### Constructors take keywords
+
+`Terminal.new` takes the device positionally and everything else by name; `Terminal.open` takes
+the input `IO` positionally and everything else by name. Ten mostly-defaulted arguments in a row
+is exactly the shape that reads wrong positionally, and a keyword is the one thing that can be
+reordered later without breaking a caller.
+
+```crystal
+TermBuf::Terminal.open probe: false do |terminal|
+  # ...
+end
+
+TermBuf::Terminal.new tty, capabilities: caps, size: TermBuf::ScreenSize.new(80, 24)
+```
+
+### `Capability` is append-only
+
+A flags enum numbers its members by position, so inserting or reordering one silently renumbers
+every member after it. New capabilities go on the end and a retired one keeps its place, which
+makes appending a minor-release change rather than a breaking one. The names, the numbering, and
+the snake case spellings `TERMBUF_CAPS` accepts are the part that is frozen.
+
+Two members are detected but in no preset: `GraphemeClusters`, which the probe asks about with
+DECRQM, and `Osc52Clipboard`, which comes from a table of terminals that document the write. A
+mask built from `Capabilities::MODERN` rather than from detection carries neither.
+
+### The environment variables are interface
+
+`TERMBUF_CAPS`, `TERMBUF_QUIRKS`, and `TERMBUF_WIDTHS` are as stable as the API, and deliberately
+not application specific: a person who knows their terminal better than the probe does should be
+able to say so once, in their shell profile, for every program built on this shard. Their syntax
+and their names are tier 1.
+
+### Input arrives through aliases
+
+The input side is the [termbuf-input](https://github.com/plambert/termbuf-input.cr) shard, and its
+types reach an application here as `TermBuf::Key`, `TermBuf::Modifiers`, `TermBuf::Decoder`,
+`TermBuf::Event`, and the `TermBuf::Events` namespace. Those aliases are tier 1 in this shard: an
+application spelling them the short way is insulated from where the definitions live, which is the
+whole reason they exist. `Events::Resize` sits in the same namespace and is defined here, because
+it carries a `ScreenSize`.
+
 ## Status
 
 The core, the driver, input, cursors, hyperlinks, images, and the terminal's own colours are in

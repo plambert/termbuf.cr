@@ -4,6 +4,8 @@ module TermBuf
   # Identifies an interned `Style`. Zero is always `Style::DEFAULT`.
   alias StyleId = UInt32
 
+  # Stability: internal
+  #
   # Interns styles so a `Cell` can carry a four byte id rather than the whole
   # struct.
   #
@@ -58,6 +60,8 @@ module TermBuf
     end
   end
 
+  # Stability: internal
+  #
   # Interns multi code point grapheme clusters so a `Cell` can carry a four
   # byte id rather than a string reference. Id zero means the cell's own
   # character says everything, which is the case for all but a handful of

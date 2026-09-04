@@ -2,6 +2,8 @@ require "base64"
 require "./caps/capability"
 
 module TermBuf
+  # Stability: stable — changes only in a major release.
+  #
   # The system clipboard, written through the terminal with OSC 52.
   #
   # The terminal is the only thing in the picture with a connection to the

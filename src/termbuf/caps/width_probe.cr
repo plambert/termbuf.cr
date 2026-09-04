@@ -2,6 +2,8 @@ require "../unicode/grapheme"
 require "../input"
 
 module TermBuf
+  # Stability: internal
+  #
   # Asks the terminal how wide it thinks a grapheme cluster is.
   #
   # Every sample goes out followed by a cursor position report, and the column

@@ -1,4 +1,6 @@
 module TermBuf
+  # Stability: stable — changes only in a major release.
+  #
   # Ways a terminal departs from what the escape sequences it accepts imply.
   #
   # Kept apart from `Capability`, which answers what a terminal can do. This
@@ -28,7 +30,7 @@ module TermBuf
     # and painted across two — puts the glyph on top of its neighbour.
     #
     # Nothing here lays such a row out correctly. `Terminal` watches for the
-    # first cluster this happens to and says so; see `Terminal#on_composed_drift`.
+    # first cluster this happens to and says so; see `Terminal#warn_composed_drift?`.
     PerCodePointColumns
   end
 end

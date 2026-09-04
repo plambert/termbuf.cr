@@ -1,6 +1,8 @@
 require "./capability"
 
 module TermBuf
+  # Stability: internal
+  #
   # The `TERMBUF_CAPS` escape hatch, which has the last word over everything
   # detection worked out.
   #
@@ -77,6 +79,8 @@ module TermBuf
     end
   end
 
+  # Stability: internal
+  #
   # The `TERMBUF_QUIRKS` escape hatch, over what detection decided a terminal
   # gets wrong.
   #

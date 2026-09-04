@@ -6,6 +6,8 @@ require "./grid"
 require "./painter"
 
 module TermBuf
+  # Stability: stable — changes only in a major release.
+  #
   # One output of a `Buffer`: what that output is believed to be showing, what
   # it has yet to be told, and the painter and encoder that tell it.
   #

@@ -4,6 +4,8 @@ require "./style"
 require "./style_table"
 
 module TermBuf
+  # Stability: internal
+  #
   # Turns paint operations into terminal bytes, as few of them as it can.
   #
   # The encoder carries the state the terminal has: where the cursor is and

@@ -2,6 +2,8 @@ require "./input"
 require "./core/style"
 
 module TermBuf
+  # Stability: internal
+  #
   # Reads the escape sequences an application writes to a cursor and turns the
   # ones about appearance into `Style` changes.
   #

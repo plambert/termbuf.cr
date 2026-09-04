@@ -1,6 +1,8 @@
 require "./color"
 
 module TermBuf
+  # Stability: stable — changes only in a major release.
+  #
   # Character attributes that can be combined freely.
   #
   # The underline *styles* are deliberately not in here: a cell has at most one
@@ -20,6 +22,8 @@ module TermBuf
     Subscript
   end
 
+  # Stability: stable — changes only in a major release.
+  #
   # The underline styles of SGR 4, including the `4:x` subparameter forms that
   # modern terminals accept.
   enum Underline : UInt8
@@ -31,6 +35,8 @@ module TermBuf
     Dashed
   end
 
+  # Stability: stable — changes only in a major release.
+  #
   # Everything about a cell other than the character in it.
   #
   # Styles are values, so they compare and hash by content. `StyleTable`
@@ -221,6 +227,8 @@ module TermBuf
     end
   end
 
+  # Stability: stable — changes only in a major release.
+  #
   # How a write settles the style of each cell it lands on: given the style
   # already there, the style being written, and the cell's position, it returns
   # the style to place.

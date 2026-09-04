@@ -3,11 +3,16 @@ require "../caps/screen_size"
 require "./tty"
 
 module TermBuf
+  # Stability: internal
+  #
   # Everything that mutates the buffer arrives as one of these.
   #
   # One fibre owns the buffer and nothing else touches it, so the public
   # drawing methods do not mutate anything: they build a command and hand it
   # over. That is what makes ordering total and locking unnecessary.
+  #
+  # Every record in here is internal along with the namespace. `Drawing` is the
+  # stable way to say any of it; these are what it says it in.
   module Commands
     # Text from (*x*, *y*) rightwards, one grapheme cluster per cell.
     record Write, x : Int32, y : Int32, text : String, style : Style,
@@ -72,6 +77,8 @@ module TermBuf
     record Stop, reply : Channel(Exception?)?
   end
 
+  # Stability: internal
+  #
   # Anything that can be sent to the owning fibre.
   alias Command = Commands::Write | Commands::WriteChar | Commands::Fill |
                   Commands::Clear | Commands::Scroll | Commands::ScrollRegion |
@@ -80,6 +87,8 @@ module TermBuf
                   Commands::Resize | Commands::Apply | Commands::Batch |
                   Commands::Stop
 
+  # Stability: stable — changes only in a major release.
+  #
   # The drawing surface, shared by the terminal and by a batch being built.
   #
   # The two differ only in what they do with a command: one sends it, the other
@@ -181,6 +190,8 @@ module TermBuf
     end
   end
 
+  # Stability: stable — changes only in a major release.
+  #
   # A drawing surface that writes into a buffer as commands arrive.
   #
   # The core layer's answer to `Terminal`: everything built on `Drawing` works
@@ -237,6 +248,8 @@ module TermBuf
     end
   end
 
+  # Stability: stable — changes only in a major release.
+  #
   # Collects drawing commands so a whole frame reaches the owning fibre as one
   # channel operation.
   class Batcher

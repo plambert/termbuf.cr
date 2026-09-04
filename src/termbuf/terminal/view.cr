@@ -1,6 +1,8 @@
 require "./command"
 
 module TermBuf
+  # Stability: stable — changes only in a major release.
+  #
   # A rectangle of another drawing surface, addressed from its own top left and
   # cut at its own edges.
   #

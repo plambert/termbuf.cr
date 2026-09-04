@@ -1,6 +1,8 @@
 require "./style_table"
 
 module TermBuf
+  # Stability: internal
+  #
   # The vocabulary the painter emits and the encoder turns into bytes.
   #
   # Keeping the two apart is what makes the paint algorithm testable: a spec
@@ -13,6 +15,9 @@ module TermBuf
   # `MoveTo` before every run and a `SetStyle` for every run, and leaves it to
   # the encoder to drop the ones that are already true and to pick between
   # `CUP`, `CHA`, `CUF`, and a carriage return.
+  #
+  # Every record in here is internal along with the namespace: this is the
+  # painter's private vocabulary, and an application never sees one.
   module Ops
     # Put the cursor at (*x*, *y*).
     record MoveTo, x : Int32, y : Int32
@@ -79,6 +84,8 @@ module TermBuf
     record Raw, bytes : Bytes
   end
 
+  # Stability: internal
+  #
   # One instruction for the encoder, as the painter emits them.
   alias Op = Ops::MoveTo | Ops::SetStyle | Ops::PutText | Ops::EraseInLine |
              Ops::EraseChars | Ops::SetScrollRegion | Ops::ResetScrollRegion |

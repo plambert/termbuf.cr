@@ -3,6 +3,8 @@ require "./buffer"
 require "./op"
 
 module TermBuf
+  # Stability: internal
+  #
   # Works out the operations that bring the terminal from what it is showing to
   # what the application has drawn.
   #

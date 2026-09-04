@@ -2,6 +2,8 @@ require "./capability"
 require "./quirk"
 
 module TermBuf
+  # Stability: internal
+  #
   # Guesses what a terminal can do from the environment it was started in.
   #
   # This runs before anything is written to the terminal, and it is all a

@@ -13,6 +13,8 @@ lib LibC
 end
 
 module TermBuf
+  # Stability: stable — changes only in a major release.
+  #
   # How many cells the terminal is showing.
   struct ScreenSize
     # Cells across.
@@ -35,6 +37,8 @@ module TermBuf
     end
   end
 
+  # Stability: internal
+  #
   # Works out how big the terminal is, trying each source in turn and taking
   # the first that answers.
   #

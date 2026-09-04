@@ -2,6 +2,8 @@ require "./cell"
 require "./rect"
 
 module TermBuf
+  # Stability: stable — changes only in a major release.
+  #
   # A rectangle of the buffer that scrolls as a unit, optionally keeping the
   # rows that scroll off it.
   #

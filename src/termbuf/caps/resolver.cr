@@ -4,6 +4,8 @@ require "./overrides"
 require "./prober"
 
 module TermBuf
+  # Stability: internal
+  #
   # Settles what the terminal can do, in four stages, each overriding the one
   # before it:
   #

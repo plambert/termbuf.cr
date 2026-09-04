@@ -33,6 +33,8 @@ module TermBuf
   # :ditto:
   alias Event = Input::Event
 
+  # Stability: stable — changes only in a major release.
+  #
   # The input side's events, in the namespace `Events::Resize` joins.
   #
   # `TermBuf::Events` is the whole of what arrives on the channel, which is

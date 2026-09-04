@@ -29,6 +29,8 @@ module TermBuf
     end
   end
 
+  # Stability: stable — changes only in a major release.
+  #
   # The in-memory terminal screen.
   #
   # The buffer holds one grid: *back*, what the application has drawn. What a

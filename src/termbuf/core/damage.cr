@@ -1,4 +1,6 @@
 module TermBuf
+  # Stability: internal
+  #
   # Which cells have changed since the last paint, tracked as one column span
   # per row.
   #

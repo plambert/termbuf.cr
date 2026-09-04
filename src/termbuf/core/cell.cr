@@ -1,6 +1,8 @@
 require "./style_table"
 
 module TermBuf
+  # Stability: internal
+  #
   # One cell of the terminal grid.
   #
   # Sixteen bytes, fixed size, with no reference to anything on the heap, so a

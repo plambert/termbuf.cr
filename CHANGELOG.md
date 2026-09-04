@@ -163,6 +163,18 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- `Terminal.new` and `Terminal.open` take keywords. `new` keeps the `Tty` positional and names
+  everything after it; `open` keeps the input `IO` positional and names `output`, `env`, `probe`
+  and `detect_composed_drift`. Ten mostly-defaulted arguments in a row is the shape that reads
+  wrong positionally, and a keyword is the one thing that can be reordered later without breaking
+  a caller. `Terminal.open { |terminal| ... }` and any call that already named its arguments are
+  unaffected; a call passing `output` or `env` positionally has to name them.
+- Every public type now carries a `Stability:` line at the top of its doc comment, and the README
+  has a Stability section saying what the two tiers mean. Tier 1 changes only in a major release;
+  tier 2 — the paint pipeline, detection, the `Tty` class, the command vocabulary — may change in
+  a minor. This is what 1.0 will freeze, written down ahead of the tag rather than after it.
+  `Capability` stays append-only across majors, so a new capability is still a minor release.
+
 - The input side is now the [termbuf-input](https://github.com/plambert/termbuf-input.cr) shard: a
   dependency rather than a directory. Every `TermBuf::Input::` name is unchanged and lives there,
   `src/termbuf/input.cr` is a `require "termbuf-input"` and the short spellings, and

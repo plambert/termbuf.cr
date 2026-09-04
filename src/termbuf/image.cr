@@ -4,6 +4,8 @@ require "./caps/capability"
 require "./core/rect"
 
 module TermBuf
+  # Stability: stable — changes only in a major release.
+  #
   # Pixels ready to be sent to a terminal that draws them.
   #
   # The shard does not decode or scale anything. An application hands over the
@@ -72,6 +74,8 @@ module TermBuf
     end
   end
 
+  # Stability: stable — changes only in a major release.
+  #
   # An image on screen: which image, and the cells it covers.
   struct Placement
     # Which image, by the id the protocol refers to it with.

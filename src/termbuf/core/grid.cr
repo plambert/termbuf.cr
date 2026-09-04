@@ -3,6 +3,8 @@ require "./damage"
 require "./rect"
 
 module TermBuf
+  # Stability: internal
+  #
   # A rectangular array of cells.
   #
   # Cells live in one flat slice, so a row is a contiguous `Slice` view and

@@ -1,4 +1,6 @@
 module TermBuf
+  # Stability: stable — changes only in a major release.
+  #
   # A rectangle of cells, in buffer coordinates with the origin at the top
   # left. Widths and heights are never negative; a zero in either makes the
   # rectangle empty.

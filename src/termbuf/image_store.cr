@@ -1,6 +1,8 @@
 require "./image"
 
 module TermBuf
+  # Stability: stable — changes only in a major release.
+  #
   # The images a terminal is currently showing, and the sequences that put them
   # there.
   #

@@ -6,6 +6,8 @@ require "./environment"
 require "../input"
 
 module TermBuf
+  # Stability: internal
+  #
   # Asks the terminal what it can do, rather than guessing from its name.
   #
   # Every query goes out in one batch, and the last of them is a cursor

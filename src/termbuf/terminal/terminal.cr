@@ -11,6 +11,8 @@ require "./meter"
 require "./tty"
 
 module TermBuf
+  # Stability: stable — changes only in a major release.
+  #
   # The terminal, as an application talks to it.
   #
   # One fibre owns the buffer. Every drawing method builds a command and sends
@@ -147,7 +149,10 @@ module TermBuf
     @restored = false
     @resize_handlers = [] of ResizeHandler
 
-    def initialize(@tty : Tty,
+    # The device is the one thing a terminal cannot be built without, so it
+    # stays positional; everything else is named. There are ten of them and
+    # most default, which is exactly the shape that reads wrong positionally.
+    def initialize(@tty : Tty, *,
                    @capabilities : Capabilities = Capabilities::NONE,
                    size : ScreenSize? = nil,
                    pending_input : Bytes = Bytes.empty,
@@ -176,7 +181,8 @@ module TermBuf
     # The block form is the one to reach for: it gives the terminal back even
     # when the body raises, which no amount of care in the body can guarantee
     # on its own.
-    def self.open(input : IO = STDIN, output : IO = STDOUT,
+    def self.open(input : IO = STDIN, *,
+                  output : IO = STDOUT,
                   env : Hash(String, String) = ENV.to_h,
                   probe : Bool = true,
                   detect_composed_drift : Bool = true) : Terminal
@@ -207,7 +213,11 @@ module TermBuf
         raise error
       end
 
-      terminal = new tty, resolved.capabilities, tty.size, resolved.input, resolved.warnings,
+      terminal = new tty,
+        capabilities: resolved.capabilities,
+        size: tty.size,
+        pending_input: resolved.input,
+        warnings: resolved.warnings,
         width_spec: env[Unicode::WidthOverrides::VARIABLE]?,
         probe_widths: probe && tty.managed?,
         quirks: resolved.quirks,
@@ -217,11 +227,13 @@ module TermBuf
     end
 
     # Opens a terminal, yields it, and closes it however the block ends.
-    def self.open(input : IO = STDIN, output : IO = STDOUT,
+    def self.open(input : IO = STDIN, *,
+                  output : IO = STDOUT,
                   env : Hash(String, String) = ENV.to_h,
                   probe : Bool = true,
                   detect_composed_drift : Bool = true, & : Terminal ->) : Nil
-      terminal = open input, output, env, probe, detect_composed_drift
+      terminal = open input, output: output, env: env, probe: probe,
+        detect_composed_drift: detect_composed_drift
 
       begin
         yield terminal

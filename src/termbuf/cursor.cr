@@ -5,6 +5,8 @@ require "./unicode/grapheme"
 require "./unicode/utf8"
 
 module TermBuf
+  # Stability: stable — changes only in a major release.
+  #
   # A place to write, and the state to write it in.
   #
   # A cursor is where streamed output goes: it holds a position, a `Style`, and
@@ -317,6 +319,8 @@ module TermBuf
     end
   end
 
+  # Stability: stable — changes only in a major release.
+  #
   # An `IO` bound to a `Cursor`.
   #
   # Unbuffered by default, so what is written has reached the buffer by the time

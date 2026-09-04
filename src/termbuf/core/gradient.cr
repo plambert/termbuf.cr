@@ -3,6 +3,8 @@ require "./rect"
 require "./style"
 
 module TermBuf
+  # Stability: stable — changes only in a major release.
+  #
   # A colour ramp across a rectangle, handed to a draw call as a `Blend`.
   #
   # A gradient is not a field of `Style`: styles are interned by value, so

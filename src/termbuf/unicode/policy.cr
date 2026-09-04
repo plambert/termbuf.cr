@@ -1,4 +1,6 @@
 module TermBuf::Unicode
+  # Stability: stable — changes only in a major release.
+  #
   # How a particular terminal measures a grapheme cluster.
   #
   # UAX #29 says where a cluster ends and UAX #11 says how wide a character is.
