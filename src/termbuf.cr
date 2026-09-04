@@ -10,7 +10,6 @@ require "./termbuf/image_store"
 require "./termbuf/cursor"
 require "./termbuf/input"
 require "./termbuf/terminal"
-require "./termbuf/widgets"
 
 # A terminal screen held in memory, repainted with a diff.
 #

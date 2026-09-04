@@ -20,6 +20,5 @@
 
 # Compiled examples: crystal build drops the binary beside its source.
 /examples/clock
-/examples/prompt
 /examples/validate
 /scripts/__pycache__/

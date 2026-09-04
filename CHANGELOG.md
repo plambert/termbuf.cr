@@ -346,6 +346,14 @@ All notable changes to this project are documented here. The format follows
   decoder is `Terminal#input.decoder`; the timing accessors `Terminal#escape_timeout`,
   `#paste_notice`, `#paste_progress` and `#paste_stall` are unchanged.
 - `Terminal::EVENT_CAPACITY`, which is `Input::Stream::CAPACITY` and still 256.
+- The widgets. `Field`, `Editor`, `LineBuffer`, `History`, `Completion`, `PasteNotice` and `Border`
+  are now in the [termbuf-widgets](https://github.com/plambert/termbuf-widgets.cr) shard, along with
+  the layout, focus and keymap work built on them. They only ever drew through `Drawing`, so nothing
+  in this shard was holding them up and a screen buffer is no place to decide what a text field's
+  keys mean. Add that shard alongside this one and `require "termbuf-widgets"`.
+- `examples/prompt.cr`, superseded by `examples/field.cr` in termbuf-widgets. The `field` page of
+  `examples/validate.cr` went with it; the boxes the remaining pages draw are drawn by the example
+  itself now.
 
 ## [0.2.1] - 2026-09-02
 
