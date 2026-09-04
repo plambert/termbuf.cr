@@ -192,10 +192,18 @@ All notable changes to this project are documented here. The format follows
   the count when the person decides to stay. `Terminal.new` gained `signals:`, which forces signal
   handling on or off for a terminal that is not managing a device; by default it is installed
   exactly when the device is managed, as before.
-- `Input::Stream#on_signal`, consulted in the dispatcher's fibre for every signal that reaches it:
-  returning `nil` consumes the signal and returning an event delivers that, and with no hook every
-  signal becomes an `Events::Signal`. It is what lets the driver answer `SIGWINCH` itself, so a
-  window change is one `Events::Resize` and not a resize and a signal both.
+- `Input::Stage` and `Input::Stream#stages`, a chain every event walks between the dispatcher and
+  the channel. A stage is a name and a proc taking the event and an `emit` proc: emitting once
+  passes or replaces the event, emitting more than once injects extra ones, and not emitting at all
+  consumes it. Keys, the events a registered pattern makes, timers and signals all go through the
+  chain; `Input::Stream#inject` does not, since what the driver has to say on its own account is not
+  something a filter should be able to swallow. The array is swapped rather than mutated and the
+  dispatcher takes a reference to it once per event, so a chain replaced while an event is half way
+  through finishes on the one it started on and reordering is assigning a new array.
+- `Terminal#stages`, the chain termbuf builds during `#start`: `:resize` consumes the
+  `Events::Signal` for `SIGWINCH` and answers it with `Events::Resize`, so a window change is one
+  event and not two, and `:signals` passes everything through as a named place for an application's
+  own signal policy to go.
 
 ### Changed
 

@@ -406,14 +406,18 @@ Spectator.describe TermBuf::Input::Stream do
       end
     end
 
-    it "delivers nothing for a signal a hook consumed" do
+    it "delivers nothing for a signal a stage consumed" do
       with_wired do |wired|
         seen = Channel(::Signal).new 4
 
-        wired.stream.on_signal do |signalled|
-          seen.send signalled.signal
-          nil
-        end
+        wired.stream.stages = [TermBuf::Input::Stage.new(:watch,
+          ->(event : TermBuf::Event, emit : Proc(TermBuf::Event, Nil)) do
+            if signal = event.as? TermBuf::Events::Signal
+              seen.send signal.signal
+            else
+              emit.call event
+            end
+          end)]
         wired.stream.signals.mode ::Signal::USR1, Mode::Event
         wired.install
         wired.deliver ::Signal::USR1
@@ -422,18 +426,24 @@ Spectator.describe TermBuf::Input::Stream do
         when signal = seen.receive
           expect(signal).to eq ::Signal::USR1
         when timeout 2.seconds
-          fail "the hook never saw the signal"
+          fail "the stage never saw the signal"
         end
 
         expect(wired.event_of(TermBuf::Events::Signal, 100.milliseconds)).to be_nil
       end
     end
 
-    it "delivers whatever the hook made of it instead" do
+    it "delivers whatever the stage made of it instead" do
       with_wired do |wired|
-        wired.stream.on_signal do |signalled|
-          TermBuf::Events::Warning.new "signal #{signalled.signal} number #{signalled.count}"
-        end
+        wired.stream.stages = [TermBuf::Input::Stage.new(:rename,
+          ->(event : TermBuf::Event, emit : Proc(TermBuf::Event, Nil)) do
+            if signal = event.as? TermBuf::Events::Signal
+              emit.call TermBuf::Events::Warning.new(
+                "signal #{signal.signal} number #{signal.count}")
+            else
+              emit.call event
+            end
+          end)]
         wired.stream.signals.mode ::Signal::USR1, Mode::Event
         wired.install
         wired.deliver ::Signal::USR1

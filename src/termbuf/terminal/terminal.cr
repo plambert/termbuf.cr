@@ -247,6 +247,7 @@ module TermBuf
       measure_widths
       choose_image_transport
       apply_kitty_keyboard
+      install_stages
       install_signal_handlers
       install_exit_handler
 
@@ -1059,6 +1060,54 @@ module TermBuf
       @sink.encoder.forget_link_state
     end
 
+    # ----------------------------------------------------------------- stages
+
+    # The chain every event walks before the application sees it.
+    #
+    # Two stages are built during `#start`:
+    #
+    # * `:resize` consumes the `Events::Signal` for `SIGWINCH` and answers it
+    #   with `Events::Resize`, since the buffer has to be resized and marked
+    #   for redraw before anyone is told, and a window change should be one
+    #   event rather than two.
+    # * `:signals` passes everything through. It is a placeholder, there so
+    #   that an application with a policy about signals has somewhere named to
+    #   put it: replace that one entry and leave the rest of the chain alone.
+    #
+    # See `Input::Stage` for what a stage may do with an event. The array is
+    # swapped rather than mutated, so reordering means assigning a new one:
+    #
+    #     terminal.stages = terminal.stages.reverse
+    def stages : Array(Input::Stage)
+      @input.stages
+    end
+
+    # :ditto:
+    def stages=(stages : Array(Input::Stage)) : Array(Input::Stage)
+      @input.stages = stages
+    end
+
+    private def install_stages : Nil
+      resize = Input::Stage.new :resize, ->(event : Event, emit : Proc(Event, Nil)) do
+        signal = event.as?(Events::Signal)
+
+        if signal && signal.signal.winch?
+          # Consumed. `#window_resized` sends the `Events::Resize` that answers
+          # it, once the grids are the new size.
+          window_resized
+        else
+          emit.call event
+        end
+      end
+
+      # Nothing, deliberately. See `#stages`.
+      signals = Input::Stage.new :signals, ->(event : Event, emit : Proc(Event, Nil)) do
+        emit.call event
+      end
+
+      @input.stages = [resize, signals]
+    end
+
     # --------------------------------------------------------------- signals
 
     # What the operating system says, and what this terminal does about it.
@@ -1086,19 +1135,6 @@ module TermBuf
       # shell unusable, so `Mode::Exit` restores before letting the default
       # happen. `TERM`, `INT` and `HUP` are on that mode already.
       signals.before_exit { restore }
-
-      # A resize is answered here rather than by the application: the buffer
-      # has to be resized and everything marked for redraw before anyone is
-      # told, and `Events::Resize` is what says so. Returning nil consumes the
-      # signal, so a window change is one event and not two.
-      @input.on_signal do |signalled|
-        if signalled.signal.winch?
-          window_resized
-          nil
-        else
-          Events::Signal.new signalled.signal, signalled.count
-        end
-      end
 
       install_suspend_handlers signals
       signals.install

@@ -3,6 +3,7 @@ require "./decoder"
 require "./patterns"
 require "./reader"
 require "./signals"
+require "./stage"
 require "./timers"
 
 module TermBuf
@@ -24,6 +25,10 @@ module TermBuf
     # takes its place in the queue behind whatever the terminal had already
     # said. The decoder's own escape and paste deadlines are timers like any
     # other; the application's are `#after` and `#cancel`.
+    #
+    # Between the dispatcher and the channel is `#stages`, a list of `Stage`s
+    # every event walks before the application sees it. Keys, patterns' events,
+    # timers and signals all go through it; `#inject` does not.
     class Stream
       # Events waiting for the application. Once this fills, decoding stops,
       # and after that reading does: the terminal's own buffer then applies
@@ -63,8 +68,8 @@ module TermBuf
       @deadline : Nonce? = nil
       @deadline_at : Time::Instant? = nil
 
-      # What a signal becomes, if the driver has said. See `#on_signal`.
-      @on_signal : Proc(Signals::Signalled, Event?)? = nil
+      # What every event walks before the application sees it. See `#stages`.
+      @stages : Array(Stage) = [] of Stage
 
       def initialize(io : IO, blocking : Bool)
         @reader = Reader.new io, blocking
@@ -127,21 +132,33 @@ module TermBuf
         # Nobody is listening any more.
       end
 
-      # Says what a signal that reached the dispatcher becomes.
+      # The chain every event walks on its way to the application.
       #
-      # Consulted for every `Signals::Signalled`, in the dispatcher's fibre
-      # rather than the signal handler's, so it runs with the rest of the
-      # stream rather than underneath it. Returning `nil` consumes the signal
-      # and nothing is delivered; returning an event delivers that. With no
-      # hook registered every signal becomes an `Events::Signal`.
+      # Empty by default, which is the useful default: with nothing in it every
+      # event goes to the channel as it was made. A driver puts its own
+      # translations here — termbuf answers `SIGWINCH` in a stage called
+      # `:resize`, which consumes the signal and sends `Events::Resize` in its
+      # place — and an application adds, removes or reorders them.
       #
-      # This is what lets the driver answer `SIGWINCH` itself — resizing the
-      # buffer and sending `Events::Resize` — so that a resize is one event
-      # rather than two. One hook, replacing any previous one, since the point
-      # of it is to own the whole translation.
-      def on_signal(&block : Signals::Signalled -> Event?) : Nil
-        @on_signal = block
-        nil
+      # The array is swapped rather than mutated: the dispatcher takes a
+      # reference to it once per event and walks that, so a chain replaced
+      # while an event is half way through it finishes on the chain it started
+      # on and the next event uses the new one. Which means reordering is
+      # assigning a new array, and mutating the one this returns is a race:
+      #
+      #     stream.stages = stream.stages.dup.tap do |chain|
+      #       chain.unshift my_stage
+      #     end
+      #
+      # `#inject` bypasses the chain entirely, since what the driver has to say
+      # on its own account is not something a filter should be able to swallow.
+      def stages : Array(Stage)
+        @stages
+      end
+
+      # :ditto:
+      def stages=(stages : Array(Stage)) : Array(Stage)
+        @stages = stages
       end
 
       # Stops delivering events.
@@ -169,7 +186,7 @@ module TermBuf
         inbound = @reader.inbound
 
         unless @preloaded.empty?
-          decoder.feed(@preloaded) { |event| inject event }
+          decoder.feed(@preloaded) { |event| deliver event }
           @preloaded = Bytes.empty
           rearm decoder
         end
@@ -186,7 +203,7 @@ module TermBuf
         in Nil         then false
         in Reader::Eof then false
         in Bytes
-          decoder.feed(message) { |event| inject event }
+          decoder.feed(message) { |event| deliver event }
           rearm decoder
           true
         in Timers::Tick
@@ -198,14 +215,34 @@ module TermBuf
         end
       end
 
-      # A signal arrived. What it becomes is the hook's to say, and with no
-      # hook it becomes an event naming the signal and how many of it have
-      # arrived.
+      # A signal arrived. It becomes an event naming the signal and how many of
+      # it have arrived, and what to make of that is the stage chain's to say:
+      # termbuf's `:resize` stage swallows `SIGWINCH` and sends a resize
+      # instead, and an application that wants the signal raw removes it.
       private def signalled(message : Signals::Signalled) : Nil
-        hook = @on_signal
-        event = hook ? hook.call(message) : Events::Signal.new(message.signal, message.count)
+        deliver Events::Signal.new message.signal, message.count
+      end
 
-        inject event if event
+      # Walks *event* through the stages and sends whatever comes out.
+      #
+      # The chain is read once, here, and handed down: an event that is part
+      # way through when the application swaps the array finishes on the chain
+      # it started on rather than half on each.
+      private def deliver(event : Event) : Nil
+        stages = @stages
+        return inject event if stages.empty?
+
+        advance stages, 0, event
+      end
+
+      # Hands *event* to the stage at *index*, or to the channel once the chain
+      # is spent. Every `emit` a stage is given calls back in here one step
+      # further along, which is what makes emitting twice inject and emitting
+      # nothing consume.
+      private def advance(stages : Array(Stage), index : Int32, event : Event) : Nil
+        return inject event if index >= stages.size
+
+        stages[index].call(event, ->(produced : Event) { advance stages, index + 1, produced })
       end
 
       # A timer went off. Whether it still means anything is the live set's to
@@ -216,10 +253,10 @@ module TermBuf
 
         if nonce == @deadline
           disarm
-          decoder.tick { |event| inject event }
+          decoder.tick { |event| deliver event }
           rearm decoder
         else
-          inject Events::Timer.new nonce
+          deliver Events::Timer.new nonce
         end
       end
 

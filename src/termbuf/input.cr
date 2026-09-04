@@ -3,6 +3,7 @@ require "./input/scanner"
 require "./input/patterns"
 require "./input/decoder"
 require "./input/signals"
+require "./input/stage"
 require "./input/timers"
 require "./input/reader"
 require "./input/stream"
@@ -21,6 +22,10 @@ module TermBuf
   # in the same queue as the bytes, which is how `Events::Timer` arrives in
   # order with everything else, and `Input::Signals` puts signals on it too, so
   # that a resize or an interrupt is ordered against the keystrokes around it.
+  # `Input::Stage` is the last thing an event passes: a chain the driver and
+  # the application both put translations in, walked between the dispatcher
+  # and the channel.
+  #
   # Every one of them is usable on its own.
   module Input
   end
