@@ -253,6 +253,12 @@ class ModelTerminal
       return
     end
 
+    # The kitty keyboard protocol, whose `>` and `<` introducers are not the
+    # `?` a private mode uses and whose parameters are not integers either. It
+    # pushes and pops a flag set on a stack the terminal keeps; nothing about
+    # what a cell holds changes.
+    return if final == 'u' && (parameters.starts_with?('>') || parameters.starts_with?('<'))
+
     values = parse_parameters parameters
 
     case final

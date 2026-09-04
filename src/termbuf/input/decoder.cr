@@ -71,6 +71,19 @@ module TermBuf
     # See `PASTE_STALL`.
     property paste_stall : Time::Span = PASTE_STALL
 
+    # Whether the terminal is speaking the kitty keyboard protocol.
+    #
+    # Set by `Terminal` when the capability set says the protocol was asked
+    # for. It changes nothing about how a sequence is read — a `CSI ... u` is
+    # decoded either way, since a terminal left in that mode by whatever ran
+    # before should still work — only about what waiting means.
+    #
+    # With the protocol on, the escape key arrives as `CSI 27 u`, so a lone
+    # `ESC` is always the start of something longer and there is nothing to
+    # time out. Held bytes are then held until the rest of them turn up, and
+    # the decoder asks for no deadline of its own.
+    property? kitty_keyboard : Bool = false
+
     # Asked what a complete escape sequence means before it is treated as a
     # key press, and answered with `nil` when it means nothing in particular.
     #
@@ -118,7 +131,9 @@ module TermBuf
       now = Time.instant
       soonest = nil.as(Time::Span?)
 
-      if since = @pending_since
+      # Nothing to time when the terminal spells the escape key out in full.
+      # See `#kitty_keyboard?`.
+      if !kitty_keyboard? && (since = @pending_since)
         soonest = @escape_timeout - (now - since)
       end
 
@@ -136,7 +151,7 @@ module TermBuf
     def tick(&emit : Event ->) : Nil
       now = Time.instant
 
-      if since = @pending_since
+      if !kitty_keyboard? && (since = @pending_since)
         flush { |event| emit.call event } if now - since >= @escape_timeout
       end
 
@@ -320,22 +335,10 @@ module TermBuf
     # The C0 controls, which is how a terminal in raw mode reports the keys
     # that predate escape sequences.
     #
-    # Several of these are two keys wearing one byte. `Ctrl+I` and `Tab` are
-    # both `0x09`, `Ctrl+M` and `Enter` are both `0x0D`, and no amount of care
-    # here separates them: it takes a terminal speaking the kitty keyboard
-    # protocol, which reports the key and the modifier apart.
+    # The table lives on `Key`, because a binding table written as text is read
+    # against the same one and the two agreeing is the whole point.
     private def control_key(byte : UInt8) : Key
-      case byte
-      when 0x00       then Key.character ' ', Modifiers::Ctrl
-      when 0x08       then Key.named Key::Name::Backspace, Modifiers::Ctrl
-      when 0x09       then Key.named Key::Name::Tab
-      when 0x0A, 0x0D then Key.named Key::Name::Enter
-      when 0x1B       then Key.named Key::Name::Escape
-      when 0x7F       then Key.named Key::Name::Backspace
-      when 0x01..0x1A then Key.character (byte + 0x60).chr, Modifiers::Ctrl
-      when 0x1C..0x1F then Key.character (byte + 0x40).chr, Modifiers::Ctrl
-      else                 Key.character byte.chr
-      end
+      Key.from_control byte
     end
 
     # ---------------------------------------------------------- sequences
@@ -407,6 +410,106 @@ module TermBuf
       28 => Key::Name::F15, 29 => Key::Name::F16,
       31 => Key::Name::F17, 32 => Key::Name::F18,
       33 => Key::Name::F19, 34 => Key::Name::F20,
+    }
+
+    # The kitty keyboard protocol's functional keys, which it reports as code
+    # points in the Unicode private use area so that they cannot collide with
+    # anything a person could type.
+    #
+    # Only the keys with no other encoding are here. Escape, enter, tab and
+    # backspace arrive as their C0 bytes, `CSI 27 u` and the rest, and the
+    # arrows and the first twelve function keys keep the shapes every terminal
+    # has always used, so all of those go through `#control_key` and the tables
+    # above instead. The gap below 57358 is unassigned by the protocol; a code
+    # in it is delivered as the character it nominally is.
+    #
+    # See <https://sw.kovidgoyal.net/kitty/keyboard-protocol/>.
+    KITTY_KEYS = {
+      57358 => Key::Name::CapsLock,
+      57359 => Key::Name::ScrollLock,
+      57360 => Key::Name::NumLock,
+      57361 => Key::Name::PrintScreen,
+      57362 => Key::Name::Pause,
+      57363 => Key::Name::Menu,
+      57376 => Key::Name::F13,
+      57377 => Key::Name::F14,
+      57378 => Key::Name::F15,
+      57379 => Key::Name::F16,
+      57380 => Key::Name::F17,
+      57381 => Key::Name::F18,
+      57382 => Key::Name::F19,
+      57383 => Key::Name::F20,
+      57384 => Key::Name::F21,
+      57385 => Key::Name::F22,
+      57386 => Key::Name::F23,
+      57387 => Key::Name::F24,
+      57388 => Key::Name::F25,
+      57389 => Key::Name::F26,
+      57390 => Key::Name::F27,
+      57391 => Key::Name::F28,
+      57392 => Key::Name::F29,
+      57393 => Key::Name::F30,
+      57394 => Key::Name::F31,
+      57395 => Key::Name::F32,
+      57396 => Key::Name::F33,
+      57397 => Key::Name::F34,
+      57398 => Key::Name::F35,
+      57399 => Key::Name::KP0,
+      57400 => Key::Name::KP1,
+      57401 => Key::Name::KP2,
+      57402 => Key::Name::KP3,
+      57403 => Key::Name::KP4,
+      57404 => Key::Name::KP5,
+      57405 => Key::Name::KP6,
+      57406 => Key::Name::KP7,
+      57407 => Key::Name::KP8,
+      57408 => Key::Name::KP9,
+      57409 => Key::Name::KPDecimal,
+      57410 => Key::Name::KPDivide,
+      57411 => Key::Name::KPMultiply,
+      57412 => Key::Name::KPSubtract,
+      57413 => Key::Name::KPAdd,
+      57414 => Key::Name::KPEnter,
+      57415 => Key::Name::KPEqual,
+      57416 => Key::Name::KPSeparator,
+      57417 => Key::Name::KPLeft,
+      57418 => Key::Name::KPRight,
+      57419 => Key::Name::KPUp,
+      57420 => Key::Name::KPDown,
+      57421 => Key::Name::KPPageUp,
+      57422 => Key::Name::KPPageDown,
+      57423 => Key::Name::KPHome,
+      57424 => Key::Name::KPEnd,
+      57425 => Key::Name::KPInsert,
+      57426 => Key::Name::KPDelete,
+      57427 => Key::Name::KPBegin,
+      57428 => Key::Name::MediaPlay,
+      57429 => Key::Name::MediaPause,
+      57430 => Key::Name::MediaPlayPause,
+      57431 => Key::Name::MediaReverse,
+      57432 => Key::Name::MediaStop,
+      57433 => Key::Name::MediaFastForward,
+      57434 => Key::Name::MediaRewind,
+      57435 => Key::Name::MediaTrackNext,
+      57436 => Key::Name::MediaTrackPrevious,
+      57437 => Key::Name::MediaRecord,
+      57438 => Key::Name::LowerVolume,
+      57439 => Key::Name::RaiseVolume,
+      57440 => Key::Name::MuteVolume,
+      57441 => Key::Name::LeftShift,
+      57442 => Key::Name::LeftControl,
+      57443 => Key::Name::LeftAlt,
+      57444 => Key::Name::LeftSuper,
+      57445 => Key::Name::LeftHyper,
+      57446 => Key::Name::LeftMeta,
+      57447 => Key::Name::RightShift,
+      57448 => Key::Name::RightControl,
+      57449 => Key::Name::RightAlt,
+      57450 => Key::Name::RightSuper,
+      57451 => Key::Name::RightHyper,
+      57452 => Key::Name::RightMeta,
+      57453 => Key::Name::IsoLevel3Shift,
+      57454 => Key::Name::IsoLevel5Shift,
     }
 
     private def csi(bytes : Bytes) : Key
@@ -482,6 +585,10 @@ module TermBuf
 
     private def other_key(code : Int32, held : Modifiers) : Key
       return Key.named Key::Name::Unknown unless 0 <= code <= Char::MAX_CODEPOINT
+
+      if name = KITTY_KEYS[code]?
+        return Key.named name, held
+      end
 
       char = code.chr
       return Key.character char, held if code >= 0x20 && code != 0x7F

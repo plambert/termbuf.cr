@@ -145,12 +145,29 @@ All notable changes to this project are documented here. The format follows
 - `ScrollHint#serial`, and `Buffer#scroll_hints_since`. Hints are a log rather than a queue now:
   each sink remembers the serial it read up to and takes only what is newer, and the log is trimmed
   to the oldest of those, so a hint survives until every sink has had it.
+- `Key::Name` members for every kitty keyboard functional key that had no name: the lock and system
+  keys (`CapsLock`, `ScrollLock`, `NumLock`, `PrintScreen`, `Pause`, `Menu`), `F21` through `F35`,
+  the keypad reported apart from the keys it shares a meaning with (`KP0` through `KP9`, `KPDecimal`
+  through `KPSeparator`, `KPLeft` through `KPBegin`), the media keys, and the modifier keys
+  themselves. `Decoder` reads code points 57358 to 57454 as these rather than as the private use
+  characters they nominally are, keeping whatever modifiers came with them, and `Key.parse` reads
+  every one of the names back. The members are appended, so no existing one changed its value.
+- `Decoder#kitty_keyboard?`, set when the terminal is speaking the kitty keyboard protocol. It
+  changes nothing about how a sequence is read — a `CSI ... u` is decoded either way, since a
+  terminal left in that mode by whatever ran before should still work — only what waiting means:
+  with the protocol on the escape key arrives as `CSI 27 u`, so a lone `ESC` is always the start of
+  something longer, the escape timeout is not armed and nothing held back is flushed by the clock.
+- `Terminal` asks for `Tty::KITTY_KEYBOARD` at takeover when the capability set has
+  `Capability::KittyKeyboard`, and tells its decoder so. Through the mode registry, so that closing
+  pops the flag set the terminal pushed and a takeover after a suspend pushes it again.
 
 ### Changed
 
 - `Key#to_s` upper cases a control character only when it is an ASCII letter. `Ctrl+C` is the
   convention and `Ctrl+c` is not, but upper casing outside ASCII changed the key rather than how it
   was spelled, which left `Key.parse` no way back to it.
+- `Decoder` reads a C0 control byte by asking `Key.from_control` rather than from a table of its
+  own. There was one table written twice and the two agreeing is the whole point of it.
 - `Commands::SetColors` is now `Commands::Quiet`: bytes sent after the current frame that move no
   cursor and set no attribute, so the encoder's idea of the screen survives them. The colour stack
   and the clipboard both issue through it, and the name no longer claims one of them.

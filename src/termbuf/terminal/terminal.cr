@@ -245,6 +245,7 @@ module TermBuf
       @tty.enter @capabilities
       measure_widths
       choose_image_transport
+      apply_kitty_keyboard
       install_signal_handlers
       install_exit_handler
 
@@ -683,6 +684,21 @@ module TermBuf
       return @tty.disable mode unless @started
 
       issue Commands::Mode.new(mode, false)
+    end
+
+    # Asks for the kitty keyboard protocol when the terminal has it, and tells
+    # the decoder it did.
+    #
+    # Through the mode registry rather than a bare write, so that `#close`
+    # pops the flag set the terminal pushed and a takeover after a suspend
+    # pushes it again. Written straight to the device because this runs during
+    # `#start`, after the takeover and before the fibre that would otherwise
+    # carry the command exists.
+    private def apply_kitty_keyboard : Nil
+      return unless @capabilities.includes? Capability::KittyKeyboard
+
+      @tty.enable Tty::KITTY_KEYBOARD
+      @input.decoder.kitty_keyboard = true
     end
 
     # ------------------------------------------------------------- lifecycle

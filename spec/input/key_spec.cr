@@ -194,7 +194,7 @@ Spectator.describe TermBuf::Key do
     end
 
     it "refuses a name it does not know" do
-      expect { TermBuf::Key.parse("F21") }.to raise_error(ArgumentError, /neither a key name/)
+      expect { TermBuf::Key.parse("F36") }.to raise_error(ArgumentError, /neither a key name/)
       expect { TermBuf::Key.parse("Ctrl+Wat") }.to raise_error(ArgumentError, /neither a key name/)
     end
 

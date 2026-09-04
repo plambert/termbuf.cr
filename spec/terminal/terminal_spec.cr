@@ -9,6 +9,9 @@ require "../support/model_terminal"
 private COLOURFUL = TermBuf::Capabilities.new(
   TermBuf::Capabilities::MODERN.flags | TermBuf::Capability::KittyColorStack)
 
+private KEYBOARD = TermBuf::Capabilities.new(
+  TermBuf::Capabilities::MODERN.flags | TermBuf::Capability::KittyKeyboard)
+
 private class Harness
   getter terminal : TermBuf::Terminal
   getter output : IO::Memory
@@ -144,6 +147,36 @@ Spectator.describe TermBuf::Terminal do
       with_harness(capabilities: TermBuf::Capabilities::NONE) do |harness|
         expect(harness.drain).not_to contain "\e[?1049h"
       end
+    end
+
+    # The kitty keyboard protocol is asked for through the mode registry, so
+    # that closing pops the flag set the terminal pushed and a takeover after
+    # a suspend pushes it again.
+    it "asks for the kitty keyboard protocol when the terminal has it" do
+      harness = Harness.new capabilities: KEYBOARD
+      taken = harness.drain
+      harness.close
+
+      expect(taken).to contain TermBuf::Tty::KITTY_KEYBOARD.set
+      expect(harness.drain).to contain TermBuf::Tty::KITTY_KEYBOARD.reset
+    end
+
+    # Which is what tells the decoder a lone escape is never the escape key.
+    it "tells the decoder the protocol is on" do
+      with_harness capabilities: KEYBOARD do |harness|
+        expect(harness.terminal.input.decoder.kitty_keyboard?).to be_true
+      end
+    end
+
+    it "leaves the keyboard alone when the terminal has no protocol" do
+      harness = Harness.new capabilities: TermBuf::Capabilities::MODERN
+      taken = harness.drain
+      decoder_flag = harness.terminal.input.decoder.kitty_keyboard?
+      harness.close
+
+      expect(taken).not_to contain TermBuf::Tty::KITTY_KEYBOARD.set
+      expect(harness.drain).not_to contain TermBuf::Tty::KITTY_KEYBOARD.reset
+      expect(decoder_flag).to be_false
     end
 
     # A mode asked for is a mode the terminal is left in, so closing has to

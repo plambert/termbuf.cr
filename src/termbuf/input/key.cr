@@ -74,6 +74,103 @@ module TermBuf
       # An escape sequence the decoder does not recognise. The bytes are on the
       # event, so an application that knows better than the decoder still can.
       Unknown
+
+      # Everything below arrives only from a terminal speaking the kitty
+      # keyboard protocol, which reports these as code points in the private
+      # use area. They are added at the end rather than in among their
+      # relatives so that no existing member changes its value.
+
+      # The lock and system keys, `CSI 57358 u` through `CSI 57363 u`.
+      CapsLock
+      ScrollLock
+      NumLock
+      PrintScreen
+      Pause
+      Menu
+
+      # The function keys past the twenty a `~` sequence can name.
+      F21
+      F22
+      F23
+      F24
+      F25
+      F26
+      F27
+      F28
+      F29
+      F30
+      F31
+      F32
+      F33
+      F34
+      F35
+
+      # The keypad, which the kitty protocol reports apart from the keys it
+      # shares a meaning with: `KP1` is not `End` and `KPEnter` is not `Enter`,
+      # however identical they look to an ordinary terminal.
+      KP0
+      KP1
+      KP2
+      KP3
+      KP4
+      KP5
+      KP6
+      KP7
+      KP8
+      KP9
+      KPDecimal
+      KPDivide
+      KPMultiply
+      KPSubtract
+      KPAdd
+      KPEnter
+      KPEqual
+      KPSeparator
+      KPLeft
+      KPRight
+      KPUp
+      KPDown
+      KPPageUp
+      KPPageDown
+      KPHome
+      KPEnd
+      KPInsert
+      KPDelete
+      KPBegin
+
+      # The media keys, which a keyboard with them sends whether or not the
+      # application asked for anything.
+      MediaPlay
+      MediaPause
+      MediaPlayPause
+      MediaReverse
+      MediaStop
+      MediaFastForward
+      MediaRewind
+      MediaTrackNext
+      MediaTrackPrevious
+      MediaRecord
+      LowerVolume
+      RaiseVolume
+      MuteVolume
+
+      # The modifier keys themselves, reported as keys of their own. Only a
+      # terminal asked for key events for them sends these; the modifier bits
+      # on another key are `Modifiers`, not these.
+      LeftShift
+      LeftControl
+      LeftAlt
+      LeftSuper
+      LeftHyper
+      LeftMeta
+      RightShift
+      RightControl
+      RightAlt
+      RightSuper
+      RightHyper
+      RightMeta
+      IsoLevel3Shift
+      IsoLevel5Shift
     end
 
     # Which key, with `Name::Character` meaning the one in `#char`.
@@ -205,10 +302,17 @@ module TermBuf
       end
     end
 
-    # The key a C0 control byte is, which is `Decoder`'s reading of the same
-    # byte. The two tables have to agree: this is the half a binding table is
-    # written against and that is the half an application is handed.
-    private def self.from_control(byte : UInt8) : Key
+    # The key a C0 control byte is.
+    #
+    # There is one table and this is it: `Decoder` reads a control byte by
+    # asking here, so what a binding table is written against and what an
+    # application is handed cannot drift apart.
+    #
+    # Several of these bytes are two keys wearing one byte. `Ctrl+I` and `Tab`
+    # are both `0x09`, `Ctrl+M` and `Enter` are both `0x0D`, and no amount of
+    # care here separates them: it takes a terminal speaking the kitty keyboard
+    # protocol, which reports the key and the modifier apart.
+    def self.from_control(byte : UInt8) : Key
       case byte
       when 0x00       then character ' ', Modifiers::Ctrl
       when 0x08       then named Name::Backspace, Modifiers::Ctrl

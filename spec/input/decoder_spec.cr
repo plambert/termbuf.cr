@@ -168,6 +168,108 @@ Spectator.describe TermBuf::Decoder do
     end
   end
 
+  # The kitty keyboard protocol spells out the keys an ordinary terminal has no
+  # encoding for, as code points in the Unicode private use area. Decoded
+  # whether or not the protocol was asked for, since a terminal left in that
+  # mode by whatever ran before should still work.
+  describe "the kitty functional keys" do
+    it "reads the keys that also have an ordinary encoding" do
+      expect(key("\e[27u").name).to eq Name::Escape
+      expect(key("\e[13u").name).to eq Name::Enter
+      expect(key("\e[9u").name).to eq Name::Tab
+      expect(key("\e[127u").name).to eq Name::Backspace
+    end
+
+    it "reads the lock and system keys" do
+      expect(key("\e[57358u").name).to eq Name::CapsLock
+      expect(key("\e[57360u").name).to eq Name::NumLock
+      expect(key("\e[57363u").name).to eq Name::Menu
+    end
+
+    it "reads the function keys past the twelve a terminal can name" do
+      expect(key("\e[57376u").name).to eq Name::F13
+      expect(key("\e[57398u").name).to eq Name::F35
+    end
+
+    it "reads the keypad apart from the keys it shares a meaning with" do
+      expect(key("\e[57399u").name).to eq Name::KP0
+      expect(key("\e[57414u").name).to eq Name::KPEnter
+      expect(key("\e[57427u").name).to eq Name::KPBegin
+    end
+
+    it "reads the media and modifier keys" do
+      expect(key("\e[57428u").name).to eq Name::MediaPlay
+      expect(key("\e[57441u").name).to eq Name::LeftShift
+      expect(key("\e[57454u").name).to eq Name::IsoLevel5Shift
+    end
+
+    it "keeps the modifiers that came with one" do
+      expect(key("\e[57376;5u")).to eq TermBuf::Key.named(Name::F13, Mods::Ctrl)
+    end
+
+    # The protocol assigns nothing below 57358, and a code there is no more
+    # than the private use character it nominally is.
+    it "leaves an unassigned private use code as a character" do
+      expect(key("\e[57344u")).to eq TermBuf::Key.character('\u{E000}')
+    end
+  end
+
+  # With the protocol on, the escape key arrives as `CSI 27 u`: a lone `ESC` is
+  # always the start of something longer, so waiting for the rest of it is
+  # right and timing out is not.
+  describe "#kitty_keyboard?" do
+    it "is off until something turns it on" do
+      expect(TermBuf::Decoder.new.kitty_keyboard?).to be_false
+    end
+
+    it "asks for no deadline while an escape is held back" do
+      decoder = TermBuf::Decoder.new
+      decoder.kitty_keyboard = true
+
+      expect(decode("\e", decoder)).to be_empty
+      expect(decoder.pending?).to be_true
+      expect(decoder.read_deadline).to be_nil
+    end
+
+    it "does not flush a held escape when the clock runs out" do
+      decoder = TermBuf::Decoder.new
+      decoder.kitty_keyboard = true
+      decoder.escape_timeout = 10.milliseconds
+      decode "\e", decoder
+
+      sleep 20.milliseconds
+      events = [] of TermBuf::Event
+      decoder.tick { |event| events << event }
+
+      expect(events).to be_empty
+      expect(decoder.pending?).to be_true
+    end
+
+    it "leaves the escape timeout alone when it is off" do
+      decoder = TermBuf::Decoder.new
+      decoder.escape_timeout = 10.milliseconds
+      decode "\e", decoder
+
+      expect(decoder.read_deadline).not_to be_nil
+
+      sleep 20.milliseconds
+      events = [] of TermBuf::Event
+      decoder.tick { |event| events << event }
+
+      expect(events.size).to eq 1
+      expect(events.first.as(TermBuf::Events::Key).key.name).to eq Name::Escape
+    end
+
+    # A paste still has to end, whatever the keyboard is doing.
+    it "still times a paste out" do
+      decoder = TermBuf::Decoder.new
+      decoder.kitty_keyboard = true
+      decode "\e[200~x", decoder
+
+      expect(decoder.read_deadline).not_to be_nil
+    end
+  end
+
   describe "responses" do
     it "delivers a claimed sequence as whatever claimed it" do
       patterns = TermBuf::Input::Patterns.new
