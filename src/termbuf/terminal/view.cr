@@ -38,10 +38,14 @@ module TermBuf
   # anything, and dismissing a panel means the next frame does not draw it —
   # the paint diff then sends the cells it covered and nothing else.
   #
-  # A `Blend` passes through as it is. The view translates the write before the
-  # buffer runs the blend, so the position a blend is given is the cell's in the
-  # buffer rather than in the view — the same coordinates a blend sees when
-  # nothing was drawn through a view at all.
+  # A `Blend` on a draw call passes through as it is. The view translates the
+  # write before the buffer runs the blend, so the position such a blend is
+  # given is the cell's in the buffer rather than in the view — the same
+  # coordinates a blend sees when nothing was drawn through a view at all.
+  #
+  # A view can carry a `#blend` of its own, which is the position-aware half of
+  # `#style`: a gradient across a panel, wherever the panel ends up. That one is
+  # asked in the view's coordinates instead. See `#blend`.
   #
   # Two commands pass through untouched, because neither is addressed in cells
   # of this view: `#passthrough`, which is aimed at the terminal, and
@@ -66,7 +70,38 @@ module TermBuf
     # leaves unset comes from here, and one it names wins. See `Style#merge`.
     property style : Style
 
-    def initialize(@target : Drawing, @rect : Rect, @style : Style = Style::DEFAULT)
+    # A `Blend` run for every cell drawn through the view, or nil for none.
+    #
+    # **The positions it is given are this view's own**, `(0, 0)` at the view's
+    # top left, so a `Gradient` built against `#bounds` paints the same ramp
+    # wherever the view is moved to and however deeply it is nested. This is
+    # the one place a blend is not asked in the buffer's coordinates; a blend
+    # passed to a draw call still is, since it was written against the surface
+    # the caller was drawing on.
+    #
+    # A draw call carrying a blend of its own does not lose it. The view's runs
+    # first, settling the style being written, and the call's runs on that
+    # result — the same precedence `#style` has, where the innermost thing to
+    # name a field wins:
+    #
+    #     panel = screen.view rect, blend: ramp.background
+    #     panel.clear                                   # the ramp
+    #     panel.write 0, 0, label, Style::DEFAULT.bold,
+    #       blend: Style::KEEP_BACKGROUND               # bold, over the ramp
+    #
+    # Nesting composes the same way, outermost view first and the draw call
+    # last, each asked in its own coordinates.
+    property blend : Blend?
+
+    # Where this view's `(0, 0)` falls in the buffer's coordinates, which is
+    # what `#blend` is translated by. Fixed at construction: a view's rectangle
+    # and its target never change.
+    getter origin : {Int32, Int32}
+
+    def initialize(@target : Drawing, @rect : Rect, @style : Style = Style::DEFAULT,
+                   @blend : Blend? = nil)
+      target_x, target_y = @target.origin
+      @origin = {target_x + @rect.x, target_y + @rect.y}
     end
 
     # The view's own rectangle, which starts at its origin rather than at the
@@ -110,7 +145,7 @@ module TermBuf
 
       start, text = shown
       @target.issue Commands::Write.new(@rect.x + start, @rect.y + command.y, text,
-        styled(command.style), command.blend)
+        styled(command.style), mixed(command.blend))
     end
 
     # The part of *text* that lands inside the view when it is drawn at column
@@ -158,7 +193,7 @@ module TermBuf
       return if columns == 2 && x + 1 >= @rect.width
 
       @target.issue Commands::WriteChar.new(@rect.x + x, @rect.y + command.y,
-        command.char, styled(command.style), command.blend)
+        command.char, styled(command.style), mixed(command.blend))
     end
 
     private def clip_fill(rect : Rect, char : Char, style : Style,
@@ -166,7 +201,7 @@ module TermBuf
       area = rect.intersect bounds
       return if area.empty?
 
-      @target.issue Commands::Fill.new(translate(area), char, styled(style), blend)
+      @target.issue Commands::Fill.new(translate(area), char, styled(style), mixed(blend))
     end
 
     private def clip_scroll(command : Commands::Scroll) : Nil
@@ -193,6 +228,35 @@ module TermBuf
     # case costs a comparison rather than a merge.
     private def styled(style : Style) : Style
       @style.default? ? style : @style.merge(style)
+    end
+
+    # *blend* composed over the view's own, in the coordinates the buffer will
+    # run the result in.
+    #
+    # A view carrying none hands *blend* back untouched, which is both what the
+    # old behaviour was and what keeps the common case free of an allocation
+    # per command.
+    private def mixed(blend : Blend?) : Blend?
+      own = @blend
+      return blend unless own
+
+      origin_x, origin_y = @origin
+      translated = Blend.new do |under, over, column, row|
+        own.call under, over, column - origin_x, row - origin_y
+      end
+
+      return translated unless blend
+
+      compose translated, blend
+    end
+
+    # A `Blend` running *first* and then *second* on what it answered. Both see
+    # the same cell and the same style underneath; only the style being written
+    # passes from one to the other.
+    private def compose(first : Blend, second : Blend) : Blend
+      Blend.new do |under, over, column, row|
+        second.call under, first.call(under, over, column, row), column, row
+      end
     end
 
     # A rectangle of this view, in the target's coordinates.

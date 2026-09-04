@@ -73,7 +73,7 @@ private class Harness
 end
 
 private def apply_operation(buffer : TermBuf::Buffer, random : Random) : Nil
-  case random.rand 12
+  case random.rand 13
   when 0..5
     buffer.write random.rand(buffer.width), random.rand(buffer.height),
       ALPHABET.sample(random), random_style(buffer, random)
@@ -86,9 +86,26 @@ private def apply_operation(buffer : TermBuf::Buffer, random : Random) : Nil
     buffer.fill random_rect(buffer, random), '#', random_style(buffer, random)
   when 10
     buffer.fill random_rect(buffer, random), ' ', TermBuf::Style::DEFAULT
+  when 11
+    fill_gradient buffer, random
   else
     buffer.clear random_style(buffer, random)
   end
+end
+
+# A panel tinted by a `Gradient` carried on the view, which is what makes the
+# painter deal with a run of 24 bit colours that change every cell. Under the
+# shallower masks the encoder narrows them, so neighbouring cells collapse to
+# one palette entry and the model terminal has to agree about where the runs
+# now end.
+private def fill_gradient(buffer : TermBuf::Buffer, random : Random) : Nil
+  area = random_rect buffer, random
+  axis = random.rand(2).zero? ? TermBuf::Gradient::Axis::Horizontal : TermBuf::Gradient::Axis::Vertical
+  ramp = TermBuf::Gradient.new TermBuf::Color.rgb(10, 90, 200), TermBuf::Color.rgb(240, 30, 5),
+    TermBuf::Rect.new(0, 0, area.width, area.height), axis
+  screen = TermBuf::BufferSurface.new buffer
+
+  screen.view(area, blend: ramp.background).clear
 end
 
 # Weighted toward full-width rectangles, which is what the scroll extractor can
@@ -164,6 +181,20 @@ Spectator.describe "paint round trip" do
         harness = Harness.new 20, 6, caps
         harness.buffer.clear STYLES[4]
         harness.buffer.write 2, 2, "on a tint", STYLES[4]
+
+        expect(harness.cycle).to be_nil
+      end
+
+      it "reproduces a panel tinted by a gradient" do
+        harness = Harness.new 20, 6, caps
+        panel = TermBuf::Rect.new 2, 1, 12, 4
+        ramp = TermBuf::Gradient.new TermBuf::Color.rgb(0x102080), TermBuf::Color.rgb(0xE04010),
+          TermBuf::Rect.new(0, 0, panel.width, panel.height), :vertical
+        screen = TermBuf::BufferSurface.new harness.buffer
+
+        screen.view(panel, blend: ramp.background).clear
+        screen.view(panel).write 1, 1, "over the ramp", TermBuf::Style::DEFAULT.bold,
+          blend: TermBuf::Style::KEEP_BACKGROUND
 
         expect(harness.cycle).to be_nil
       end

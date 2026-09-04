@@ -28,6 +28,19 @@ All notable changes to this project are documented here. The format follows
   write. Styles are interned and `StyleTable` only grows, so a blend returning a colour computed per
   cell interns a style per cell: bounded by the screen for one frame, unbounded across an animation.
 
+- `Gradient`, a colour ramp across a rectangle, handed to a draw call as a `Blend` rather than
+  carried in a `Style`: styles are interned by value, and a colour that depends on where the cell is
+  neither hashes nor compares. `#at(x, y)` interpolates each channel between `from` and `to` along
+  the horizontal or vertical axis, clamping outside the rectangle, and `#foreground` and
+  `#background` wrap that as blends. The colours are always 24 bit, so the encoder narrows them to
+  the palette or to the sixteen system colours per the terminal's mask and one gradient renders
+  everywhere.
+- `View#blend` and `Drawing#view(rect, style, blend)`, a blend every cell drawn through a view is
+  settled by. Unlike the blend of a draw call, which is asked in the buffer's coordinates, this one
+  is asked in the view's own — so a `Gradient` built against `view.bounds` paints the same ramp
+  wherever the view is moved to and however deeply it is nested. A draw call's own blend still runs,
+  on what the view's answered, the way a write's style wins over the view's.
+
 - `Unicode::WidthPolicy#conjunct_wide?`, on by default, and a `WidthProbe` sample that settles it:
   whether a consonant conjunct joined by a virama is two columns whatever it opens with. A conjunct
   ligates into one glyph and what a terminal charges for that glyph is its own decision — ghostty

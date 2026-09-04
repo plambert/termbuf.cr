@@ -1,7 +1,10 @@
 require "../spec_helper"
 
 private alias Rect = TermBuf::Rect
-private RED = TermBuf::Style::DEFAULT.fg TermBuf::Color::RED
+private RED    = TermBuf::Style::DEFAULT.fg TermBuf::Color::RED
+private BLACK  = TermBuf::Color.rgb 0, 0, 0
+private BRIGHT = TermBuf::Color.rgb 100, 200, 50
+private MIDWAY = TermBuf::Color.rgb 50, 100, 25
 
 # A buffer and a surface over it, so a view can be checked by what reached the
 # cells rather than by what commands went by.
@@ -317,6 +320,78 @@ Spectator.describe TermBuf::View do
       end
     end
 
+    it "asks a blend it carries in its own coordinates" do
+      with_screen do |screen, buffer|
+        seen = [] of {Int32, Int32}
+        recorder = TermBuf::Blend.new do |_under, over, column, row|
+          seen << {column, row}
+          over
+        end
+
+        screen.view(Rect.new(3, 2, 4, 2), blend: recorder).write 1, 1, "ab"
+
+        expect(seen).to eq [{1, 1}, {2, 1}]
+        expect(buffer.back[4, 3].char).to eq 'a'
+      end
+    end
+
+    it "paints a gradient built against its bounds wherever it sits" do
+      with_screen do |screen, buffer|
+        panel = screen.view Rect.new(4, 1, 5, 2)
+        panel.blend = TermBuf::Gradient.new(BLACK, BRIGHT, panel.bounds).background
+        panel.clear
+
+        expect(buffer.styles[buffer.back[4, 1].style].background).to eq BLACK
+        expect(buffer.styles[buffer.back[6, 2].style].background).to eq MIDWAY
+        expect(buffer.styles[buffer.back[8, 1].style].background).to eq BRIGHT
+      end
+    end
+
+    it "lines a nested view's gradient up with the cells it covers" do
+      with_screen do |screen, buffer|
+        panel = screen.view Rect.new(2, 1, 9, 3)
+        inner = panel.view Rect.new(2, 1, 5, 1)
+        inner.blend = TermBuf::Gradient.new(BLACK, BRIGHT, inner.bounds).background
+        inner.clear
+
+        expect(buffer.styles[buffer.back[4, 2].style].background).to eq BLACK
+        expect(buffer.styles[buffer.back[6, 2].style].background).to eq MIDWAY
+        expect(buffer.styles[buffer.back[8, 2].style].background).to eq BRIGHT
+      end
+    end
+
+    it "runs its own blend first and the draw call's on the result" do
+      with_screen do |screen, buffer|
+        panel = screen.view Rect.new(1, 0, 5, 1),
+          blend: TermBuf::Gradient.new(BLACK, BRIGHT, Rect.new(0, 0, 5, 1)).background
+        panel.clear
+        # The label keeps the ramp's background and adds its own bold.
+        panel.write 0, 0, "ab", TermBuf::Style::DEFAULT.bold,
+          blend: TermBuf::Style::KEEP_BACKGROUND
+
+        first = buffer.styles[buffer.back[1, 0].style]
+
+        expect(first.background).to eq BLACK
+        expect(first.has?(TermBuf::Attributes::Bold)).to be_true
+        expect(buffer.styles[buffer.back[3, 0].style].background).to eq MIDWAY
+      end
+    end
+
+    it "composes an outer view's blend under an inner one's" do
+      with_screen do |screen, buffer|
+        outer = screen.view Rect.new(0, 0, 6, 1),
+          blend: TermBuf::Style.blend { |_under, over| over.fg TermBuf::Color::RED }
+        inner = outer.view Rect.new(1, 0, 3, 1),
+          blend: TermBuf::Gradient.new(BLACK, BRIGHT, Rect.new(0, 0, 3, 1)).background
+        inner.clear
+
+        placed = buffer.styles[buffer.back[1, 0].style]
+
+        expect(placed.foreground).to eq TermBuf::Color::RED
+        expect(placed.background).to eq BLACK
+      end
+    end
+
     it "leaves styles alone when it carries none" do
       with_screen do |screen, buffer|
         plain = screen.view Rect.new(0, 0, 4, 1)
@@ -365,6 +440,25 @@ Spectator.describe TermBuf::View do
       batcher.view(Rect.new(1, 0, 4, 1)).fill Rect.new(0, 0, 2, 1), '.', blend: blend
 
       expect(batcher.commands.first.as(TermBuf::Commands::Fill).blend).to eq blend
+    end
+
+    it "sends a blend of its own along with a command carrying none" do
+      batcher = TermBuf::Batcher.new
+      view = batcher.view Rect.new(1, 0, 4, 1),
+        blend: TermBuf::Gradient.new(BLACK, BRIGHT, Rect.new(0, 0, 4, 1)).background
+      view.write 0, 0, "ab"
+
+      command = batcher.commands.first.as TermBuf::Commands::Write
+      blend = command.blend
+
+      expect(blend).not_to be_nil
+
+      if blend
+        # Asked at the buffer column the write landed on, it answers for the
+        # view's own column zero.
+        expect(blend.call(TermBuf::Style::DEFAULT, TermBuf::Style::DEFAULT, 1, 0).background)
+          .to eq BLACK
+      end
     end
   end
 end

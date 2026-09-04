@@ -141,10 +141,26 @@ module TermBuf
 
     # A rectangle of this surface, addressed from its own top left and cut at
     # its own edges. Anything drawn through it merges onto *style*. See `View`.
-    def view(rect : Rect, style : Style = Style::DEFAULT) : View
-      made = View.new self, rect, style
+    #
+    # A *blend* settles the style of every cell drawn through the view, on top
+    # of whatever a draw call brings of its own. **It is asked in the view's
+    # coordinates**, `(0, 0)` at the view's top left, so a `Gradient` built
+    # against the view's `bounds` lands where the view is — unlike the *blend*
+    # of a draw call, which is asked in the buffer's. See `View#blend`.
+    #
+    #     ramp = Gradient.new(top, bottom, Rect.new(0, 0, rect.width, rect.height), :vertical)
+    #     screen.view(rect, blend: ramp.background).clear
+    def view(rect : Rect, style : Style = Style::DEFAULT, blend : Blend? = nil) : View
+      made = View.new self, rect, style, blend
       made.policy = policy
       made
+    end
+
+    # Where this surface's `(0, 0)` falls in the buffer's coordinates. Zero for
+    # everything that draws on a whole buffer; a `View` says where it sits, so
+    # the blend it carries can be asked in its own coordinates.
+    def origin : {Int32, Int32}
+      {0, 0}
     end
 
     # How clusters are measured on this surface, which is what a `View` cuts
