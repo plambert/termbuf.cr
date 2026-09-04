@@ -3,7 +3,7 @@ require "base64"
 require "../image_store"
 require "./capability"
 require "./environment"
-require "./response_scanner"
+require "../input/scanner"
 
 module TermBuf
   # Asks the terminal what it can do, rather than guessing from its name.
@@ -38,7 +38,7 @@ module TermBuf
     getter timeout : Time::Span
 
     def initialize(@input : IO, @output : IO, @timeout : Time::Span = DEFAULT_TIMEOUT)
-      @scanner = ResponseScanner.new
+      @scanner = Input::SequenceScanner.new
     end
 
     # A one pixel RGB image, asked about rather than displayed.
@@ -132,7 +132,7 @@ module TermBuf
     # The read deadline is put back the way it was found. Leaving one behind
     # would make every later read of that stream give up after a quarter of a
     # second, which reads exactly like the terminal having gone away.
-    private def collect(& : ResponseScanner::Kind, Bytes -> Bool) : Nil
+    private def collect(& : Input::SequenceScanner::Kind, Bytes -> Bool) : Nil
       input = @input
 
       if input.responds_to?(:read_timeout=) && input.responds_to?(:read_timeout)
@@ -148,7 +148,7 @@ module TermBuf
       end
     end
 
-    private def gather(& : ResponseScanner::Kind, Bytes -> Bool) : Nil
+    private def gather(& : Input::SequenceScanner::Kind, Bytes -> Bool) : Nil
       deadline = Time.instant + @timeout
       buffer = Bytes.new 4096
       done = false

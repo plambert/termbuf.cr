@@ -1,5 +1,5 @@
 require "../unicode/grapheme"
-require "./response_scanner"
+require "../input/scanner"
 
 module TermBuf
   # Asks the terminal how wide it thinks a grapheme cluster is.
@@ -111,7 +111,7 @@ module TermBuf
     getter timeout : Time::Span
 
     def initialize(@input : IO, @output : IO, @timeout : Time::Span = DEFAULT_TIMEOUT)
-      @scanner = ResponseScanner.new
+      @scanner = Input::SequenceScanner.new
     end
 
     CURSOR_POSITION = /\A\e\[(\d+);(\d+)R\z/

@@ -1,4 +1,4 @@
-require "./caps/response_scanner"
+require "./input/scanner"
 require "./core/style"
 
 module TermBuf
@@ -21,7 +21,7 @@ module TermBuf
   # pair of matching mistakes.
   class SgrScanner
     def initialize
-      @scanner = ResponseScanner.new
+      @scanner = Input::SequenceScanner.new
     end
 
     # Feeds bytes in, yielding each run of printable text with the style in

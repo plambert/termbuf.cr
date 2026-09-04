@@ -1,10 +1,10 @@
 require "../spec_helper"
 
-private alias Kind = TermBuf::ResponseScanner::Kind
+private alias Kind = TermBuf::Input::SequenceScanner::Kind
 
 # Feeds *chunks* through one scanner and collects what it classified.
 private def scan(*chunks : String) : Array({Kind, String})
-  scanner = TermBuf::ResponseScanner.new
+  scanner = TermBuf::Input::SequenceScanner.new
   result = [] of {Kind, String}
 
   chunks.each do |chunk|
@@ -15,7 +15,7 @@ private def scan(*chunks : String) : Array({Kind, String})
 end
 
 private def scan_and_flush(*chunks : String) : Array({Kind, String})
-  scanner = TermBuf::ResponseScanner.new
+  scanner = TermBuf::Input::SequenceScanner.new
   result = [] of {Kind, String}
 
   chunks.each do |chunk|
@@ -26,7 +26,7 @@ private def scan_and_flush(*chunks : String) : Array({Kind, String})
   result
 end
 
-Spectator.describe TermBuf::ResponseScanner do
+Spectator.describe TermBuf::Input::SequenceScanner do
   describe "ordinary input" do
     it "passes plain text through" do
       expect(scan("hello")).to eq [{Kind::Text, "hello"}]
@@ -128,7 +128,7 @@ Spectator.describe TermBuf::ResponseScanner do
     end
 
     it "reports whether it is holding anything back" do
-      scanner = TermBuf::ResponseScanner.new
+      scanner = TermBuf::Input::SequenceScanner.new
 
       expect(scanner.pending?).to be_false
       scanner.feed("\e[".to_slice) { }
@@ -138,7 +138,7 @@ Spectator.describe TermBuf::ResponseScanner do
     end
 
     it "holds a partial sequence back rather than guessing" do
-      scanner = TermBuf::ResponseScanner.new
+      scanner = TermBuf::Input::SequenceScanner.new
       seen = [] of String
       scanner.feed("\e[12".to_slice) { |_, bytes| seen << String.new(bytes) }
 

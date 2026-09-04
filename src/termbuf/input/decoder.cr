@@ -1,4 +1,4 @@
-require "../caps/response_scanner"
+require "./scanner"
 require "../unicode/utf8"
 require "../terminal/event"
 require "../terminal/responses"
@@ -71,7 +71,7 @@ module TermBuf
     property paste_stall : Time::Span = PASTE_STALL
 
     def initialize(@responses : ResponseRegistry = ResponseRegistry.new)
-      @scanner = ResponseScanner.new
+      @scanner = Input::SequenceScanner.new
       @partial = IO::Memory.new
       @paste = IO::Memory.new
       @pasting = false
@@ -174,7 +174,7 @@ module TermBuf
 
     # ------------------------------------------------------------ dispatch
 
-    private def dispatch(kind : ResponseScanner::Kind, chunk : Bytes, emit : Event ->) : Nil
+    private def dispatch(kind : Input::SequenceScanner::Kind, chunk : Bytes, emit : Event ->) : Nil
       # The scanner hands out slices of a buffer it reuses, so anything kept
       # past this call has to be copied.
       kind.sequence? ? sequence(chunk.dup, emit) : text(chunk, emit)
