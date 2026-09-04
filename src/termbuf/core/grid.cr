@@ -26,6 +26,7 @@ module TermBuf
     @cells : Slice(Cell)
     @hashes : Slice(UInt64)
     @hashed : Slice(Bool)
+    @watchers : Array(Damage)
 
     def initialize(@width : Int32, @height : Int32, blank : Cell = Cell.blank)
       raise ArgumentError.new "grid width #{@width} is not positive" unless @width > 0
@@ -35,6 +36,25 @@ module TermBuf
       @hashes = Slice(UInt64).new @height, 0_u64
       @hashed = Slice(Bool).new @height, false
       @damage = Damage.new @height
+      @watchers = [] of Damage
+    end
+
+    # Starts marking *damage* alongside the grid's own on every write.
+    #
+    # One `Sink` is one watcher: each output painting this grid needs its own
+    # record of what it has yet to draw, because they paint at different times
+    # and one committing must not tell another its rows are clean. There are
+    # one or two of these, so marking them is a loop over a short array rather
+    # than anything cleverer.
+    def watch(damage : Damage) : Nil
+      return if @watchers.includes? damage
+
+      @watchers << damage
+    end
+
+    # Stops marking *damage*.
+    def unwatch(damage : Damage) : Nil
+      @watchers.delete damage
     end
 
     # The cell at (*x*, *y*). Raises if it is off the grid.
@@ -61,6 +81,7 @@ module TermBuf
       @cells[index] = cell
       @hashed[y] = false
       @damage.touch x, y
+      @watchers.each &.touch(x, y)
     end
 
     # Whether (*x*, *y*) is on the grid.
@@ -273,6 +294,7 @@ module TermBuf
       @hashes = Slice(UInt64).new height, 0_u64
       @hashed = Slice(Bool).new height, false
       @damage.resize height
+      @watchers.each &.resize(height)
 
       # A cluster reaching past the new right edge lost continuations to the
       # narrower grid, so it has to go. Only the last `Cell::MAX_WIDTH - 1`
@@ -288,6 +310,7 @@ module TermBuf
       end
 
       @damage.touch_all width
+      @watchers.each &.touch_all(width)
     end
 
     # Replaces this grid's contents with *other*'s, which must be the same
@@ -337,12 +360,14 @@ module TermBuf
       row_span(rect, to).copy_from row_span(rect, from)
       @hashed[to] = false
       @damage.touch_span to, rect.x, rect.right
+      @watchers.each &.touch_span(to, rect.x, rect.right)
     end
 
     private def fill_row(rect : Rect, y : Int32, blank : Cell) : Nil
       row_span(rect, y).fill blank
       @hashed[y] = false
       @damage.touch_span y, rect.x, rect.right
+      @watchers.each &.touch_span(y, rect.x, rect.right)
     end
 
     FNV_OFFSET = 0xCBF29CE484222325_u64
