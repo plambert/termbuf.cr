@@ -1393,63 +1393,7 @@ Spectator.describe TermBuf::Tty do
   end
 end
 
-Spectator.describe TermBuf::ResponseRegistry do
-  subject(registry) { TermBuf::ResponseRegistry.new }
-
-  it "starts empty, so every sequence is a keystroke" do
-    expect(registry.empty?).to be_true
-    expect(registry.matches?("\e[A")).to be_false
-  end
-
-  it "matches on both ends" do
-    registry.register "\e[?", "$y"
-
-    expect(registry.matches?("\e[?2026;2$y")).to be_true
-    expect(registry.matches?("\e[?2026;2c")).to be_false
-    expect(registry.matches?("\e[2026$y")).to be_false
-  end
-
-  # The two ends have to fit without overlapping, or `"\e["` would match a
-  # pattern whose prefix and terminator are both `"\e["`.
-  it "needs room for both ends" do
-    registry.register "\e[", "R"
-    expect(registry.matches?("\e[R")).to be_true
-    expect(registry.matches?("\e[1;1R")).to be_true
-
-    registry.clear
-    registry.register "\e[", "\e["
-    expect(registry.matches?("\e[")).to be_false
-    expect(registry.matches?("\e[x\e[")).to be_true
-  end
-
-  it "registers a pattern once" do
-    registry.register "\e[", "R"
-    registry.register "\e[", "R"
-
-    expect(registry.size).to eq 1
-  end
-
-  it "matches any of several patterns" do
-    registry.register "\e[?", "$y"
-    registry.register "\eP", "\e\\"
-
-    expect(registry.matches?("\e[?2026;2$y")).to be_true
-    expect(registry.matches?("\eP>|ghostty\e\\")).to be_true
-    expect(registry.matches?("\e[A")).to be_false
-  end
-
-  it "forgets a pattern" do
-    pattern = registry.register "\e[", "R"
-    registry.unregister pattern
-
-    expect(registry.matches?("\e[1;1R")).to be_false
-    expect(registry.empty?).to be_true
-  end
-
-  it "refuses a pattern with an empty end" do
-    expect { TermBuf::ResponsePattern.new("", "R") }.to raise_error(ArgumentError)
-    expect { TermBuf::ResponsePattern.new("\e[", "") }.to raise_error(ArgumentError)
-  end
+Spectator.describe TermBuf::Terminal do
   # Terminal.app counts a cluster's columns by adding up its code points, so
   # the row it is on comes apart. Nothing here can lay that row out; the point
   # is that the application is told rather than left watching it happen.

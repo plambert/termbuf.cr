@@ -1,7 +1,7 @@
 require "./scanner"
 require "../unicode/utf8"
 require "../terminal/event"
-require "../terminal/responses"
+require "./patterns"
 require "./key"
 
 module TermBuf
@@ -9,9 +9,10 @@ module TermBuf
   #
   # Three things arrive on the same stream and have to be told apart: replies
   # to queries the application made, text that was pasted rather than typed,
-  # and key presses. The first is settled by `ResponseRegistry`, since nothing
-  # about the bytes says whether a finger or a terminal produced them. The
-  # second is settled by the bracketed paste markers. Everything left is a key.
+  # and key presses. The first is settled by whoever set `#on_sequence`, since
+  # nothing about the bytes says whether a finger or a terminal produced them.
+  # The second is settled by the bracketed paste markers. Everything left is a
+  # key.
   #
   # State is carried between calls, because none of the three respects the
   # boundaries of a read: an escape sequence, a UTF-8 character, and a paste can
@@ -70,7 +71,15 @@ module TermBuf
     # See `PASTE_STALL`.
     property paste_stall : Time::Span = PASTE_STALL
 
-    def initialize(@responses : ResponseRegistry = ResponseRegistry.new)
+    # Asked what a complete escape sequence means before it is treated as a
+    # key press, and answered with `nil` when it means nothing in particular.
+    #
+    # This is the seam the pattern registry hangs off. The decoder deliberately
+    # does not own it: which replies an application is waiting for changes while
+    # it runs, and the decoder's own state does not.
+    property on_sequence : (Input::Sequence -> Event?)? = nil
+
+    def initialize
       @scanner = Input::SequenceScanner.new
       @partial = IO::Memory.new
       @paste = IO::Memory.new
@@ -187,9 +196,11 @@ module TermBuf
 
       return paste_marker bytes, emit if @pasting
 
-      if @responses.matches? String.new(bytes)
-        emit.call Events::Response.new(bytes)
-        return
+      if handler = @on_sequence
+        if event = handler.call Input::Sequence.parse(bytes)
+          emit.call event
+          return
+        end
       end
 
       return open_paste if bytes == PASTE_START

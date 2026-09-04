@@ -3,10 +3,10 @@ require "../cursor"
 require "../core/buffer"
 require "../core/encoder"
 require "../core/painter"
+require "../input/stream"
 require "./command"
 require "./event"
 require "./meter"
-require "./responses"
 require "./tty"
 
 module TermBuf
@@ -17,9 +17,10 @@ module TermBuf
   # has something to report — a paint, a shutdown — carries a reply channel and
   # the caller waits on it; the rest are fire and forget.
   #
-  # Input is read on a fibre of its own, in its own execution context when the
-  # terminal is a real device, because a blocking read would otherwise stall
-  # every other fibre sharing that thread.
+  # Input is `Input::Stream`'s: one fibre reads the device, in an execution
+  # context of its own when the terminal is a real one because a blocking read
+  # would otherwise stall every fibre sharing that thread, and a second turns
+  # what it read into the events on `#events`.
   #
   # Whatever happens, the terminal is given back: the owning fibre restores it
   # on the way out, signal handlers restore it before dying, and `at_exit`
@@ -31,11 +32,6 @@ module TermBuf
     # shallow enough to be backpressure rather than an unbounded queue.
     COMMAND_CAPACITY = 256
 
-    # Events waiting for the application. Once this fills, the reader stops
-    # reading, which is the right way round: the terminal's own buffer then
-    # applies backpressure to the keyboard rather than memory growing here.
-    EVENT_CAPACITY = 256
-
     # What the terminal was found to be able to do. The encoder emits nothing
     # that is not in here.
     getter capabilities : Capabilities
@@ -45,16 +41,12 @@ module TermBuf
     getter size : ScreenSize
 
     # Everything the terminal has to say, in the order it happened.
-    getter events : Channel(Event)
+    def events : Channel(Event)
+      @input.events
+    end
 
     # The device underneath, for anything the driver does not wrap.
     getter tty : Tty
-
-    # The replies the application is waiting for. Anything arriving from the
-    # terminal that matches one becomes an `Events::Response`; everything else
-    # goes to the decoder, because an escape sequence nobody asked for is a key
-    # someone pressed.
-    getter responses : ResponseRegistry
 
     # Whether the terminal has been given back.
     getter? closed : Bool = false
@@ -71,51 +63,50 @@ module TermBuf
     # when it did not run.
     getter width_readings = [] of WidthProbe::Reading
 
-    # Turns the bytes the terminal sends into events. Held here rather than
-    # made on the reader fibre so that its deadlines can be adjusted before
-    # anything starts reading.
-    getter decoder : Decoder
+    # The input side: the fibres that read the device, the decoder they feed,
+    # and the sequence patterns the application registered.
+    getter input : Input::Stream
 
     # See `Decoder::ESCAPE_TIMEOUT`. Worth raising over a slow link, where a
     # sequence can take longer than that to arrive in full.
     def escape_timeout : Time::Span
-      @decoder.escape_timeout
+      @input.decoder.escape_timeout
     end
 
     # :ditto:
     def escape_timeout=(span : Time::Span) : Time::Span
-      @decoder.escape_timeout = span
+      @input.decoder.escape_timeout = span
     end
 
     # See `Decoder::PASTE_NOTICE`.
     def paste_notice : Time::Span
-      @decoder.paste_notice
+      @input.decoder.paste_notice
     end
 
     # :ditto:
     def paste_notice=(span : Time::Span) : Time::Span
-      @decoder.paste_notice = span
+      @input.decoder.paste_notice = span
     end
 
     # See `Decoder::PASTE_PROGRESS`.
     def paste_progress : Time::Span
-      @decoder.paste_progress
+      @input.decoder.paste_progress
     end
 
     # :ditto:
     def paste_progress=(span : Time::Span) : Time::Span
-      @decoder.paste_progress = span
+      @input.decoder.paste_progress = span
     end
 
     # See `Decoder::PASTE_STALL`. Worth raising for an application expecting
     # very large pastes over a very slow link.
     def paste_stall : Time::Span
-      @decoder.paste_stall
+      @input.decoder.paste_stall
     end
 
     # :ditto:
     def paste_stall=(span : Time::Span) : Time::Span
-      @decoder.paste_stall = span
+      @input.decoder.paste_stall = span
     end
 
     # How many bytes the last paint sent. The point of the buffer is that a
@@ -134,7 +125,6 @@ module TermBuf
     @encoder : Encoder
     @meter : Meter
     @commands : Channel(Command)
-    @reader : Fiber::ExecutionContext::Isolated?
     @scheduler : Fiber?
     @scheduling = false
     @signals = [] of Signal
@@ -160,9 +150,7 @@ module TermBuf
         @buffer.links
       @meter = Meter.new @tty.output
       @commands = Channel(Command).new COMMAND_CAPACITY
-      @events = Channel(Event).new EVENT_CAPACITY
-      @responses = ResponseRegistry.new
-      @decoder = Decoder.new @responses
+      @input = Input::Stream.new @tty.input, blocking: @tty.managed?
       @pending_input = pending_input
       @initial_warnings = warnings.dup
     end
@@ -246,9 +234,13 @@ module TermBuf
       install_exit_handler
 
       spawn(name: "termbuf-owner") { run }
-      start_reader
 
-      @initial_warnings.each { |message| emit Events::Warning.new(message) }
+      # After the width probe, which reads the device itself and hands back
+      # whatever it read that was not an answer.
+      @input.preload @pending_input
+      @input.start
+
+      @initial_warnings.each { |message| @input.inject Events::Warning.new(message) }
     end
 
     # What this terminal is known to get wrong. See `Quirk`.
@@ -477,13 +469,21 @@ module TermBuf
 
     # Says that a reply beginning with *prefix* and ending with *terminator* is
     # expected, so it arrives as an `Events::Response` rather than as input.
-    def expect_response(prefix : String, terminator : String) : ResponsePattern
-      @responses.register prefix, terminator
+    #
+    # An application that wants the reply as something more than its bytes can
+    # register with `Input::Patterns` directly and return an event of its own.
+    def expect_response(prefix : String, terminator : String) : Input::Pattern
+      raise ArgumentError.new "a response pattern needs a terminator" if terminator.empty?
+
+      kind, head = Input::Prefix.split prefix
+      @input.patterns.register(kind, head, terminator) do |sequence|
+        Events::Response.new sequence.bytes
+      end
     end
 
     # Stops expecting *pattern*, so sequences matching it are input again.
-    def forget_response(pattern : ResponsePattern) : Nil
-      @responses.unregister pattern
+    def forget_response(pattern : Input::Pattern) : Nil
+      @input.patterns.unregister pattern
     end
 
     # --------------------------------------------------------------- resizing
@@ -693,10 +693,10 @@ module TermBuf
     rescue Channel::ClosedError
       # Closed from underneath; fall through to the restore.
     rescue error
-      emit Events::Failure.new(error)
+      @input.inject Events::Failure.new(error)
     ensure
       restore
-      @events.close rescue nil
+      @input.close
     end
 
     # Returns true when the owning fibre should stop.
@@ -752,7 +752,7 @@ module TermBuf
       command.reply.try &.send nil
     rescue error
       reply = command.reply
-      reply ? reply.send(error) : emit(Events::Failure.new(error))
+      reply ? reply.send(error) : @input.inject(Events::Failure.new(error))
     end
 
     # Says so, once, when a cluster this terminal will misplace has gone out.
@@ -768,7 +768,7 @@ module TermBuf
 
       message = composed_drift_message cluster
 
-      emit Events::Warning.new(message)
+      @input.inject Events::Warning.new(message)
       return unless @warn_composed_drift
 
       say_aside message
@@ -944,7 +944,7 @@ module TermBuf
 
       run_resize_handlers size
 
-      emit Events::Resize.new(size, previous)
+      @input.inject Events::Resize.new(size, previous)
     end
 
     # The application's layout, run before it is told the screen changed so
@@ -955,7 +955,7 @@ module TermBuf
       @resize_handlers.each do |handler|
         handler.call size
       rescue error
-        emit Events::Failure.new(error)
+        @input.inject Events::Failure.new(error)
       end
     end
 
@@ -964,7 +964,7 @@ module TermBuf
       command.reply.try &.send nil
     rescue error
       reply = command.reply
-      reply ? reply.send(error) : emit(Events::Failure.new(error))
+      reply ? reply.send(error) : @input.inject(Events::Failure.new(error))
     end
 
     private def perform_stop(command : Commands::Stop) : Nil
@@ -999,69 +999,6 @@ module TermBuf
       @tty.flush
       @encoder.reset_state
       @encoder.forget_link_state
-    end
-
-    # ----------------------------------------------------------------- input
-
-    private def start_reader : Nil
-      # A blocking read on a real device needs a thread of its own, or it
-      # stalls every fibre sharing one. An in-memory stream returns straight
-      # away and does not.
-      if @tty.managed?
-        @reader = Fiber::ExecutionContext::Isolated.new("termbuf-input") { read_loop }
-      else
-        spawn(name: "termbuf-input") { read_loop }
-      end
-    end
-
-    private def read_loop : Nil
-      decoder = @decoder
-      decoder.feed(@pending_input) { |event| emit event } unless @pending_input.empty?
-
-      buffer = Bytes.new 4096
-      input = @tty.input
-
-      loop do
-        count = read_next input, buffer, decoder
-        next if count.nil?
-        break if count.zero?
-
-        decoder.feed(buffer[0, count]) { |event| emit event }
-      end
-    rescue IO::Error
-      # The terminal went away.
-    ensure
-      emit Events::Closed.new
-    end
-
-    # Reads the next chunk. Returns the number of bytes, zero at end of input,
-    # or `nil` when a deadline expired and whatever it was waiting on has been
-    # dealt with.
-    #
-    # A deadline is only set when the decoder is holding something. The rest of
-    # the time the read blocks, which is what it should do: waking every 25
-    # milliseconds to find nothing is work nobody asked for.
-    private def read_next(input : IO, buffer : Bytes, decoder : Decoder) : Int32?
-      deadline = decoder.read_deadline
-      return input.read buffer unless deadline
-      return input.read buffer unless input.responds_to? :read_timeout=
-
-      input.read_timeout = deadline
-
-      begin
-        input.read buffer
-      rescue IO::TimeoutError
-        decoder.tick { |event| emit event }
-        nil
-      ensure
-        input.read_timeout = nil
-      end
-    end
-
-    private def emit(event : Event) : Nil
-      @events.send event
-    rescue Channel::ClosedError
-      # Nobody is listening any more.
     end
 
     # --------------------------------------------------------------- signals

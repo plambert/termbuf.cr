@@ -138,6 +138,33 @@ All notable changes to this project are documented here. The format follows
   which does the same thing and is one of many rather than the only one. The flag could only ever
   answer the one question; a blend answers whatever the caller asks, and `#fill` and `#clear` now
   take it too, which the flag never did.
+- Input is now `Input::Stream`, under `src/termbuf/input/`, and `Terminal` holds one rather than
+  running the reader itself. Two fibres instead of one: `Input::Reader` reads the device and puts
+  what it read on a channel — in an isolated execution context when the terminal is a real one, so
+  a blocking read stalls nothing else — and a dispatcher fibre feeds the decoder, offers each
+  complete escape sequence to the registered patterns, and sends what came of it to the
+  application. The escape and paste deadlines are the dispatcher's now, kept by a `select` on the
+  inbound channel rather than by a read timeout, so they hold on an input that has none.
+- Terminal replies are matched by `Input::Patterns` rather than by prefix and terminator strings. A
+  pattern names an `Input::Prefix` — the introducer, `CSI` through `APC` — what has to follow it,
+  what has to end it, and a handler that is given the parsed `Input::Sequence` and returns the
+  event it makes of it, or `nil` to say it wants nothing to do with it and leave it a keystroke.
+  That last part is the point: a reply and a key press are the same bytes, and until now the only
+  thing an application could do about one was be told it arrived.
+- `Terminal#expect_response` keeps its signature and now returns the `Input::Pattern` to hand back
+  to `Terminal#forget_response`. It registers a handler emitting `Events::Response` with the same
+  bytes as before, so nothing calling it needs to change.
+- `ResponseScanner` is `Input::SequenceScanner` and lives in `src/termbuf/input/scanner.cr`. It was
+  always the input decoder's as much as the capability probe's, and the probe is not where the
+  splitting of a byte stream into escape sequences belongs.
+
+### Removed
+
+- `ResponsePattern` and `ResponseRegistry`, replaced by `Input::Patterns` and `Input::Pattern`.
+- `Terminal#responses` and `Terminal#decoder`. The registry is `Terminal#input.patterns` and the
+  decoder is `Terminal#input.decoder`; the timing accessors `Terminal#escape_timeout`,
+  `#paste_notice`, `#paste_progress` and `#paste_stall` are unchanged.
+- `Terminal::EVENT_CAPACITY`, which is `Input::Stream::CAPACITY` and still 256.
 
 ## [0.2.1] - 2026-09-02
 

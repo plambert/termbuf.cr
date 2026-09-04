@@ -169,17 +169,35 @@ Spectator.describe TermBuf::Decoder do
   end
 
   describe "responses" do
-    it "delivers a registered reply as a response rather than a key" do
-      registry = TermBuf::ResponseRegistry.new
-      registry.register "\e[", "R"
-      decoder = TermBuf::Decoder.new registry
+    it "delivers a claimed sequence as whatever claimed it" do
+      patterns = TermBuf::Input::Patterns.new
+      patterns.register(TermBuf::Input::Prefix::CSI, terminator: "R") do |sequence|
+        TermBuf::Events::Response.new sequence.bytes
+      end
+
+      decoder = TermBuf::Decoder.new
+      decoder.on_sequence = ->(sequence : TermBuf::Input::Sequence) { patterns.match sequence }
 
       events = decode "\e[3;4R", decoder
       expect(events.size).to eq 1
       expect(events.first).to be_a TermBuf::Events::Response
     end
 
-    it "delivers an unregistered sequence as a key" do
+    # A pattern that answers `nil` has looked at the sequence and decided it
+    # wants nothing to do with it, which leaves it a keystroke.
+    it "delivers a sequence a pattern declined as a key" do
+      patterns = TermBuf::Input::Patterns.new
+      patterns.register(TermBuf::Input::Prefix::CSI, terminator: "R") do |sequence|
+        TermBuf::Events::Response.new(sequence.bytes) if sequence.body.starts_with? '?'
+      end
+
+      decoder = TermBuf::Decoder.new
+      decoder.on_sequence = ->(sequence : TermBuf::Input::Sequence) { patterns.match sequence }
+
+      expect(decode("\e[3;4R", decoder).first).to be_a TermBuf::Events::Key
+    end
+
+    it "delivers a sequence as a key when nothing is asked about it" do
       expect(decode("\e[3;4R").first).to be_a TermBuf::Events::Key
     end
   end

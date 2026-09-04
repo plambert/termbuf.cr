@@ -7,6 +7,7 @@ require "./termbuf/sgr_scanner"
 require "./termbuf/color_stack"
 require "./termbuf/image_store"
 require "./termbuf/cursor"
+require "./termbuf/input"
 require "./termbuf/terminal"
 require "./termbuf/widgets"
 
@@ -76,6 +77,8 @@ require "./termbuf/widgets"
 # arrive as `Events::Key` with a decoded `Key`; text arrives as `Events::Paste`
 # when it was pasted rather than typed; replies to queries the application
 # registered with `Terminal#expect_response` arrive as `Events::Response`.
-# See `Decoder` for what separates the three.
+# See `Decoder` for what separates the three, and `Input::Stream` for the
+# fibres that run it. An application wanting a reply as something other than
+# its bytes registers with `Input::Patterns` itself.
 module TermBuf
 end
