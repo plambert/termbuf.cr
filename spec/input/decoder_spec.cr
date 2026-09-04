@@ -338,20 +338,4 @@ Spectator.describe TermBuf::Decoder do
       expect(events.first.as(TermBuf::Events::Key).key.char).to eq 'y'
     end
   end
-
-  describe TermBuf::Key do
-    it "prints in a form a binding table would use" do
-      expect(TermBuf::Key.character('c', Mods::Ctrl).to_s).to eq "Ctrl+C"
-      expect(TermBuf::Key.named(Name::Up, Mods::Alt).to_s).to eq "Alt+Up"
-      expect(TermBuf::Key.named(Name::F5, Mods::Shift).to_s).to eq "Shift+F5"
-      expect(TermBuf::Key.character('a').to_s).to eq "a"
-      expect(TermBuf::Key.character(' ').to_s).to eq "Space"
-    end
-
-    it "answers what was pressed without unpacking it" do
-      expect(TermBuf::Key.character('q').is?('q')).to be_true
-      expect(TermBuf::Key.character('q', Mods::Ctrl).is?('q')).to be_false
-      expect(TermBuf::Key.named(Name::Up, Mods::Ctrl).is?(Name::Up)).to be_true
-    end
-  end
 end

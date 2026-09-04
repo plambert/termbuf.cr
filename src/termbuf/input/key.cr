@@ -98,6 +98,130 @@ module TermBuf
       new name, '\0', modifiers
     end
 
+    # Reads back what `#to_s` writes: a space separated sequence of key
+    # descriptions.
+    #
+    # Each description is zero or more of the prefixes `Ctrl+`, `Alt+`,
+    # `Shift+` and `Super+`, in any order and any case, followed by a `Name`
+    # label, the `Space` or `Nul` label, or a single character. A space is an
+    # unambiguous separator because the space key is written `Space`, so
+    # `"Ctrl+X s"` is two keys and `"Ctrl+Space"` is one.
+    #
+    # Descriptions are normalised to what `Decoder` emits for the same key
+    # press, so a binding table built from text matches the keys an application
+    # is handed. See `.parse_one`.
+    #
+    # A string of nothing but whitespace is an empty sequence; an empty
+    # description is an `ArgumentError`, as is an unknown name, a trailing
+    # modifier, and anything longer than one character that is not a name.
+    def self.parse(text : String) : Array(Key)
+      text.split.map { |description| parse_one description }
+    end
+
+    # One key description, as `.parse` reads them.
+    #
+    # `Ctrl` with a character is a single C0 control byte on the wire, and
+    # several of those bytes are a named key: no terminal can tell `Ctrl+I`
+    # from `Tab`, so both have to become the key the decoder emits for `0x09`.
+    # That gives `Ctrl+I` => `Tab`, `Ctrl+M` and `Ctrl+J` => `Enter`, and
+    # `Ctrl+[` => `Escape`, each keeping whatever else was held down.
+    #
+    # `Ctrl+H` is the one that keeps its modifier. `0x08` reaches the decoder
+    # as `Ctrl+Backspace` and `0x7F` as a bare `Backspace`, because a keyboard
+    # with both keys sends the two bytes and an application is entitled to bind
+    # them apart; stripping the `Ctrl` would fold the two together.
+    #
+    # The same rule settles case, since `Ctrl+A` and `Ctrl+a` are one byte and
+    # the decoder calls it lower case.
+    def self.parse_one(text : String) : Key
+      raise ArgumentError.new "a key description cannot be empty" if text.empty?
+
+      held = Modifiers::None
+      rest = text
+
+      # A leading `+` is the plus key rather than an empty modifier, which is
+      # what leaves the last one in `Ctrl++` to the key.
+      while (plus = rest.index('+')) && plus > 0
+        modifier = modifier_named rest[0, plus]
+        break unless modifier
+
+        held |= modifier
+        rest = rest[(plus + 1)..]
+      end
+
+      normalise resolve(rest, held, text)
+    end
+
+    private def self.modifier_named(text : String) : Modifiers?
+      case text.downcase
+      when "ctrl"  then Modifiers::Ctrl
+      when "alt"   then Modifiers::Alt
+      when "shift" then Modifiers::Shift
+      when "super" then Modifiers::Super
+      end
+    end
+
+    # What is left of a description once its modifiers have been taken off.
+    private def self.resolve(rest : String, held : Modifiers, text : String) : Key
+      raise ArgumentError.new "#{text.inspect} ends with a modifier and no key" if rest.empty?
+
+      case rest.downcase
+      when "space" then return character ' ', held
+      when "nul"   then return character '\0', held
+      end
+
+      # `Character` is the absence of a name rather than one an application can
+      # ask for: the character itself, or `Nul`, is how that key is written.
+      if (name = Name.parse? rest) && !name.character?
+        return named name, held
+      end
+
+      return character rest[0], held if rest.size == 1
+
+      if rest.includes? '+'
+        raise ArgumentError.new "#{text.inspect} holds a modifier that is not Ctrl, Alt, Shift or Super"
+      end
+
+      raise ArgumentError.new "#{rest.inspect} in #{text.inspect} is neither a key name nor a single character"
+    end
+
+    # Folds a `Ctrl` and a character onto the key its control byte arrives as.
+    private def self.normalise(key : Key) : Key
+      return key unless key.character? && key.ctrl?
+      return key unless byte = control_byte key.char
+
+      base = from_control byte
+      new base.name, base.char, base.modifiers | (key.modifiers & ~Modifiers::Ctrl)
+    end
+
+    # The C0 byte `Ctrl` and *char* stand for, or nil when the pair has no
+    # control byte and so reaches the application as the two of them.
+    private def self.control_byte(char : Char) : UInt8?
+      case char
+      when ' '      then 0x00_u8
+      when '?'      then 0x7F_u8
+      when 'a'..'z' then (char.ord - 0x60).to_u8
+      when '@'..'_' then (char.ord - 0x40).to_u8
+      end
+    end
+
+    # The key a C0 control byte is, which is `Decoder`'s reading of the same
+    # byte. The two tables have to agree: this is the half a binding table is
+    # written against and that is the half an application is handed.
+    private def self.from_control(byte : UInt8) : Key
+      case byte
+      when 0x00       then character ' ', Modifiers::Ctrl
+      when 0x08       then named Name::Backspace, Modifiers::Ctrl
+      when 0x09       then named Name::Tab
+      when 0x0A, 0x0D then named Name::Enter
+      when 0x1B       then named Name::Escape
+      when 0x7F       then named Name::Backspace
+      when 0x01..0x1A then character (byte + 0x60).chr, Modifiers::Ctrl
+      when 0x1C..0x1F then character (byte + 0x40).chr, Modifiers::Ctrl
+      else                 character byte.chr
+      end
+    end
+
     # Whether this is an ordinary character rather than a named key.
     def character? : Bool
       @name.character?
@@ -151,7 +275,10 @@ module TermBuf
       when ' '  then "Space"
       when '\0' then "Nul"
       else
-        ctrl? ? @char.upcase.to_s : @char.to_s
+        # Upper case is the convention for a control character, and only for
+        # one: it is `Ctrl+C`, never `Ctrl+c`, but upper casing anything
+        # outside ASCII changes the key rather than how it is spelled.
+        ctrl? && @char.ascii_letter? ? @char.upcase.to_s : @char.to_s
       end
     end
   end

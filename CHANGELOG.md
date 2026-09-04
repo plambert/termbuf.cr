@@ -119,9 +119,25 @@ All notable changes to this project are documented here. The format follows
   falls outside it. Measured from the view's absolute origin, so a nest costs one call rather than
   one per level. Coordinates are 0-based buffer cells throughout; an SGR mouse report numbers its
   own from one, and converting that belongs to the mouse decoder.
+- `Key.parse`, the inverse of `Key#to_s` over a space separated sequence of key descriptions, with
+  `Key.parse_one` for a single one. `Key.parse "Ctrl+X s"` is two keys, and a space is an
+  unambiguous separator because the space key is written `Space`. Modifier prefixes may come in any
+  order and any case, as may a key name.
+
+  A description is normalised to the key `Decoder` emits for the same press, since a binding table
+  that does not match what an application is handed fires for nothing. `Ctrl` with a character is
+  one C0 byte on the wire, so `Ctrl+I` becomes `Tab`, `Ctrl+M` and `Ctrl+J` become `Enter`, `Ctrl+[`
+  becomes `Escape`, `Ctrl+@` becomes `Ctrl+Space`, and `Ctrl+A` and `Ctrl+a` both become the lower
+  case one the decoder reports. `Ctrl+H` is the exception that keeps its modifier: `0x08` arrives as
+  `Ctrl+Backspace` and `0x7F` as a bare `Backspace`, and a keyboard with both keys sends both bytes.
+  Anything else — an empty description, an unknown name or modifier, a trailing `+`, more than one
+  character that is not a name — is an `ArgumentError` that names what it could not read.
 
 ### Changed
 
+- `Key#to_s` upper cases a control character only when it is an ASCII letter. `Ctrl+C` is the
+  convention and `Ctrl+c` is not, but upper casing outside ASCII changed the key rather than how it
+  was spelled, which left `Key.parse` no way back to it.
 - `Commands::SetColors` is now `Commands::Quiet`: bytes sent after the current frame that move no
   cursor and set no attribute, so the encoder's idea of the screen survives them. The colour stack
   and the clipboard both issue through it, and the name no longer claims one of them.
