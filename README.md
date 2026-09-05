@@ -677,16 +677,17 @@ here is renamed, removed, or given a new required argument without the major ver
   `stages`, `signals`, `after`, `cancel`, `expect_response`, `forget_response`, and the decoder
   timing properties); resizing (`on_resize`, `forget_resize`, `window_resized`,
   `resize_interval`); the extras (`link`, `images`, `colors`, `clipboard`, `enable`, `disable`);
-  hit testing (`hit`); the frame scheduler; the paint byte counters; and the two drawing switches
-  `clear_overhang=` and `warn_composed_drift=`.
+  the window (`title`, `title=`, `cursor_shape`, `cursor_shape=`, `cursor_blink?`,
+  `cursor_blink=`); hit testing (`hit`); the frame scheduler; the paint byte counters; and the two
+  drawing switches `clear_overhang=` and `warn_composed_drift=`.
 * **Drawing.** The `Drawing` module and everything that mixes it in — `Terminal`, `Batcher`,
   `BufferSurface`, `View` — so a method written against one surface keeps working against all of
   them.
 * **The buffer.** `Buffer`, `Sink`, `Cursor`, `CursorIO`, `Region`, `Rect`.
 * **Appearance.** `Style`, `Blend`, `Gradient`, `Color`, `Attributes`, `Underline`, `Link`,
   `LinkId`.
-* **What a terminal is.** `Capability`, `Capabilities`, `Quirk`, `ScreenSize`, and `Tty::Mode`
-  with the mode constants beside it — `BRACKETED_PASTE`, `FOCUS_EVENTS`, `MOUSE_SGR`,
+* **What a terminal is.** `Capability`, `Capabilities`, `Quirk`, `ScreenSize`, `CursorShape`, and
+  `Tty::Mode` with the mode constants beside it — `BRACKETED_PASTE`, `FOCUS_EVENTS`, `MOUSE_SGR`,
   `KITTY_KEYBOARD`.
 * **Talking to the terminal itself.** `ColorStack`, `Clipboard`, `ImageStore`, `Image`,
   `Placement`.
@@ -752,8 +753,8 @@ it carries a `ScreenSize`.
 
 ## Status
 
-The core, the driver, input, cursors, hyperlinks, images, and the terminal's own colours are in
-and specified. Mouse reporting is neither enabled nor decoded. See
+The core, the driver, input, cursors, hyperlinks, images, the window title, the cursor's own
+shape, and the terminal's own colours are in and specified. See
 [CHANGELOG.md](CHANGELOG.md) for what has landed and [PLAN.md](PLAN.md) for what is coming.
 
 ## Contributing

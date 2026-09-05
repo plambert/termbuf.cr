@@ -8,6 +8,39 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- `Terminal#title=` and `Terminal#title`, the window title, written with OSC 2 in order with the
+  frames around it. The title the terminal had is saved on its own stack — `CSI 22 ; 0 t` — the
+  first time one is set and popped again by `#close`, so a program that renamed a tab does not
+  leave its own name in one somebody goes on using; `terminal.title = nil` pops it there and then.
+  Gated on `Capability::Titles`, which no query settles: a terminal that does not take the
+  sequence prints it, so without the capability nothing is written at all.
+- `Terminal#cursor_shape=`, `#cursor_blink=` and `CursorShape`, the shape the terminal draws its
+  own cursor as: `Default`, `Block`, `Underline` or `Bar`, blinking or steady, emitted as DECSCUSR
+  `CSI Ps SP q`. Registered as a terminal mode named `cursor_shape`, so `#close` sends
+  `CSI 0 SP q` and the person gets the cursor their terminal was configured for back, a takeover
+  after a suspend asks for the shape again, and a second shape replaces the first rather than
+  stacking on it. Two setters rather than one call, because Crystal allows an assignment method a
+  single argument; each re-asks with the other's current value. Gated on
+  `Capability::CursorShape`.
+- `Tty#enable` now writes a mode of the same name carrying different bytes, where an identical
+  re-enable is still written once. Registration by name is what stops `KITTY_KEYBOARD` pushing
+  twice against one pop; a replacement is a different thing, and the cursor shape is one mode
+  whichever shape it is asking for.
+- The probe batch now asks DECRQSS for the DECSCUSR setting — `DCS $ q SP q ST` — and reads
+  `DCS 1 $ r Ps SP q ST` as evidence of `Capability::CursorShape` and `DCS 0 $ r ST` as evidence
+  against it, the latter taking the capability off a terminal whose name had put it there. An
+  experiment: Terminal.app and kitty answer neither, and silence changes nothing.
+- `scripts/caps_check.cr` and `measurements/CAPS.md`, one command per terminal for the four
+  capabilities that reach a terminal by way of its name and have never been watched working —
+  `FocusEvents`, `MouseSgr`, `Titles` and `CursorShape`. It runs the probe, prints a
+  capability/method/result row for each, and then asks the person at the keyboard the questions no
+  query can: alt-tab away and back, click once, look at the title bar, look at the cursor. TSV to
+  stdout and to `<directory>/caps.tsv` with `--out`.
+- `examples/validate.cr` grows three pages: `focus`, which turns mode 1004 on while it is showing
+  and reports the raw bytes and what they meant; `mouse`, which turns SGR reporting on and shows
+  the decoded event beside the report it was decoded from; and `title`, which renames the window
+  on arrival and puts the old name back on the way out. The cursors page cycles the cursor shape
+  with `s` and its blink with `b`.
 - The probe batch now asks DECRQM for modes 2027, 1004, 1006 and 2004 alongside 2026, in the same
   write, and reads all five through one table. Focus events, SGR mouse reporting and bracketed paste
   were previously guessed from the terminal's name and never confirmed.
