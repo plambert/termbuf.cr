@@ -261,6 +261,16 @@ sixteen environments give seven distinct answers; GNU `screen` 5.0.2 carries
 agree against our tables on a format character taking a column and on a joined emoji sequence
 being two columns whatever it opens with.
 
+## Capability checks
+
+A second, much smaller procedure runs in the same terminals and answers a different question:
+whether four capabilities this shard sets from a table of terminal names — `FocusEvents`,
+`MouseSgr`, `Titles` and `CursorShape` — are honoured by the terminal that carries the name. Two
+of them can be asked about with DECRQM, one with DECRQSS, and one with nothing at all, so the
+instrument asks what it can and then asks the person at the keyboard. One command per terminal,
+`scripts/caps_check.cr`, and a `caps.tsv` beside the counted widths. See
+[CAPS.md](CAPS.md) for the procedure and the six environments to run it in.
+
 ## Phases
 
 Ordered so a failure wastes as little as possible.
