@@ -16,7 +16,17 @@ module Validate
   alias Color = TermBuf::Color
   alias Rect = TermBuf::Rect
 
-  PAGES = %w[caps edges widths colours attrs motion keys cursors measured panels rich]
+  PAGES = %w[caps edges widths colours attrs motion keys focus mouse title cursors
+    measured panels rich]
+
+  # How wide the tab bar is when every page is named, which is what decides
+  # whether there is room to draw it. Computed rather than written down: the
+  # number was wrong the first time a page was added.
+  TAB_BAR_WIDTH = 10 + PAGES.sum { |name| name.size + 2 }
+
+  # What the title page asks the terminal to call its window. Two of them, so
+  # a person can watch the title change rather than only see it changed.
+  TITLES = ["termbuf validate", "termbuf validate — still here"]
 
   # One line of the width page: something to draw, and what it is.
   #
@@ -90,6 +100,18 @@ module Validate
       # The swatch, registered the first time it is wanted and reused after.
       @swatch = nil.as(UInt32?)
       @typed = ""
+      # What the focus page has seen: the last sequence, what it meant, and
+      # how many have arrived.
+      @focus_bytes = nil.as(String?)
+      @focus_state = nil.as(String?)
+      @focus_count = 0
+      @focus_patterns = [] of Input::Pattern
+      # What the mouse page has seen: the event, and the bytes it was decoded
+      # from, which the event does not carry.
+      @mouse = nil.as(Events::Mouse?)
+      @mouse_report = nil.as(String?)
+      @decoding = nil.as((Input::Sequence -> Event?)?)
+      @titled = 0
     end
 
     def run : Nil
@@ -99,6 +121,10 @@ module Validate
         @terminal.paint
         pump
       end
+    ensure
+      # Quitting from a page that turned something on is still leaving it.
+      # Closing would reset the modes anyway; the title would not come back.
+      leaving PAGES[@page]
     end
 
     # ------------------------------------------------------------- the frame
@@ -125,6 +151,7 @@ module Validate
       end
     end
 
+    # ameba:disable Metrics/CyclomaticComplexity
     private def draw_page(screen) : Nil
       case PAGES[@page]
       when "caps"     then draw_caps screen
@@ -133,6 +160,9 @@ module Validate
       when "attrs"    then draw_attrs screen
       when "motion"   then draw_motion screen
       when "keys"     then draw_keys screen
+      when "focus"    then draw_focus screen
+      when "mouse"    then draw_mouse screen
+      when "title"    then draw_title screen
       when "cursors"  then draw_cursors screen
       when "measured" then draw_measured screen
       when "panels"   then draw_panels screen
@@ -156,6 +186,18 @@ module Validate
       PAGES[@page] == "cursors"
     end
 
+    private def focus_page? : Bool
+      PAGES[@page] == "focus"
+    end
+
+    private def mouse? : Bool
+      PAGES[@page] == "mouse"
+    end
+
+    private def title? : Bool
+      PAGES[@page] == "title"
+    end
+
     private def columns : Int32
       @terminal.size.columns
     end
@@ -173,7 +215,7 @@ module Validate
       # The names cost about ninety columns. Below that a half-drawn bar says
       # less than naming the page you are on and how far along it is, since
       # tab is the only way to move and the others cannot be reached directly.
-      return draw_narrow_tabs screen if columns < 96
+      return draw_narrow_tabs screen if columns < TAB_BAR_WIDTH
 
       column = 10
 
@@ -240,6 +282,8 @@ module Validate
     # whether it has been entered.
     private def keys_note : String
       return "[esc] leave the pane  [ctrl-r] redraw" if @focused
+      return "[s] shape  [b] blink  [enter] type here  [tab] page  [q] quit" if cursors?
+      return "[t] retitle  [tab] page  [ctrl-r] redraw  [q] quit" if title?
       return "[enter] type here  [tab] page  [ctrl-r] redraw  [q] quit" if typeable?
 
       "[tab]/[shift-tab] page  [ctrl-r] redraw  [q] quit"
@@ -260,7 +304,7 @@ module Validate
       end
     end
 
-    # ---------------------------------------------------------------- page 1
+    # --------------------------------------------------------------- page 1
 
     private def draw_caps(screen) : Nil
       row = 2
@@ -351,7 +395,7 @@ module Validate
       end
     end
 
-    # ---------------------------------------------------------------- page 2
+    # --------------------------------------------------------------- page 2
 
     # Every cell of the screen, corners included. If the terminal wraps or
     # scrolls when the bottom right cell is written, the box loses its top row
@@ -473,7 +517,7 @@ module Validate
       end
     end
 
-    # ---------------------------------------------------------------- page 3
+    # --------------------------------------------------------------- page 3
 
     # Each row is written as one string, so the painter sends it as one run and
     # the terminal's own idea of how wide the sample is decides where the bar
@@ -513,7 +557,7 @@ module Validate
       "wider or narrower than the shard measured it."
     end
 
-    # ---------------------------------------------------------------- page 9
+    # -------------------------------------------------------------- page 12
 
     # What the terminal said when it was asked how wide a cluster is, beside
     # what the width tables would have assumed. A row where the two differ is
@@ -562,7 +606,7 @@ module Validate
       end
     end
 
-    # ---------------------------------------------------------------- page 4
+    # --------------------------------------------------------------- page 4
 
     private def draw_colours(screen) : Nil
       caps = @terminal.capabilities
@@ -668,7 +712,7 @@ module Validate
       end
     end
 
-    # ---------------------------------------------------------------- page 5
+    # --------------------------------------------------------------- page 5
 
     ATTRIBUTES = [
       {"bold", Capability::Bold},
@@ -746,7 +790,7 @@ module Validate
       end
     end
 
-    # ---------------------------------------------------------------- page 6
+    # --------------------------------------------------------------- page 6
 
     # The claim the whole buffer exists to make: a frame costs a diff, not a
     # screenful. A line arrives at the bottom of the box every frame and the
@@ -785,7 +829,7 @@ module Validate
         Style::DEFAULT.faint
     end
 
-    # ---------------------------------------------------------------- page 7
+    # --------------------------------------------------------------- page 7
 
     # What the decoder makes of a real keyboard, which is the only place to
     # find out: no two terminals agree on how to report a modified key, and a
@@ -810,6 +854,110 @@ module Validate
     end
 
     # ---------------------------------------------------------------- page 8
+
+    # Whether the terminal tells an application that its window came forward
+    # or went away. `Capability::FocusEvents` is set from the terminal's name
+    # or from a mode report, and neither of those is the same as having
+    # watched a report arrive — which is what this page is for.
+    #
+    # The mode is on only while this page is showing, because a terminal
+    # reporting focus to an application that is not watching is two escape
+    # sequences arriving as keystrokes.
+    private def draw_focus(screen) : Nil
+      claimed = @terminal.capabilities.includes? Capability::FocusEvents
+      screen.write 2, 2, "window focus", Style::DEFAULT.bold
+      screen.write 20, 2,
+        claimed ? "detected: this terminal reports focus" : "not detected: expect nothing here",
+        Style::DEFAULT.faint
+
+      field screen, 4, "mode", "#{Tty::FOCUS_EVENTS.set.inspect} while this page shows"
+      field screen, 5, "watching", "#{@focus_patterns.size} patterns registered"
+      field screen, 7, "state", @focus_state || "nothing has arrived"
+      field screen, 8, "raw", @focus_bytes.try(&.inspect) || "—"
+      field screen, 9, "reports", @focus_count.to_s
+
+      screen.write 2, rows - 3,
+        "click another window and click back, or press command-tab away and back. " \
+        "a terminal that reports focus sends CSI I and CSI O.",
+        Style::DEFAULT.faint
+    end
+
+    # ---------------------------------------------------------------- page 9
+
+    # Mouse reporting, which nothing in this shard turns on uninvited: a
+    # terminal reporting the mouse is one that no longer lets the person
+    # select and copy with it, so the mode is on only while this page shows.
+    #
+    # Both the decoded event and the bytes it came from, because they are two
+    # different claims: the event is what the application will act on, and the
+    # bytes are what the terminal actually sent.
+    private def draw_mouse(screen) : Nil
+      claimed = @terminal.capabilities.includes? Capability::MouseSgr
+      screen.write 2, 2, "mouse reporting", Style::DEFAULT.bold
+      screen.write 20, 2,
+        claimed ? "detected: this terminal reports SGR" : "not detected: expect nothing here",
+        Style::DEFAULT.faint
+
+      field screen, 4, "mode", "#{Tty::MOUSE_SGR.set.inspect} while this page shows"
+      field screen, 6, "raw", @mouse_report.try(&.inspect) || "—"
+
+      report = @mouse
+      unless report
+        field screen, 7, "event", "nothing has arrived"
+        return draw_mouse_help screen
+      end
+
+      field screen, 7, "button", report.button.to_s
+      field screen, 8, "action", report.action.to_s
+      field screen, 9, "at", "#{report.x}, #{report.y}"
+      field screen, 10, "modifiers", report.modifiers.none? ? "none" : report.modifiers.to_s
+
+      draw_mouse_help screen
+    end
+
+    private def draw_mouse_help(screen) : Nil
+      screen.write 2, rows - 3,
+        "click, drag and scroll anywhere on this page. selecting text with the " \
+        "mouse stops working while the mode is on, and starts again on the next page.",
+        Style::DEFAULT.faint
+    end
+
+    # --------------------------------------------------------------- page 10
+
+    # The window title, which is the one thing on these pages that cannot be
+    # checked by looking at the screen: it is drawn by the window manager,
+    # above or behind whatever the terminal is showing.
+    #
+    # Arriving here sets it and leaving puts back the one the terminal had, so
+    # a person can watch it change twice and see that the second change was
+    # the original coming back rather than a guess at it.
+    private def draw_title(screen) : Nil
+      claimed = @terminal.capabilities.includes? Capability::Titles
+      screen.write 2, 2, "window title", Style::DEFAULT.bold
+      screen.write 20, 2,
+        claimed ? "detected: this terminal takes OSC 2" : "not detected: nothing is sent",
+        Style::DEFAULT.faint
+
+      field screen, 4, "asked for", @terminal.title.try(&.inspect) || "nothing"
+      field screen, 5, "saved with", TermBuf::Terminal::TITLE_STACK.set.inspect
+      field screen, 6, "given back", TermBuf::Terminal::TITLE_STACK.reset.inspect
+
+      screen.write 2, rows - 3,
+        "look at the window's title bar, or at its tab. [t] asks for the other title, " \
+        "and leaving this page puts the terminal's own back.",
+        Style::DEFAULT.faint
+    end
+
+    # A label and a value on one row, which is the shape all three of the
+    # pages above are.
+    private def field(screen, row : Int32, label : String, value : String) : Nil
+      return if row >= rows - 2
+
+      screen.write 2, row, label.ljust(12), Style::DEFAULT.faint
+      screen.write 14, row, Unicode.truncate(value, Math.max(columns - 16, 4))
+    end
+
+    # -------------------------------------------------------------- page 11
 
     # A cursor streaming into a pane, and the terminal's own cursor following
     # it. What a spec cannot check is whether the block ends up where the next
@@ -907,7 +1055,7 @@ module Validate
         Style::DEFAULT.reverse.bold
     end
 
-    # --------------------------------------------------------------- page 10
+    # -------------------------------------------------------------- page 13
 
     # Clipping, a view's own style, and a background that varies under text.
     # A row that reads right proves all three: the bar is painted once, the
@@ -1005,7 +1153,7 @@ module Validate
         Style::DEFAULT.faint
     end
 
-    # --------------------------------------------------------------- page 11
+    # -------------------------------------------------------------- page 14
 
     # The three things a modern terminal will do that a cell grid cannot say on
     # its own. Each is behind the capability that decides whether asking is
@@ -1204,18 +1352,43 @@ module Validate
 
     private def handle(event) : Nil
       case event
-      when Events::Key     then press event.key, event.bytes
-      when Events::Resize  then @rebuild = true
-      when Events::Closed  then @running = false
-      when Events::Failure then @running = false
-      when Events::Paste   then pasted event.text, event.complete
-      when Events::Pasting then arriving event.bytes
+      when Events::Key      then press event.key, event.bytes
+      when Events::Resize   then @rebuild = true
+      when Events::Closed   then @running = false
+      when Events::Failure  then @running = false
+      when Events::Paste    then pasted event.text, event.complete
+      when Events::Pasting  then arriving event.bytes
+      when Events::Mouse    then moused event
+      when Events::Response then responded event.bytes
       when Nil
         @running = false
       else
-        # Responses, warnings, and anything another shard defines: nothing
+        # Warnings, timers, and anything another shard defines: nothing else
         # here asks the terminal anything.
       end
+    end
+
+    private def moused(event : Events::Mouse) : Nil
+      return unless mouse?
+
+      @mouse = event
+      @rebuild = true
+    end
+
+    # The focus page registers `CSI I` and `CSI O` as replies it is expecting,
+    # so they arrive here rather than as two keystrokes nobody pressed.
+    private def responded(bytes : Bytes) : Nil
+      return unless focus_page?
+
+      text = String.new bytes
+      @focus_bytes = text
+      @focus_state = case text
+                     when "\e[I" then "focus in"
+                     when "\e[O" then "focus out"
+                     else             "unrecognised"
+                     end
+      @focus_count += 1
+      @rebuild = true
     end
 
     # Two pages want the keyboard for themselves, so they are entered rather
@@ -1255,6 +1428,7 @@ module Validate
       end
     end
 
+    # ameba:disable Metrics/CyclomaticComplexity
     private def command(key : Key) : Nil
       return unless key.character?
 
@@ -1262,7 +1436,30 @@ module Validate
       when '1' then @fill = @fill.digits? ? Fill::None : Fill::Digits
       when '2' then @fill = @fill.mixed? ? Fill::None : Fill::Mixed
       when ' ' then @frozen = !@frozen
+      when 's' then cycle_cursor_shape if cursors?
+      when 'b' then toggle_cursor_blink if cursors?
+      when 't' then retitle if title?
       end
+    end
+
+    # The next shape round, which is how a person sees that a shape asked for
+    # twice running is one mode being replaced rather than two being stacked.
+    private def cycle_cursor_shape : Nil
+      shapes = CursorShape.values
+      next_shape = shapes[(shapes.index(@terminal.cursor_shape) || 0) + 1]? || shapes.first
+      @terminal.cursor_shape = next_shape
+      @rebuild = true
+    end
+
+    private def toggle_cursor_blink : Nil
+      @terminal.cursor_blink = !@terminal.cursor_blink?
+      @rebuild = true
+    end
+
+    private def retitle : Nil
+      @titled = (@titled + 1) % TITLES.size
+      @terminal.title = TITLES[@titled]
+      @rebuild = true
     end
 
     # Whether this page has something to type into.
@@ -1352,7 +1549,11 @@ module Validate
       return unless 0 <= page < PAGES.size
       return if page == @page
 
+      # Three pages turn something on that the rest of them should not be
+      # left with: two terminal modes and the window's own title.
+      leaving PAGES[@page]
       @page = page
+      entering PAGES[page]
       @rebuild = true
       @log = 0
       # Leaving a page gives its keyboard back, so tab always means the same
@@ -1375,6 +1576,69 @@ module Validate
       # columns the buffer counted, and on those rows the terminal puts them
       # somewhere else. Every other terminal keeps the diff.
       force_repaint if @terminal.quirks.per_code_point_columns?
+    end
+
+    # ------------------------------------------------------ arriving and going
+
+    private def entering(name : String) : Nil
+      case name
+      when "focus" then watch_focus
+      when "mouse" then watch_mouse
+      when "title" then @terminal.title = TITLES[@titled]
+      end
+    end
+
+    private def leaving(name : String) : Nil
+      case name
+      when "focus" then forget_focus
+      when "mouse" then forget_mouse
+      when "title" then @terminal.title = nil
+      end
+    end
+
+    # `CSI I` and `CSI O` are what a terminal sends for focus, and they are
+    # indistinguishable from a keystroke by looking at them — which is exactly
+    # what registering a response pattern says: this one was asked for.
+    private def watch_focus : Nil
+      @terminal.enable Tty::FOCUS_EVENTS
+      @focus_patterns << @terminal.expect_response("\e[", "I")
+      @focus_patterns << @terminal.expect_response("\e[", "O")
+      @focus_bytes = nil
+      @focus_state = nil
+      @focus_count = 0
+    end
+
+    private def forget_focus : Nil
+      @focus_patterns.each { |pattern| @terminal.forget_response pattern }
+      @focus_patterns.clear
+      @terminal.disable Tty::FOCUS_EVENTS
+    end
+
+    # `Events::Mouse` carries what the report meant and not the bytes it was
+    # made of, so the page taps the decoder on its way past rather than
+    # putting a second pattern on `CSI <` — the stream's own is registered
+    # first and would answer before this one was asked.
+    private def watch_mouse : Nil
+      @terminal.enable Tty::MOUSE_SGR
+      decoder = @terminal.input.decoder
+      decoding = decoder.on_sequence
+      @decoding = decoding
+
+      decoder.on_sequence = ->(sequence : Input::Sequence) : Event? do
+        @mouse_report = String.new sequence.bytes if sequence.body.starts_with? '<'
+        decoding.try &.call sequence
+      end
+    end
+
+    private def forget_mouse : Nil
+      if decoding = @decoding
+        @terminal.input.decoder.on_sequence = decoding
+        @decoding = nil
+      end
+
+      @mouse = nil
+      @mouse_report = nil
+      @terminal.disable Tty::MOUSE_SGR
     end
 
     # Sends the screen again without touching what is on it. Whatever scribbled
