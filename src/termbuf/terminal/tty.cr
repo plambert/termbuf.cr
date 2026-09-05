@@ -81,10 +81,15 @@ module TermBuf
     # `#leave` resets them in the reverse of that order.
     getter modes = [] of Mode
 
-    # The names of the modes currently set on the device, which is not always
-    # every registered one: a mode enabled before `#enter` is recorded and only
-    # written when the takeover happens.
-    @applied = Set(String).new
+    # The modes currently set on the device, by name and by the sequence that
+    # set them. Not always every registered one: a mode enabled before
+    # `#enter` is recorded and only written when the takeover happens.
+    #
+    # The sequence is kept beside the name because a mode can be replaced by
+    # one of the same name carrying different bytes — `cursor_shape` is the
+    # same mode whichever shape it asks for — and the replacement has to go
+    # out where an identical re-enable must not.
+    @applied = {} of String => String
 
     # Crystal's bindings carry `VMIN` but not `VTIME` on every platform, so the
     # index is filled in here when it is missing.
@@ -235,14 +240,19 @@ module TermBuf
     # once and writes it once. That is not tidiness. `KITTY_KEYBOARD` pushes
     # onto a stack the terminal keeps, and a second push against the single pop
     # `#leave` sends leaves the keyboard changed after the program has gone.
+    #
+    # A mode of the same name carrying *different* bytes is a replacement
+    # rather than a repeat, and does go out: `cursor_shape` is one mode
+    # whichever shape it is asking for, and asking for a bar after a block has
+    # to reach the terminal.
     def enable(mode : Mode) : Nil
       register mode
       return unless @entered
-      return if @applied.includes? mode.name
+      return if @applied[mode.name]? == mode.set
 
       @output << mode.set
       @output.flush
-      @applied << mode.name
+      @applied[mode.name] = mode.set
     end
 
     # Turns *mode* off and forgets it, so a later `#enter` does not bring it
@@ -274,10 +284,10 @@ module TermBuf
     # Writes every registered mode that is not on the device yet.
     private def apply_modes : Nil
       @modes.each do |mode|
-        next if @applied.includes? mode.name
+        next if @applied[mode.name]? == mode.set
 
         @output << mode.set
-        @applied << mode.name
+        @applied[mode.name] = mode.set
       end
     end
 
@@ -285,7 +295,7 @@ module TermBuf
     # enabled after another may depend on it.
     private def reset_modes : Nil
       @modes.reverse_each do |mode|
-        next unless @applied.includes? mode.name
+        next unless @applied.has_key? mode.name
 
         @output << mode.reset
       end

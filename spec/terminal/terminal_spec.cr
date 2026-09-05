@@ -1050,6 +1050,156 @@ Spectator.describe TermBuf::Terminal do
     end
   end
 
+  describe "the window title" do
+    # The push has to go out before the title does, or what the terminal saves
+    # is the title this program just set.
+    it "saves the title the terminal had, then sets its own" do
+      with_harness capabilities: TermBuf::Capabilities::MODERN do |harness|
+        harness.drain
+        harness.terminal.title = "a title"
+        harness.terminal.paint
+
+        written = harness.drain
+
+        expect(written).to contain "\e[22;0t"
+        expect(written).to contain "\e]2;a title\e\\"
+        expect(written.index!("\e[22;0t")).to be < written.index!("\e]2;a title")
+        expect(harness.terminal.title).to eq "a title"
+      end
+    end
+
+    it "saves it once however many titles are set" do
+      with_harness capabilities: TermBuf::Capabilities::MODERN do |harness|
+        harness.drain
+        harness.terminal.title = "one"
+        harness.terminal.title = "two"
+        harness.terminal.paint
+
+        written = harness.drain
+
+        expect(written.scan("\e[22;0t").size).to eq 1
+        expect(written).to contain "\e]2;two\e\\"
+      end
+    end
+
+    # Popping is what restores. Handing the terminal an empty title instead
+    # would leave a tab named nothing, which is not what it started with.
+    it "pops the saved title rather than setting an empty one" do
+      with_harness capabilities: TermBuf::Capabilities::MODERN do |harness|
+        harness.terminal.title = "a title"
+        harness.terminal.paint
+        harness.drain
+
+        harness.terminal.title = nil
+        harness.terminal.paint
+        written = harness.drain
+
+        expect(written).to contain "\e[23;0t"
+        expect(written).not_to contain "\e]2;"
+        expect(harness.terminal.title).to be_nil
+      end
+    end
+
+    it "pushes again after the title was given back" do
+      with_harness capabilities: TermBuf::Capabilities::MODERN do |harness|
+        harness.terminal.title = "one"
+        harness.terminal.title = nil
+        harness.terminal.paint
+        harness.drain
+
+        harness.terminal.title = "two"
+        harness.terminal.paint
+
+        expect(harness.drain).to contain "\e[22;0t"
+      end
+    end
+
+    it "gives the title back when it closes" do
+      harness = Harness.new capabilities: TermBuf::Capabilities::MODERN
+      harness.terminal.title = "a title"
+      harness.terminal.paint
+      harness.drain
+      harness.close
+
+      expect(harness.output.to_s).to contain "\e[23;0t"
+    end
+
+    # A terminal that does not take the sequence prints it, so a screen with
+    # nothing on it beats a screen with an escape sequence across it.
+    it "writes nothing on a terminal without the capability" do
+      with_harness capabilities: TermBuf::Capabilities::ANSI do |harness|
+        harness.drain
+        harness.terminal.title = "a title"
+        harness.terminal.paint
+
+        written = harness.drain
+
+        expect(written).not_to contain "\e]2;"
+        expect(written).not_to contain "\e[22;0t"
+        expect(harness.terminal.title).to be_nil
+      end
+    end
+  end
+
+  describe "the cursor shape" do
+    it "asks for the shape with DECSCUSR" do
+      with_harness capabilities: TermBuf::Capabilities::MODERN do |harness|
+        harness.drain
+        harness.terminal.cursor_shape = TermBuf::CursorShape::Bar
+        harness.terminal.paint
+
+        expect(harness.drain).to contain "\e[5 q"
+        expect(harness.terminal.cursor_shape).to eq TermBuf::CursorShape::Bar
+      end
+    end
+
+    it "asks for the steady form of a shape that is not to blink" do
+      with_harness capabilities: TermBuf::Capabilities::MODERN do |harness|
+        harness.terminal.cursor_shape = TermBuf::CursorShape::Block
+        harness.drain
+        harness.terminal.cursor_blink = false
+        harness.terminal.paint
+
+        expect(harness.drain).to contain "\e[2 q"
+        expect(harness.terminal.cursor_blink?).to be_false
+      end
+    end
+
+    # One mode, whichever shape it is asking for: a second shape replaces the
+    # first rather than registering a second mode to reset.
+    it "replaces the shape rather than stacking a second one" do
+      harness = Harness.new capabilities: TermBuf::Capabilities::MODERN
+      harness.terminal.cursor_shape = TermBuf::CursorShape::Bar
+      harness.terminal.cursor_shape = TermBuf::CursorShape::Underline
+      harness.terminal.paint
+      written = harness.drain
+      harness.close
+
+      expect(written).to contain "\e[3 q"
+      expect(harness.drain.scan("\e[0 q").size).to eq 1
+    end
+
+    it "gives the terminal its own cursor back when it closes" do
+      harness = Harness.new capabilities: TermBuf::Capabilities::MODERN
+      harness.terminal.cursor_shape = TermBuf::CursorShape::Bar
+      harness.terminal.paint
+      harness.drain
+      harness.close
+
+      expect(harness.output.to_s).to contain "\e[0 q"
+    end
+
+    it "writes nothing on a terminal without the capability" do
+      with_harness capabilities: TermBuf::Capabilities::ANSI do |harness|
+        harness.drain
+        harness.terminal.cursor_shape = TermBuf::CursorShape::Bar
+        harness.terminal.paint
+
+        expect(harness.drain).not_to contain " q"
+      end
+    end
+  end
+
   describe "passthrough" do
     it "sends bytes to the terminal untouched" do
       with_harness do |harness|

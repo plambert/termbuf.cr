@@ -259,6 +259,11 @@ class ModelTerminal
     # what a cell holds changes.
     return if final == 'u' && (parameters.starts_with?('>') || parameters.starts_with?('<'))
 
+    # DECSCUSR, `CSI Ps SP q`, which sets the shape of the terminal's own
+    # cursor. The intermediate space lands in the parameters here, and nothing
+    # about what a cell holds changes.
+    return if final == 'q' && parameters.ends_with?(' ')
+
     values = parse_parameters parameters
 
     case final
@@ -276,11 +281,20 @@ class ModelTerminal
     when 'L' then insert_lines param(values, 0, 1)
     when 'M' then delete_lines param(values, 0, 1)
     when 'r' then set_margins values
+    when 't' then window_manipulation values
     when 'n'
       # A cursor position report is a question, not an instruction. Nothing on
       # screen changes; a real terminal would answer, and nothing here reads.
     else raise "model terminal: unsupported CSI #{parameters.inspect} #{final}"
     end
+  end
+
+  # `CSI Ps ; Ps t`, of which only the title stack is modelled: 22 pushes the
+  # icon name and window title, 23 pops them. Neither is a cell.
+  private def window_manipulation(values : Array(Int32)) : Nil
+    return if values.first?.in? 22, 23
+
+    raise "model terminal: unsupported window manipulation #{values.inspect}"
   end
 
   private def dispatch_private(parameters : String, final : Char) : Nil

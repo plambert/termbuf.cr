@@ -63,6 +63,39 @@ Spectator.describe TermBuf::Tty do
         expect(tty.modes).to eq [replacement, BETA]
       end
     end
+
+    # A replacement is not a repeat. The cursor shape is one mode whichever
+    # shape it asks for, so a mode of the same name carrying different bytes
+    # has to reach the terminal where an identical re-enable must not.
+    it "writes a mode of the same name carrying different bytes" do
+      replacement = TermBuf::Tty::Mode.new "alpha", "\e[?9003h", "\e[?9003l"
+
+      with_tty do |tty, output|
+        tty.enter TermBuf::Capabilities::NONE
+        tty.enable ALPHA
+        output.clear
+        tty.enable replacement
+
+        expect(output.to_s).to eq replacement.set
+      end
+    end
+
+    # And the reset that goes out is the replacement's, not the one the name
+    # was first registered with.
+    it "resets a replaced mode with the replacement's own sequence" do
+      replacement = TermBuf::Tty::Mode.new "alpha", "\e[?9003h", "\e[?9003l"
+
+      with_tty do |tty, output|
+        tty.enter TermBuf::Capabilities::NONE
+        tty.enable ALPHA
+        tty.enable replacement
+        output.clear
+        tty.leave
+
+        expect(output.to_s).to contain replacement.reset
+        expect(output.to_s).not_to contain ALPHA.reset
+      end
+    end
   end
 
   describe "#disable" do

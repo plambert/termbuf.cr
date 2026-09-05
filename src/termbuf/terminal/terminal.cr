@@ -13,6 +13,42 @@ require "./tty"
 module TermBuf
   # Stability: stable — changes only in a major release.
   #
+  # What the terminal draws its own cursor as.
+  #
+  # `Default` gives the shape back to the terminal, which is the one every
+  # other member cannot be: a person who set a bar cursor in their terminal's
+  # preferences gets it back rather than the block this shard would otherwise
+  # have to guess at. See `Terminal#cursor_shape=`.
+  enum CursorShape
+    # Whatever the terminal was configured to draw.
+    Default
+
+    # A filled rectangle over the cell.
+    Block
+
+    # A line under the cell.
+    Underline
+
+    # A line down the left of the cell, sometimes called a beam or an I-beam.
+    Bar
+
+    # The DECSCUSR parameter for this shape, blinking or steady.
+    #
+    # `CSI Ps SP q` numbers them in pairs from one, blinking first, and zero
+    # is the terminal's own setting — which has a blink of its own, so
+    # *blink* says nothing about it.
+    def code(blink : Bool = true) : Int32
+      case self
+      in .default?   then 0
+      in .block?     then blink ? 1 : 2
+      in .underline? then blink ? 3 : 4
+      in .bar?       then blink ? 5 : 6
+      end
+    end
+  end
+
+  # Stability: stable — changes only in a major release.
+  #
   # The terminal, as an application talks to it.
   #
   # One fibre owns the buffer. Every drawing method builds a command and sends
@@ -699,6 +735,130 @@ module TermBuf
 
       issue Commands::Mode.new(mode, false)
     end
+
+    # ---------------------------------------------------------------- window
+
+    # The window title this terminal was last asked for, or `nil` when it has
+    # not been asked for one — or was asked to give the original back.
+    getter title : String?
+
+    # What the terminal is drawing its own cursor as, as far as it was asked.
+    # `CursorShape::Default` until something else is asked for, and again once
+    # the terminal has been given its own setting back.
+    getter cursor_shape : CursorShape = CursorShape::Default
+
+    # Whether the shape last asked for was asked to blink.
+    getter? cursor_blink : Bool = true
+
+    # The window title saved on the terminal's own stack. Pushed the first
+    # time a title is set and popped by `Tty#leave`, so a program that changed
+    # the title leaves the one it found behind — and a takeover after a
+    # suspend saves it again.
+    #
+    # `CSI 22 ; 0 t` pushes the icon name and the window title, `CSI 23 ; 0 t`
+    # pops them. A terminal with `Capability::Titles` and no stack ignores
+    # both and the title simply stays changed, which is where a program that
+    # never pushed ends up anyway.
+    TITLE_STACK = Tty::Mode.new "title", "\e[22;0t", "\e[23;0t"
+
+    # The name the cursor shape is registered under, so that asking for a
+    # different one replaces the mode rather than stacking a second one.
+    CURSOR_SHAPE_MODE = "cursor_shape"
+
+    # DECSCUSR's own reset, which gives the shape back to whatever the
+    # terminal was configured for.
+    CURSOR_SHAPE_RESET = "\e[0 q"
+
+    # Sets the window title, or gives back the one the terminal started with.
+    #
+    #     terminal.title = "termbuf — #{path}"
+    #     terminal.title = nil            # whatever it said before
+    #
+    # The title goes out in order with the frames around it, the way a colour
+    # or a clipboard write does. The terminal is asked to save the title it
+    # had the first time one is set and `#close` asks for it back, so a
+    # program that changed the title does not leave its own behind in a tab
+    # somebody goes on using.
+    #
+    # Does nothing at all without `Capability::Titles`: a terminal that does
+    # not take the sequence prints it.
+    def title=(text : String?) : String?
+      return text unless @capabilities.includes? Capability::Titles
+
+      @title = text
+      # Popping is what restores, so `nil` is a pop rather than an empty
+      # title: a terminal handed `OSC 2 ; ST` shows an empty tab, which is not
+      # what it started with.
+      return text if text.nil? && restore_title
+
+      enable TITLE_STACK
+      @title_pushed = true
+      issue Commands::Quiet.new("\e]2;#{text}\e\\".to_slice)
+      text
+    end
+
+    # Whether the title on the terminal's stack is one this program put there.
+    @title_pushed = false
+
+    # Pops the saved title, and says whether there was one to pop.
+    private def restore_title : Bool
+      return false unless @title_pushed
+
+      @title_pushed = false
+      disable TITLE_STACK
+      true
+    end
+
+    # Asks the terminal to draw its own cursor as *shape*.
+    #
+    #     terminal.cursor_shape = :bar
+    #     terminal.cursor_blink = false
+    #     terminal.cursor_shape = TermBuf::CursorShape::Default
+    #
+    # DECSCUSR, `CSI Ps SP q`, and it goes through the mode registry rather
+    # than a bare write: `#close` sends `CSI 0 SP q` and the person gets the
+    # cursor their terminal was configured for back, and a takeover after a
+    # suspend asks for the shape again. Asking for a second shape replaces the
+    # first rather than stacking on it.
+    #
+    # Whether the shape blinks is `#cursor_blink=`, and a setter is where it
+    # has to live: Crystal allows an assignment method one argument, so the
+    # pair cannot be one call. Each of them re-asks with the other's current
+    # value, so the order they are set in does not matter.
+    #
+    # Does nothing without `Capability::CursorShape`. This is the terminal's
+    # own cursor, not one of the buffer's — see `#hardware_cursor=` for which
+    # of those it follows.
+    def cursor_shape=(shape : CursorShape) : CursorShape
+      @cursor_shape = shape
+      apply_cursor_shape
+      shape
+    end
+
+    # Whether the cursor shape asked for blinks. On by default, which is what
+    # DECSCUSR's odd-numbered parameters mean and what most terminals are
+    # configured for.
+    #
+    # `CursorShape::Default` has a blink of its own — it is the terminal's
+    # setting, blink included — so this says nothing about it until some other
+    # shape is asked for.
+    def cursor_blink=(blink : Bool) : Bool
+      @cursor_blink = blink
+      apply_cursor_shape
+      blink
+    end
+
+    # Registers the shape and the blink as one mode, replacing whichever was
+    # asked for before.
+    private def apply_cursor_shape : Nil
+      return unless @capabilities.includes? Capability::CursorShape
+
+      shape = cursor_shape
+      enable Tty::Mode.new(CURSOR_SHAPE_MODE, "\e[#{shape.code cursor_blink?} q",
+        CURSOR_SHAPE_RESET)
+    end
+
+    # ------------------------------------------------------- kitty keyboard
 
     # Asks for the kitty keyboard protocol when the terminal has it, and tells
     # the decoder it did.
