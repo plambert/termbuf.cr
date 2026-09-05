@@ -266,7 +266,7 @@ begin
 ensure
   tty.output << "\e[?7h"
   tty.output.flush
-  tty.leave TermBuf::Capabilities::ANSI
+  tty.leave
 end
 
 abort "no answer to the first #{BATCH}: this terminal does not report the cursor" if silent
