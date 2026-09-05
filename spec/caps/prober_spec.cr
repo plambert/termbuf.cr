@@ -95,6 +95,50 @@ Spectator.describe TermBuf::Prober do
 
       expect(queries).not_to contain "\e[?2027h"
     end
+
+    # The only query there is for the cursor shape: DECSCUSR has no mode
+    # number to ask DECRQM about, so the setting is asked for itself.
+    it "asks what the cursor style is set to, with DECRQSS" do
+      _, queries = probe KITTY
+
+      expect(queries).to contain "\eP$q q\e\\"
+    end
+  end
+
+  describe "the cursor style report" do
+    # A terminal that reports the DECSCUSR setting is one that has the
+    # setting, whichever shape it happens to be in.
+    it "reads a valid DECRQSS reply as the shape being there" do
+      result, _ = probe "\eP1$r2 q\e\\\e[1;1R"
+
+      expect(result.capabilities.includes?(Cap::CursorShape)).to be_true
+      expect(result.answered).to contain :decrqss_cursor_style
+    end
+
+    it "reads it whichever shape the terminal is in" do
+      result, _ = probe "\eP1$r6 q\e\\\e[1;1R"
+
+      expect(result.capabilities.includes?(Cap::CursorShape)).to be_true
+    end
+
+    # `DCS 0 $ r ST` is a terminal that parsed the request and will not answer
+    # this one, which for a setting it would have to implement to report means
+    # it does not have it. That outranks the name it goes by.
+    it "takes the shape back off a terminal that refuses the request" do
+      result, _ = probe "\eP0$r\e\\\e[1;1R", TermBuf::Capabilities::MODERN
+
+      expect(result.capabilities.includes?(Cap::CursorShape)).to be_false
+      expect(result.answered).to contain :decrqss_cursor_style
+    end
+
+    # Terminal.app and kitty answer neither, and silence is not evidence: the
+    # name is still the best that can be done for them.
+    it "changes nothing when the terminal says nothing" do
+      result, _ = probe "\e[1;1R", TermBuf::Capabilities::MODERN
+
+      expect(result.capabilities.includes?(Cap::CursorShape)).to be_true
+      expect(result.answered).not_to contain :decrqss_cursor_style
+    end
   end
 
   describe "a terminal that answers everything" do

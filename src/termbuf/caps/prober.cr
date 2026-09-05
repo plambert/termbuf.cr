@@ -50,6 +50,19 @@ module TermBuf
     # asking for them by hex name is how XTGETTCAP works.
     TCAP_QUERY = "\eP+q5463;524742\e\\"
 
+    # DECRQSS for the cursor style: `DCS $ q SP q ST` asks the terminal to
+    # report the DECSCUSR setting it is currently in.
+    #
+    # An experiment, and the only query there is for `Capability::CursorShape`
+    # — nothing else this shard can ask answers whether DECSCUSR does
+    # anything. A terminal that implements DECRQSS answers `DCS 1 $ r Ps SP q
+    # ST` with the shape it is set to, which is evidence it knows the setting
+    # exists; `DCS 0 $ r ST` is a terminal that understands the request and
+    # refuses this particular one, which is evidence it does not. Terminal.app
+    # and kitty answer neither, and silence changes nothing: the terminal's
+    # name is still the best that can be done for them.
+    CURSOR_STYLE_QUERY = "\eP$q q\e\\"
+
     # The DEC private modes worth asking about, and the capability each one
     # stands for. `CSI ? Pm $ p` is DECRQM and the reply is DECRPM, which is
     # the only mechanism a terminal offers for saying it does *not* have
@@ -86,7 +99,8 @@ module TermBuf
       # DECRQM for every mode above, in the same write as everything else.
       MODE_CAPABILITIES.each_key { |mode| io << "\e[?" << mode << "$p" }
 
-      io << "\e[?u" # kitty keyboard protocol
+      io << "\e[?u"            # kitty keyboard protocol
+      io << CURSOR_STYLE_QUERY # DECSCUSR, asked with DECRQSS
       io << KITTY_GRAPHICS_QUERY
       io << "\e[6n" # cursor position: the sentinel, always answered
     end
@@ -192,11 +206,18 @@ module TermBuf
       input.read_timeout = remaining > Time::Span.zero ? remaining : 1.millisecond
     end
 
-    CURSOR_POSITION    = /\A\e\[(\d+);(\d+)R\z/
-    MODE_REPORT        = /\A\e\[\?(\d+);(\d+)\$y\z/
-    KITTY_KEYBOARD     = /\A\e\[\?\d*u\z/
-    PRIMARY_ATTRIBUTES = /\A\e\[\?[\d;]*c\z/
-    TERMINAL_NAME      = /\A\eP>\|(.*)\e\\\z/m
+    CURSOR_POSITION = /\A\e\[(\d+);(\d+)R\z/
+    MODE_REPORT     = /\A\e\[\?(\d+);(\d+)\$y\z/
+
+    # `DCS Ps $ r ... ST`, the DECRPSS reply, where a leading 1 means the
+    # request was valid and 0 that it was not. The payload of a valid one is
+    # the setting itself, `Ps SP q` for a cursor style, and it is matched
+    # rather than read: the shape the terminal happens to be in says nothing
+    # about whether it will take a new one.
+    CURSOR_STYLE_REPORT = /\A\eP([01])\$r(\d* q)?\e\\\z/
+    KITTY_KEYBOARD      = /\A\e\[\?\d*u\z/
+    PRIMARY_ATTRIBUTES  = /\A\e\[\?[\d;]*c\z/
+    TERMINAL_NAME       = /\A\eP>\|(.*)\e\\\z/m
 
     # What one response told us: the capabilities after folding it in, which
     # query it answered, and anything else it happened to carry.
@@ -230,6 +251,10 @@ module TermBuf
         return Reading.new interpret_tcap(response, flags), :xtgettcap
       end
 
+      if match = response.match CURSOR_STYLE_REPORT
+        return interpret_cursor_style match, flags
+      end
+
       if match = response.match TERMINAL_NAME
         name = match[1]
         told = (flags | from_name(name)) & ~EnvironmentDetector.denials(name)
@@ -260,6 +285,21 @@ module TermBuf
       return Reading.new flags | capability, query if match[2].in? "1", "2", "3"
 
       Reading.new flags, query, denied: capability
+    end
+
+    # A DECRQSS reply for the cursor style. `DCS 1 $ r ... ST` is a terminal
+    # that knows the setting and reports it; `DCS 0 $ r ST` is one that parsed
+    # the request and will not answer this one, which for a setting it would
+    # have to implement to report means it does not have it.
+    #
+    # A refusal is recorded as a denial rather than merely not added, for the
+    # reason a DECRPM refusal is: an answer about the terminal actually on the
+    # other end outranks the family its name puts it in.
+    private def interpret_cursor_style(match : Regex::MatchData,
+                                       flags : Capability) : Reading
+      return Reading.new flags, :decrqss_cursor_style, denied: Capability::CursorShape unless match[1] == "1"
+
+      Reading.new flags | Capability::CursorShape, :decrqss_cursor_style
     end
 
     # Any reply at all means the terminal parsed the graphics command, which is
