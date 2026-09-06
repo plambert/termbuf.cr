@@ -194,6 +194,15 @@ module TermBuf
     # No `Osc52Clipboard` or `GraphemeClusters` either, for the reasons given
     # on those two: both are detected, neither is presumed from a terminal
     # being modern.
+    #
+    # `FocusEvents`, `MouseSgr`, `Titles` and `CursorShape` were the four here
+    # that nothing had ever watched: each reached a terminal by way of a table
+    # of names, and a name is a statement about a family. All four were watched
+    # working on 2026-09-06, on ghostty 1.3.2, kitty 0.48.2 and iTerm2 3.6.11 —
+    # a focus report on the way out and back in, a click reported, the window
+    # renamed, the cursor's shape changed — so all four stay. What the same
+    # readings did change is where a multiplexer or Terminal.app is concerned;
+    # see `measurements/CAPS.md` and `EnvironmentDetector`.
     MODERN = new XTERM.flags | Capability::TrueColor | Capability::ExtendedUnderline |
                  Capability::UnderlineColor | Capability::Overline |
                  Capability::SynchronizedOutput |

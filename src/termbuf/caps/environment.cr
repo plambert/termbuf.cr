@@ -75,6 +75,17 @@ module TermBuf
     # foot, a current terminal with no protocols borrowed from kitty.
     FOOT = Capabilities::MODERN.flags | CLIPBOARD_WRITE
 
+    # What Terminal.app does and never admits to.
+    #
+    # It answers no DECRQM, no DECRQSS and no XTGETTCAP, so nothing about these
+    # four can be asked and the table was the only evidence there was — and the
+    # table said no to all four. Watched on 2026-09-06 against 470.2: mode 1004
+    # sends a focus report on the way out and back in, mode 1006 reports a
+    # click, OSC 2 renames the window, and DECSCUSR changes the cursor's shape.
+    # See `measurements/CAPS.md`.
+    APPLE_TERMINAL_WATCHED = Capability::FocusEvents | Capability::MouseSgr |
+                             Capability::Titles | Capability::CursorShape
+
     # Matched against `TERM`, most specific first.
     TERM_PATTERNS = [
       {/\Adumb/, Capability::None},
@@ -110,7 +121,7 @@ module TermBuf
       # blink, and conceal, but SGR 9 draws no line through anything. The
       # colour depth depends on the version; see `APPLE_TERMINAL_TRUECOLOR`.
       {"Apple_Terminal", Capabilities::XTERM.flags | Capability::TrueColor |
-                         Capability::BracketedPaste},
+                         Capability::BracketedPaste | APPLE_TERMINAL_WATCHED},
     ]
 
     # Set by a terminal that has no `TERM_PROGRAM` of its own, or as well as
@@ -131,8 +142,47 @@ module TermBuf
     # A multiplexer sits between the application and the terminal and does not
     # forward everything. The kitty protocols in particular are swallowed,
     # so they come off until a probe says otherwise.
+    #
+    # Focus reports, SGR mouse reporting and the window title come off for a
+    # different reason: all three depend on how the multiplexer was configured,
+    # and all three default to off. Watched on 2026-09-06 — under `tmux` 3.7c
+    # with no config, neither a focus report nor a click reached the
+    # application and the title was never set, because `focus-events`, `mouse`
+    # and `set-titles` all ship off; under GNU `screen` 4.00.03 none of the
+    # three arrived either. `screen` 5.0.2 forwarded the mouse and the title
+    # and still not the focus, and nothing in the environment tells 4 from 5.
+    # A configuration that does forward them says so with
+    # `TERMBUF_CAPS=+focus_events,+mouse_sgr,+titles`.
+    #
+    # `CursorShape` stays: DECSCUSR reached the terminal through `tmux` and
+    # through `screen` 5.0.2, and `screen` 4.00.03 swallowing it costs nothing
+    # visible. See `measurements/CAPS.md`.
     THROUGH_MULTIPLEXER = KITTY_EXTRAS | Capability::KittyGraphicsTempFile |
-                          Capability::SynchronizedOutput
+                          Capability::SynchronizedOutput | Capability::FocusEvents |
+                          Capability::MouseSgr | Capability::Titles
+
+    # Capabilities a multiplexer answers a mode report for on its own account.
+    #
+    # `tmux` 3.7c answers `?1004;1$y` and `?1006;1$y` because it implements
+    # both modes; whether anything reaches the application past it is a
+    # question about its options rather than about the modes, and the answer
+    # measured was no. So a *present* report for these two is evidence about
+    # the multiplexer and not about the terminal, and `Prober` records that it
+    # was answered without letting it add the capability back.
+    #
+    # An *absent* report is still trusted, and so are the other three modes:
+    # 2026, 2027 and 2004 are handled by the multiplexer itself rather than
+    # forwarded, and the measurement agrees that synchronized output through
+    # `tmux` works.
+    MULTIPLEXER_ANSWERS_FOR_ITSELF = Capability::FocusEvents | Capability::MouseSgr
+
+    # Which of `MULTIPLEXER_ANSWERS_FOR_ITSELF` apply to this environment: all
+    # of them under a multiplexer and none of them anywhere else. `Prober`
+    # takes this and adds no capability for a mode report that says yes to one
+    # of them.
+    def distrusted(env : Hash(String, String)) : Capability
+      multiplexed?(env) ? MULTIPLEXER_ANSWERS_FOR_ITSELF : Capability::None
+    end
 
     # Guesses from `TERM`, `TERM_PROGRAM`, `COLORTERM`, `VTE_VERSION`, and the
     # marker variables terminals set for themselves.

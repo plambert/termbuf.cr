@@ -106,7 +106,13 @@ module TermBuf
     end
 
     # Sends the queries and folds whatever comes back into *base*.
-    def probe(base : Capabilities) : Result
+    #
+    # A mode report for a capability in *distrusted* is recorded as answered
+    # and adds nothing: it is the answer of something in the middle rather than
+    # of the terminal at the end. A refusal is trusted whatever is in
+    # *distrusted*, since nothing forwards a mode it does not know. See
+    # `EnvironmentDetector.distrusted`.
+    def probe(base : Capabilities, distrusted : Capability = Capability::None) : Result
       @output << QUERIES
       @output.flush
 
@@ -127,7 +133,7 @@ module TermBuf
           next false
         end
 
-        reading = interpret String.new(bytes), flags
+        reading = interpret String.new(bytes), flags, distrusted
         flags = reading.flags
         denied |= reading.denied
 
@@ -229,14 +235,15 @@ module TermBuf
       # Capabilities the terminal said outright that it does not have.
       denied : Capability = Capability::None
 
-    private def interpret(response : String, flags : Capability) : Reading
+    private def interpret(response : String, flags : Capability,
+                          distrusted : Capability) : Reading
       if match = response.match CURSOR_POSITION
         return Reading.new flags, :cursor_position,
           cursor: {match[2].to_i - 1, match[1].to_i - 1}
       end
 
       if match = response.match MODE_REPORT
-        return interpret_decrpm match, flags
+        return interpret_decrpm match, flags, distrusted
       end
 
       if response.matches? KITTY_KEYBOARD
@@ -276,13 +283,24 @@ module TermBuf
     # evidence about the terminal actually on the other end, where a name that
     # put the capability there is evidence about the family it belongs to, and
     # the specific answer wins.
-    private def interpret_decrpm(match : Regex::MatchData, flags : Capability) : Reading
+    #
+    # Unless the thing on the other end is a multiplexer answering for a mode
+    # it implements and does not forward, which is what *distrusted* names. The
+    # answer is still recorded as answered — it arrived — and the capability is
+    # left where the environment put it.
+    private def interpret_decrpm(match : Regex::MatchData, flags : Capability,
+                                 distrusted : Capability) : Reading
       mode = match[1].to_i?
       capability = mode ? MODE_CAPABILITIES[mode]? : nil
       return Reading.new flags, nil unless mode && capability
 
       query = MODE_QUERIES[mode]?
-      return Reading.new flags | capability, query if match[2].in? "1", "2", "3"
+
+      if match[2].in? "1", "2", "3"
+        return Reading.new flags, query if distrusted.includes? capability
+
+        return Reading.new flags | capability, query
+      end
 
       Reading.new flags, query, denied: capability
     end

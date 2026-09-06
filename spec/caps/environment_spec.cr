@@ -180,6 +180,41 @@ Spectator.describe TermBuf::EnvironmentDetector do
       expect(caps.includes?(Cap::Osc8Links)).to be_false
     end
 
+    # Watched on 2026-09-06 against 470.2, which answers no DECRQM, no DECRQSS
+    # and no XTGETTCAP: mode 1004 sent a focus report, mode 1006 reported a
+    # click, OSC 2 renamed the window, and DECSCUSR changed the cursor. The
+    # table had said no to all four. See `measurements/CAPS.md`.
+    it "gives Terminal.app the four capabilities it was watched doing" do
+      caps = detect({"TERM"                 => "xterm-256color",
+                     "TERM_PROGRAM"         => "Apple_Terminal",
+                     "TERM_PROGRAM_VERSION" => "470.2"})
+
+      expect(caps.includes?(Cap::FocusEvents)).to be_true
+      expect(caps.includes?(Cap::MouseSgr)).to be_true
+      expect(caps.includes?(Cap::Titles)).to be_true
+      expect(caps.includes?(Cap::CursorShape)).to be_true
+    end
+
+    # The four have nothing to do with the colour depth, and an old
+    # Terminal.app is the same application.
+    it "gives them to an earlier Terminal.app too" do
+      caps = detect({"TERM"                 => "xterm-256color",
+                     "TERM_PROGRAM"         => "Apple_Terminal",
+                     "TERM_PROGRAM_VERSION" => "455"})
+
+      expect(caps.includes?(Cap::FocusEvents)).to be_true
+      expect(caps.includes?(Cap::Titles)).to be_true
+      expect(caps.includes?(Cap::TrueColor)).to be_false
+    end
+
+    it "does not hand them to every 256 colour terminal" do
+      caps = detect({"TERM" => "xterm-256color"})
+
+      expect(caps.includes?(Cap::FocusEvents)).to be_false
+      expect(caps.includes?(Cap::Titles)).to be_false
+      expect(caps.includes?(Cap::CursorShape)).to be_false
+    end
+
     it "stops an earlier Terminal.app at the palette" do
       caps = detect({"TERM"                 => "xterm-256color",
                      "TERM_PROGRAM"         => "Apple_Terminal",
@@ -402,6 +437,95 @@ Spectator.describe TermBuf::EnvironmentDetector do
       caps = detect({"TERM" => "screen", "KITTY_WINDOW_ID" => "1"})
 
       expect(caps.includes?(Cap::KittyGraphics)).to be_false
+    end
+
+    # Watched on 2026-09-06 under `tmux` 3.7c with no config: neither a focus
+    # report nor a click reached the application, and the title was never set,
+    # because `focus-events`, `mouse` and `set-titles` all ship off.
+    it "takes focus, the mouse and the title off under tmux" do
+      caps = detect({"TERM"         => "tmux-256color",
+                     "TERM_PROGRAM" => "tmux",
+                     "TMUX"         => "/tmp/tmux-501/default,1,0"})
+
+      expect(caps.includes?(Cap::FocusEvents)).to be_false
+      expect(caps.includes?(Cap::MouseSgr)).to be_false
+      expect(caps.includes?(Cap::Titles)).to be_false
+    end
+
+    # GNU `screen` passes `TERM_PROGRAM` through, so the terminal underneath
+    # names itself and its table is applied; the multiplexer trims it. 4.00.03
+    # delivered none of the three and 5.0.2 delivered two, and nothing in the
+    # environment tells one from the other.
+    it "takes the same three off under screen" do
+      caps = detect({"TERM"                 => "screen",
+                     "TERM_PROGRAM"         => "ghostty",
+                     "TERM_PROGRAM_VERSION" => "1.3.2",
+                     "STY"                  => "34310.ttys004.squit"})
+
+      expect(caps.includes?(Cap::FocusEvents)).to be_false
+      expect(caps.includes?(Cap::MouseSgr)).to be_false
+      expect(caps.includes?(Cap::Titles)).to be_false
+    end
+
+    # DECSCUSR reached the terminal through `tmux` and through `screen` 5.0.2,
+    # and `screen` 4.00.03 swallowing it costs nothing anyone can see.
+    it "leaves the cursor shape on, which did get through" do
+      tmux = detect({"TERM" => "tmux-256color", "TERM_PROGRAM" => "ghostty",
+                     "TMUX" => "/tmp/tmux-501/default,1,0"})
+      screen = detect({"TERM" => "screen", "TERM_PROGRAM" => "ghostty",
+                       "STY" => "34310.ttys004.squit"})
+
+      expect(tmux.includes?(Cap::CursorShape)).to be_true
+      expect(screen.includes?(Cap::CursorShape)).to be_true
+    end
+
+    it "keeps them for the same terminal with nothing in the way" do
+      caps = detect({"TERM" => "xterm-ghostty", "TERM_PROGRAM" => "ghostty"})
+
+      expect(caps.includes?(Cap::FocusEvents)).to be_true
+      expect(caps.includes?(Cap::MouseSgr)).to be_true
+      expect(caps.includes?(Cap::Titles)).to be_true
+    end
+
+    # Which is the whole point of an escape hatch: a `tmux` with
+    # `focus-events on` is a different terminal from a `tmux` without it, and
+    # nothing in the environment says which one this is.
+    it "gives one back when TERMBUF_CAPS says the configuration forwards it" do
+      env = {"TERM" => "tmux-256color", "TERM_PROGRAM" => "ghostty",
+             "TMUX" => "/tmp/tmux-501/default,1,0"}
+      base = TermBuf::EnvironmentDetector.detect env
+      caps = TermBuf::CapabilityOverrides.apply(base, "+focus_events").capabilities
+
+      expect(caps.includes?(Cap::FocusEvents)).to be_true
+      expect(caps.includes?(Cap::MouseSgr)).to be_false
+    end
+  end
+
+  describe ".distrusted" do
+    # `tmux` 3.7c answers `?1004;1$y` and `?1006;1$y` because it implements
+    # both modes, and forwards neither by default.
+    it "names the modes a multiplexer answers for itself" do
+      expect(TermBuf::EnvironmentDetector.distrusted({"TMUX" => "/tmp/x,1,0"}))
+        .to eq(Cap::FocusEvents | Cap::MouseSgr)
+      expect(TermBuf::EnvironmentDetector.distrusted({"STY" => "1.pts-0.host"}))
+        .to eq(Cap::FocusEvents | Cap::MouseSgr)
+      expect(TermBuf::EnvironmentDetector.distrusted({"TERM" => "screen"}))
+        .to eq(Cap::FocusEvents | Cap::MouseSgr)
+    end
+
+    # 2026, 2027 and 2004 are handled by the multiplexer rather than forwarded,
+    # and synchronized output through `tmux` 3.7c was watched working.
+    it "trusts the modes a multiplexer implements on its own account" do
+      distrusted = TermBuf::EnvironmentDetector.distrusted({"TMUX" => "/tmp/x,1,0"})
+
+      expect(distrusted.includes?(Cap::SynchronizedOutput)).to be_false
+      expect(distrusted.includes?(Cap::BracketedPaste)).to be_false
+      expect(distrusted.includes?(Cap::GraphemeClusters)).to be_false
+    end
+
+    it "distrusts nothing with no multiplexer in the way" do
+      expect(TermBuf::EnvironmentDetector.distrusted({"TERM" => "xterm-ghostty"}))
+        .to eq Cap::None
     end
   end
 

@@ -14,6 +14,11 @@ module TermBuf
   # 3. what the terminal says when asked directly;
   # 4. whatever `TERMBUF_CAPS` insists on.
   #
+  # Stage 3 is not quite unconditional: under a multiplexer a mode report can
+  # be the multiplexer's own answer for a mode it never forwards, and those
+  # modes are named by `EnvironmentDetector.distrusted` and handed to the
+  # probe, which then adds nothing for them.
+  #
   # Probing is skipped when there is nothing to probe — output that is not a
   # terminal, or a caller that did not supply one. That is not an error: the
   # environment heuristics stand on their own, and a program writing to a pipe
@@ -50,7 +55,11 @@ module TermBuf
       probed = false
 
       if input && output
-        probe = Prober.new(input, output, timeout).probe detected
+        # The environment says more than which capabilities to start from: it
+        # also says whether there is a multiplexer in the way, and so which of
+        # the terminal's answers are the multiplexer's own.
+        probe = Prober.new(input, output, timeout)
+          .probe detected, EnvironmentDetector.distrusted(env)
         detected = probe.capabilities
         keystrokes = probe.input
         name = probe.name
