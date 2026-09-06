@@ -268,8 +268,12 @@ whether four capabilities this shard sets from a table of terminal names — `Fo
 `MouseSgr`, `Titles` and `CursorShape` — are honoured by the terminal that carries the name. Two
 of them can be asked about with DECRQM, one with DECRQSS, and one with nothing at all, so the
 instrument asks what it can and then asks the person at the keyboard. One command per terminal,
-`scripts/caps_check.cr`, and a `caps.tsv` beside the counted widths. See
-[CAPS.md](CAPS.md) for the procedure and the six environments to run it in.
+`scripts/caps_check.cr`, and a `caps.tsv` beside the counted widths.
+
+Seven runs on 2026-09-06 settled it, and the answer was not the one the question expected: nothing
+came out of `Capabilities::MODERN`, Terminal.app gained all four it had been denied, and a
+multiplexer lost three it had been credited with — including two `tmux` answers a mode report had
+said yes to. See [CAPS.md](CAPS.md) for the procedure, the environments, and the readings.
 
 ## Phases
 

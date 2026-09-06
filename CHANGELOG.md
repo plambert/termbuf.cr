@@ -196,6 +196,27 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- Terminal.app gains `Capability::FocusEvents`, `MouseSgr`, `Titles` and `CursorShape`, all four of
+  which its table entry had denied it. It answers no DECRQM, no DECRQSS and no XTGETTCAP, so the
+  table was the only evidence there was, and on 2026-09-06 against 470.2 the table was wrong four
+  times out of four: mode 1004 sent a focus report, mode 1006 reported a click, OSC 2 renamed the
+  window, and DECSCUSR changed the cursor's shape. See `measurements/terminal/caps.tsv`.
+- A multiplexer loses `FocusEvents`, `MouseSgr` and `Titles`:
+  `EnvironmentDetector::THROUGH_MULTIPLEXER` takes all three off alongside the kitty protocols.
+  Measured on 2026-09-06 — under `tmux` 3.7c with no config neither a focus report nor a click
+  reached the application and the title was never set, because `focus-events`, `mouse` and
+  `set-titles` all ship off; under GNU `screen` 4.00.03 none of the three arrived either. `screen`
+  5.0.2 forwarded the mouse and the title, and nothing in the environment tells 4 from 5, so the
+  worse of the two is what is assumed. `TERMBUF_CAPS=+focus_events,+mouse_sgr,+titles` is how a
+  configuration that does forward them says so. `CursorShape` stays: DECSCUSR got through both.
+- `Prober#probe` takes a second argument, a set of capabilities whose *presence* in a mode report
+  is not to be believed, and `CapabilityResolver` fills it in from
+  `EnvironmentDetector.distrusted`. `tmux` 3.7c answers `?1004;1$y` and `?1006;1$y` because it
+  implements both modes and forwards neither, so under a multiplexer a yes for 1004 or 1006 is
+  recorded in `Result#answered` and adds nothing. A *no* is still trusted, since nothing forwards a
+  mode it does not know, and 2026, 2027 and 2004 stay trusted outright: those a multiplexer
+  implements on its own account. Existing callers are unaffected; the argument defaults to
+  `Capability::None`.
 - `Terminal.new` and `Terminal.open` take keywords. `new` keeps the `Tty` positional and names
   everything after it; `open` keeps the input `IO` positional and names `output`, `env`, `probe`
   and `detect_composed_drift`. Ten mostly-defaulted arguments in a row is the shape that reads
