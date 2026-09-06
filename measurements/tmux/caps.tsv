@@ -1,0 +1,23 @@
+# date	2026-09-06 01:46:33
+# term	tmux-256color
+# term_program	tmux
+# term_program_version	3.7c
+# xtversion	tmux 3.7c
+# termbuf_caps	
+# columns	172
+# rows	49
+# answered	primary_attributes,secondary_attributes,xtversion,synchronized_output,grapheme_clusters,focus_events,mouse_sgr,bracketed_paste,cursor_position
+# multiplexer	tmux
+# multiplexer_socket	/private/tmp/tmux-501/default
+capability	method	result
+synchronized_output	decrqm	yes
+grapheme_clusters	decrqm	no
+bracketed_paste	decrqm	yes
+focus_events	decrqm	yes
+mouse_sgr	decrqm	yes
+cursor_shape	table	yes
+titles	table	yes
+focus_events	observed	no
+mouse_sgr	observed	no
+titles	asked	skipped
+cursor_shape	asked	yes

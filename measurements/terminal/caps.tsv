@@ -1,0 +1,21 @@
+# date	2026-09-06 01:45:59
+# term	xterm-256color
+# term_program	Apple_Terminal
+# term_program_version	470.2
+# xtversion	
+# termbuf_caps	
+# columns	155
+# rows	41
+# answered	primary_attributes,secondary_attributes,cursor_position
+capability	method	result
+synchronized_output	table	no
+grapheme_clusters	table	no
+bracketed_paste	table	yes
+focus_events	table	no
+mouse_sgr	table	no
+cursor_shape	table	no
+titles	table	no
+focus_events	observed	yes
+mouse_sgr	observed	yes
+titles	asked	yes
+cursor_shape	asked	yes

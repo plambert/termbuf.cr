@@ -1,0 +1,23 @@
+# date	2026-09-06 01:49:52
+# term	screen
+# term_program	ghostty
+# term_program_version	1.3.2-main-+73534c468
+# xtversion	
+# termbuf_caps	
+# columns	172
+# rows	49
+# answered	primary_attributes,secondary_attributes,cursor_position
+# multiplexer	screen
+# multiplexer_session	34310.ttys004.squit
+capability	method	result
+synchronized_output	table	no
+grapheme_clusters	table	no
+bracketed_paste	table	yes
+focus_events	table	yes
+mouse_sgr	table	yes
+cursor_shape	table	yes
+titles	table	yes
+focus_events	observed	no
+mouse_sgr	observed	yes
+titles	asked	yes
+cursor_shape	asked	yes

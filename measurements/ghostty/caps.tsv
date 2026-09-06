@@ -1,0 +1,21 @@
+# date	2026-09-06 01:41:23
+# term	xterm-ghostty
+# term_program	ghostty
+# term_program_version	1.3.2-main-+73534c468
+# xtversion	ghostty 1.3.2-main-+73534c468
+# termbuf_caps	
+# columns	172
+# rows	50
+# answered	primary_attributes,secondary_attributes,xtversion,xtgettcap,xtgettcap,synchronized_output,grapheme_clusters,focus_events,mouse_sgr,bracketed_paste,kitty_keyboard,decrqss_cursor_style,kitty_graphics,cursor_position
+capability	method	result
+synchronized_output	decrqm	yes
+grapheme_clusters	decrqm	yes
+bracketed_paste	decrqm	yes
+focus_events	decrqm	yes
+mouse_sgr	decrqm	yes
+cursor_shape	decrqss	yes
+titles	table	yes
+focus_events	observed	yes
+mouse_sgr	observed	yes
+titles	asked	yes
+cursor_shape	asked	yes
