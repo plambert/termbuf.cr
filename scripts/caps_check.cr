@@ -171,7 +171,8 @@ module CapsCheck
         return
       end
 
-      say "Seven readings. The last two take y or n; q skips one."
+      say "Seven readings. The first two wait for the terminal, up to " \
+          "#{PATIENCE.total_seconds.to_i} s each; the last two take y or n. q skips any one."
       say ""
 
       check_focus
@@ -192,7 +193,8 @@ module CapsCheck
     # on its own row and then drained, and the reading proper wants a focus
     # out followed by a focus in, which only a switch away and back produces.
     private def check_focus : Nil
-      say "1. Focus reporting. Click another window, then click this one back."
+      say "1. Focus reporting. Click another window, then click this one back. " \
+          "(up to #{PATIENCE.total_seconds.to_i} s; q skips)"
       @tty.write TermBuf::Tty::FOCUS_EVENTS.set
       @tty.flush
 
@@ -217,7 +219,8 @@ module CapsCheck
     # recorded on its own row and drained, and the reading proper wants a
     # press: a report with the motion bit clear.
     private def check_mouse : Nil
-      say "2. Mouse reporting. Click once anywhere in this window."
+      say "2. Mouse reporting. Click once anywhere in this window. " \
+          "(up to #{PATIENCE.total_seconds.to_i} s; q skips)"
       @tty.write TermBuf::Tty::MOUSE_SGR.set
       @tty.flush
 
@@ -403,26 +406,40 @@ module CapsCheck
     end
 
     # Puts *question* on the screen and waits for one letter.
+    # The buffer is drained first: the tracking steps leave mouse reports in
+    # it, and a byte of one of those is not an answer. Then only y, n, or q
+    # counts; anything else is thrown away and the question stands.
     private def ask(question : String) : String
-      @tty.write "#{question} [y/n] "
+      drain
+      @tty.write "#{question} [y/n, q skips] "
       @tty.flush
 
-      answer = case key
-               when 'y', 'Y' then "yes"
-               when 'n', 'N' then "no"
-               else               "skipped"
-               end
+      answer = "skipped"
+      deadline = Time.instant + PATIENCE
+
+      while Time.instant < deadline
+        case key(deadline - Time.instant)
+        when 'y', 'Y'
+          answer = "yes"
+          break
+        when 'n', 'N'
+          answer = "no"
+          break
+        when 'q', 'Q', '\u{3}', nil
+          break
+        end
+      end
 
       say answer
       answer
     end
 
     # One keystroke, or nothing if the patience runs out.
-    private def key : Char?
+    private def key(patience : Time::Span = PATIENCE) : Char?
       input = @tty.input
       return unless input.responds_to? :read_timeout=
 
-      input.read_timeout = PATIENCE
+      input.read_timeout = patience
       buffer = Bytes.new 1
 
       begin
