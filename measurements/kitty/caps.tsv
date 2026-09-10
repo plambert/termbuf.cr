@@ -1,4 +1,4 @@
-# date	2026-09-10 13:06:09
+# date	2026-09-10 13:35:27
 # term	xterm-kitty
 # term_program	
 # term_program_version	
@@ -19,11 +19,11 @@ focus_report_on_enable	observed	no
 focus_events	observed	yes
 mouse_report_on_enable	observed	no
 mouse_sgr	observed	yes
-mouse_report_on_enable_1000	observed	yes
+mouse_report_on_enable_1000	observed	no
 mouse_motion_1000	observed	no
 mouse_report_on_enable_1002	observed	no
 mouse_motion_1002	observed	no
-mouse_report_on_enable_1003	observed	yes
+mouse_report_on_enable_1003	observed	no
 mouse_motion_1003	observed	yes
 titles	asked	yes
 cursor_shape	asked	yes

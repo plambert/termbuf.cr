@@ -1,11 +1,11 @@
-# date	2026-09-10 13:04:13
+# date	2026-09-10 13:34:50
 # term	xterm-256color
 # term_program	iTerm.app
-# term_program_version	3.6.11
+# term_program_version	3.7.0
 # xtversion	iTerm2 3.7.0
 # termbuf_caps	
-# columns	156
-# rows	45
+# columns	143
+# rows	39
 # answered	primary_attributes,secondary_attributes,xtversion,xtgettcap,xtgettcap,synchronized_output,grapheme_clusters,focus_events,mouse_sgr,bracketed_paste,kitty_keyboard,decrqss_cursor_style,kitty_graphics,cursor_position
 capability	method	result
 synchronized_output	decrqm	yes
@@ -19,11 +19,11 @@ focus_report_on_enable	observed	no
 focus_events	observed	yes
 mouse_report_on_enable	observed	no
 mouse_sgr	observed	yes
-mouse_report_on_enable_1000	observed	yes
+mouse_report_on_enable_1000	observed	no
 mouse_motion_1000	observed	no
 mouse_report_on_enable_1002	observed	no
 mouse_motion_1002	observed	no
-mouse_report_on_enable_1003	observed	yes
+mouse_report_on_enable_1003	observed	no
 mouse_motion_1003	observed	yes
 titles	asked	yes
 cursor_shape	asked	yes

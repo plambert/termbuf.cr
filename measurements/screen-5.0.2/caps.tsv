@@ -1,4 +1,4 @@
-# date	2026-09-10 13:10:23
+# date	2026-09-10 13:34:00
 # term	screen
 # term_program	ghostty
 # term_program_version	1.3.2-main-+73534c468
@@ -8,7 +8,7 @@
 # rows	49
 # answered	primary_attributes,secondary_attributes,cursor_position
 # multiplexer	screen
-# multiplexer_session	19064.ttys011.squit
+# multiplexer_session	29450.ttys011.squit
 capability	method	result
 synchronized_output	table	no
 grapheme_clusters	table	no
@@ -21,11 +21,11 @@ focus_report_on_enable	observed	no
 focus_events	observed	no
 mouse_report_on_enable	observed	no
 mouse_sgr	observed	yes
-mouse_report_on_enable_1000	observed	yes
+mouse_report_on_enable_1000	observed	no
 mouse_motion_1000	observed	no
 mouse_report_on_enable_1002	observed	no
 mouse_motion_1002	observed	no
-mouse_report_on_enable_1003	observed	yes
+mouse_report_on_enable_1003	observed	no
 mouse_motion_1003	observed	yes
 titles	asked	yes
 cursor_shape	asked	yes

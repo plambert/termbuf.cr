@@ -1,4 +1,4 @@
-# date	2026-09-10 13:13:18
+# date	2026-09-10 13:36:08
 # term	xterm-256color
 # term_program	Apple_Terminal
 # term_program_version	470.2
@@ -23,7 +23,7 @@ mouse_report_on_enable_1000	observed	no
 mouse_motion_1000	observed	no
 mouse_report_on_enable_1002	observed	no
 mouse_motion_1002	observed	no
-mouse_report_on_enable_1003	observed	yes
+mouse_report_on_enable_1003	observed	no
 mouse_motion_1003	observed	yes
 titles	asked	yes
 cursor_shape	asked	yes
