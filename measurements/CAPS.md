@@ -50,9 +50,12 @@ scripted run should use.
 3. Prints one row per capability: the capability, the method that settled it (`decrqm`, `decrqss`,
    `table`, or `override` when `TERMBUF_CAPS` had the last word), and the answer.
 4. Walks seven readings, restoring everything it turned on as it goes:
-   + **focus** — turns mode 1004 on and waits up to 45 seconds for `CSI I` or `CSI O`. Click
-     another window and click this one back. Recorded as `observed`, yes or no, from whether a
-     report arrived rather than from what anyone thought they saw.
+   + **focus** — turns mode 1004 on and waits up to 45 seconds for `CSI O` followed by `CSI I`.
+     Click another window and click this one back. Recorded as `observed`, yes or no, from
+     whether both arrived rather than from what anyone thought they saw. Many terminals answer
+     the enable itself with `CSI I` when the window already has focus; that report is recorded
+     on its own row, `focus_report_on_enable`, and then discarded, since it says the terminal
+     knows the mode and nothing about whether a switch is reported.
    + **mouse** — turns SGR reporting on and waits for one click anywhere in the window.
      Recorded as `observed` the same way.
    + **`mouse_motion_1000`**, **`mouse_motion_1002`**, **`mouse_motion_1003`** — one reading per
@@ -151,7 +154,9 @@ Seven runs on 2026-09-06, one per directory beside this file: `ghostty`, `kitty`
 used, and each holds the `caps.tsv` the instrument wrote.
 
 Each cell is what the person or the mode reporter saw, and then what the shard had concluded
-before anyone looked.
+before anyone looked. The seven FocusEvents readings were taken before the focus step required
+a focus out followed by a focus in; on 2026-09-10 ghostty was seen to answer the enable itself
+with `CSI I`, which the old step counted. Those cells need a second run.
 
 | terminal | FocusEvents | MouseSgr | Titles | CursorShape | 1000 | 1002 | 1003 |
 |---|---|---|---|---|---|---|---|

@@ -1162,7 +1162,8 @@ module Validate
         "replies, and the last one to arrive.",
         "expected: switch away from this window and back — by clicking another one, or with " \
         "command-tab. raw reads \"\\e[O\" then \"\\e[I\", state reads focus out then focus in, " \
-        "and reports counts up by one each time.",
+        "and reports counts up by one each time. a focus in that arrives on its own as this " \
+        "page opens is the terminal answering the enable, not a switch.",
       ]
 
       lines << if claimed

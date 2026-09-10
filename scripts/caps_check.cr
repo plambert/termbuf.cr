@@ -61,8 +61,13 @@ module CapsCheck
     {TermBuf::Capability::Titles, nil, "table"},
   ]
 
-  # A focus report, either way round.
-  FOCUS_REPORT = /\e\[[IO]/
+  # A focus report, each way round.
+  FOCUS_IN  = /\e\[I/
+  FOCUS_OUT = /\e\[O/
+
+  # How long the enable of a mode is given to answer on its own before the
+  # reading proper starts.
+  ENABLE_GRACE = 300.milliseconds
 
   # An SGR mouse report: `CSI < button ; column ; row` and a final M or m.
   MOUSE_REPORT = /\e\[<\d+;\d+;\d+[Mm]/
@@ -149,7 +154,7 @@ module CapsCheck
     # least disturbed if somebody walks away half way through.
     def checklist : Nil
       unless @interactive
-        %w[focus_events mouse_sgr mouse_motion_1000 mouse_motion_1002 mouse_motion_1003
+        %w[focus_report_on_enable focus_events mouse_sgr mouse_motion_1000 mouse_motion_1002 mouse_motion_1003
           titles cursor_shape].each do |name|
           @rows << Row.new name, "observed", "skipped"
         end
@@ -172,17 +177,29 @@ module CapsCheck
     # A terminal that reports focus sends `CSI I` when the window comes
     # forward and `CSI O` when it goes away, and nothing at all when it does
     # not have the feature. Watching for one is the only way to tell.
+    # Many terminals answer the enable itself with `CSI I` when the window
+    # already has focus. That report says the terminal knows the mode; it does
+    # not say a switch will be reported. So the enable's own answer is recorded
+    # on its own row and then drained, and the reading proper wants a focus
+    # out followed by a focus in, which only a switch away and back produces.
     private def check_focus : Nil
       say "1. Focus reporting. Click another window, then click this one back."
       @tty.write TermBuf::Tty::FOCUS_EVENTS.set
       @tty.flush
 
-      seen = wait_for FOCUS_REPORT
+      on_enable = wait_for FOCUS_IN, ENABLE_GRACE
+      drain
+      say "   the enable itself was answered with #{on_enable.inspect}" if on_enable
+
+      out = wait_for FOCUS_OUT
+      back = out ? wait_for(FOCUS_IN) : nil
       @tty.write TermBuf::Tty::FOCUS_EVENTS.reset
       @tty.flush
 
-      say seen ? "   saw #{seen.inspect}" : "   nothing arrived"
+      seen = out && back
+      say seen ? "   saw #{out.inspect} then #{back.inspect}" : "   no focus out and in arrived"
       say ""
+      @rows << Row.new "focus_report_on_enable", "observed", on_enable ? "yes" : "no"
       @rows << Row.new "focus_events", "observed", seen ? "yes" : "no"
     end
 
