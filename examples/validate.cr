@@ -1171,7 +1171,7 @@ module Validate
         claimed ? "detected: this terminal reports SGR" : "not detected: expect nothing here",
         Style::DEFAULT.faint
 
-      field screen, 4, "mode", "#{Tty::MOUSE_SGR.set.inspect} while this page shows"
+      field screen, 4, "mode", "#{Tty::MOUSE_SGR_ANY.set.inspect} while this page shows"
       field screen, 6, "raw", @mouse_report.try(&.inspect) || "—"
 
       report = @mouse
@@ -1203,9 +1203,9 @@ module Validate
         "claims.",
         "expected: click and button, action Press, at and modifiers fill in; let go and action " \
         "reads Release; drag with a button held reads Motion the whole way, one line per cell " \
-        "crossed; moving with no button held reports nothing, since this page asks for " \
-        "button-event tracking and not any-event; the wheel gives WheelUp and WheelDown; shift " \
-        "or alt shows in modifiers.",
+        "crossed; moving with no button held also reads Motion with button None, since this page " \
+        "asks for any-event tracking; the wheel gives WheelUp and WheelDown; shift or alt shows " \
+        "in modifiers.",
         "no keys of its own; selecting text with the mouse stops working here and works again on " \
         "the next page.",
       ]
@@ -1992,7 +1992,7 @@ module Validate
     # putting a second pattern on `CSI <` — the stream's own is registered
     # first and would answer before this one was asked.
     private def watch_mouse : Nil
-      @terminal.enable Tty::MOUSE_SGR
+      @terminal.enable Tty::MOUSE_SGR_ANY
       decoder = @terminal.input.decoder
       decoding = decoder.on_sequence
       @decoding = decoding
@@ -2011,7 +2011,7 @@ module Validate
 
       @mouse = nil
       @mouse_report = nil
-      @terminal.disable Tty::MOUSE_SGR
+      @terminal.disable Tty::MOUSE_SGR_ANY
     end
 
     # Sends the screen again without touching what is on it. Whatever scribbled
