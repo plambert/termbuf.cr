@@ -262,9 +262,10 @@ All notable changes to this project are documented here. The format follows
   enable its grace, and only then asks for the movement. Both readings were instrument artefacts
   before: a person holds a button down for longer than the next step's 20 ms drain, so the release
   landed in mode 1000's enable window, and enabling 1003 under a pointer that was already moving
-  made the movement's first report look like the enable's answer. The
-  `mouse_report_on_enable_1000` and `_1003` cells of the 2026-09-10 runs are void for that reason;
-  `measurements/CAPS.md` says so.
+  made the movement's first report look like the enable's answer. Both cells were void where the
+  old steps produced them; a third round on 2026-09-10 with the fixed instrument re-read them
+  clean, and `mouse_report_on_enable_1000`, `_1002` and `_1003` are no on all seven terminals,
+  ghostty included. `measurements/CAPS.md` carries that round as the record.
 - `Terminal.new` and `Terminal.open` take keywords. `new` keeps the `Tty` positional and names
   everything after it; `open` keeps the input `IO` positional and names `output`, `env`, `probe`
   and `detect_composed_drift`. Ten mostly-defaulted arguments in a row is the shape that reads
