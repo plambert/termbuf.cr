@@ -140,7 +140,7 @@ apart:
 | Ghostty | 1.3.2 | `ghostty` | expected to answer everything |
 | Terminal.app | 2.15 (build 470.2) | `apple-terminal-470.2` | answers no DECRQM at all; the table is all there is |
 | kitty | 0.48.2 | `kitty` | answers DECRQM, silent on DECRQSS |
-| iTerm2 | 3.6.11 | `iterm2` | Automation approval needed the first time |
+| iTerm2 | 3.7.0 (3.6.11 in round one) | `iterm2` | Automation approval needed the first time |
 | `tmux` | 3.7c | `tmux` | `tmux -L termbuf -f /dev/null new-session -- /tmp/caps_check` |
 | GNU `screen` | 5.0.2 | `screen-5.0.2` | `/opt/homebrew/bin/screen -c /dev/null -S termbuf-caps /tmp/caps_check` |
 | GNU `screen` | 4.00.03 | `screen-4.00.03` | the macOS build, `/usr/bin/screen`, same arguments |
