@@ -49,10 +49,10 @@ private APPLE_TERMINAL = "\e[?1;2c" \
                          "\e[>1;95;0c" \
                          "\e[3;1R"
 
-# `tmux` 3.7c, recorded on 2026-09-06. It answers for the modes it implements,
-# 1004 and 1006 among them, and forwards neither: `focus-events` and `mouse`
-# ship off, and neither a focus report nor a click arrived. See
-# `measurements/tmux/caps.tsv`.
+# `tmux` 3.7c, recorded on 2026-09-10. It answers for the modes it implements,
+# 1004 and 1006 among them. It forwards no focus report — `focus-events` ships
+# off — and it does forward a click, so only the 1004 answer is the answer of
+# something in the middle. See `measurements/tmux/caps.tsv`.
 private TMUX = "\e[?62;c" \
                "\e[>84;0;0c" \
                "\eP>|tmux 3.7c\e\\" \
@@ -323,22 +323,23 @@ Spectator.describe TermBuf::Prober do
   describe "a mode report from something in the middle" do
     it "records the answer and adds nothing for it" do
       result, _ = probe TMUX, base: TermBuf::Capabilities::XTERM,
-        distrusted: Cap::FocusEvents | Cap::MouseSgr
+        distrusted: Cap::FocusEvents
 
       expect(result.capabilities.includes?(Cap::FocusEvents)).to be_false
-      expect(result.capabilities.includes?(Cap::MouseSgr)).to be_false
       expect(result.answered).to contain :focus_events
-      expect(result.answered).to contain :mouse_sgr
     end
 
     # 2026 and 2004 are `tmux`'s own to implement rather than to forward, and
-    # synchronized output through 3.7c was watched working.
+    # synchronized output through 3.7c was watched working. 1006 it both
+    # answers and forwards, so its yes is worth what it says.
     it "leaves the modes it was not told to distrust alone" do
       result, _ = probe TMUX, base: TermBuf::Capabilities::XTERM,
-        distrusted: Cap::FocusEvents | Cap::MouseSgr
+        distrusted: Cap::FocusEvents
 
       expect(result.capabilities.includes?(Cap::SynchronizedOutput)).to be_true
       expect(result.capabilities.includes?(Cap::BracketedPaste)).to be_true
+      expect(result.capabilities.includes?(Cap::MouseSgr)).to be_true
+      expect(result.answered).to contain :mouse_sgr
     end
 
     it "takes the same replies at face value with nothing in the middle" do
@@ -352,7 +353,7 @@ Spectator.describe TermBuf::Prober do
     # the whole chain however little the middle of it is trusted.
     it "still trusts a refusal" do
       result, _ = probe "\e[?1004;0$y\e[1;1R", base: TermBuf::Capabilities::MODERN,
-        distrusted: Cap::FocusEvents | Cap::MouseSgr
+        distrusted: Cap::FocusEvents
 
       expect(result.capabilities.includes?(Cap::FocusEvents)).to be_false
       expect(result.answered).to contain :focus_events
@@ -465,18 +466,21 @@ Spectator.describe TermBuf::CapabilityResolver do
   # The environment decides which of the terminal's answers are the
   # multiplexer's own, and the probe is told before it reads any of them.
   describe "under a multiplexer" do
-    it "leaves focus and the mouse off however the mode reports read" do
+    it "leaves focus off however the mode reports read, and takes the mouse" do
       env = {"TERM" => "tmux-256color", "TERM_PROGRAM" => "ghostty",
              "TMUX" => "/tmp/tmux-501/default,1,0"}
       result = TermBuf::CapabilityResolver.resolve env,
         IO::Memory.new(MODE_ANSWERS), IO::Memory.new, 50.milliseconds
 
       expect(result.capabilities.includes?(Cap::FocusEvents)).to be_false
-      expect(result.capabilities.includes?(Cap::MouseSgr)).to be_false
+      expect(result.capabilities.includes?(Cap::MouseSgr)).to be_true
       expect(result.probed).to be_true
     end
 
-    it "does the same under screen" do
+    # `screen` answers no DECRQM of its own, so these are the reports of the
+    # terminal behind it. They change nothing: the environment took the mouse
+    # off for `screen` and 1006 says only that some layer knows the mode.
+    it "leaves both off under screen" do
       env = {"TERM" => "screen", "TERM_PROGRAM" => "ghostty",
              "STY" => "34310.ttys004.squit"}
       result = TermBuf::CapabilityResolver.resolve env,
@@ -515,7 +519,7 @@ Spectator.describe TermBuf::CapabilityResolver do
         IO::Memory.new(MODE_ANSWERS), IO::Memory.new, 50.milliseconds
 
       expect(result.capabilities.includes?(Cap::FocusEvents)).to be_true
-      expect(result.capabilities.includes?(Cap::MouseSgr)).to be_false
+      expect(result.capabilities.includes?(Cap::Titles)).to be_false
     end
   end
 

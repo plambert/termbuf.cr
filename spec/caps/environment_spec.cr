@@ -439,24 +439,27 @@ Spectator.describe TermBuf::EnvironmentDetector do
       expect(caps.includes?(Cap::KittyGraphics)).to be_false
     end
 
-    # Watched on 2026-09-06 under `tmux` 3.7c with no config: neither a focus
-    # report nor a click reached the application, and the title was never set,
-    # because `focus-events`, `mouse` and `set-titles` all ship off.
-    it "takes focus, the mouse and the title off under tmux" do
+    # Watched on 2026-09-10 under `tmux` 3.7c with no config: no focus report
+    # reached the application and the title was never set, because
+    # `focus-events` and `set-titles` ship off. The mouse did get through, so
+    # it stays; under a real `tmux` the environment never claims it in the
+    # first place and the probe's `?1006;1$y` is what puts it there.
+    it "takes focus and the title off under tmux and leaves the mouse" do
       caps = detect({"TERM"         => "tmux-256color",
-                     "TERM_PROGRAM" => "tmux",
+                     "TERM_PROGRAM" => "ghostty",
                      "TMUX"         => "/tmp/tmux-501/default,1,0"})
 
       expect(caps.includes?(Cap::FocusEvents)).to be_false
-      expect(caps.includes?(Cap::MouseSgr)).to be_false
       expect(caps.includes?(Cap::Titles)).to be_false
+      expect(caps.includes?(Cap::MouseSgr)).to be_true
     end
 
     # GNU `screen` passes `TERM_PROGRAM` through, so the terminal underneath
-    # names itself and its table is applied; the multiplexer trims it. 4.00.03
-    # delivered none of the three and 5.0.2 delivered two, and nothing in the
-    # environment tells one from the other.
-    it "takes the same three off under screen" do
+    # names itself and its table is applied; the multiplexer trims it. It
+    # trims the mouse as well, which `tmux` does not: 4.00.03 delivered no
+    # mouse report at all, 5.0.2 did, and nothing in the environment tells one
+    # from the other.
+    it "takes the mouse off as well under screen" do
       caps = detect({"TERM"                 => "screen",
                      "TERM_PROGRAM"         => "ghostty",
                      "TERM_PROGRAM_VERSION" => "1.3.2",
@@ -465,6 +468,15 @@ Spectator.describe TermBuf::EnvironmentDetector do
       expect(caps.includes?(Cap::FocusEvents)).to be_false
       expect(caps.includes?(Cap::MouseSgr)).to be_false
       expect(caps.includes?(Cap::Titles)).to be_false
+    end
+
+    # `screen` with no `STY` in the environment is still `screen`: `TERM` is
+    # what it sets, and `TMUX` being absent is what says the multiplexer in
+    # the way is not the one that forwards a click.
+    it "takes the mouse off from a screen TERM alone" do
+      caps = detect({"TERM" => "screen", "TERM_PROGRAM" => "ghostty"})
+
+      expect(caps.includes?(Cap::MouseSgr)).to be_false
     end
 
     # DECSCUSR reached the terminal through `tmux` and through `screen` 5.0.2,
@@ -497,16 +509,32 @@ Spectator.describe TermBuf::EnvironmentDetector do
       caps = TermBuf::CapabilityOverrides.apply(base, "+focus_events").capabilities
 
       expect(caps.includes?(Cap::FocusEvents)).to be_true
-      expect(caps.includes?(Cap::MouseSgr)).to be_false
+      expect(caps.includes?(Cap::Titles)).to be_false
+    end
+
+    # And the same for the mouse `screen` 5.0.2 does forward and cannot say so.
+    it "gives the mouse back under screen when TERMBUF_CAPS says so" do
+      env = {"TERM" => "screen", "TERM_PROGRAM" => "ghostty",
+             "STY" => "34310.ttys004.squit"}
+      base = TermBuf::EnvironmentDetector.detect env
+      caps = TermBuf::CapabilityOverrides.apply(base, "+mouse_sgr").capabilities
+
+      expect(caps.includes?(Cap::MouseSgr)).to be_true
     end
   end
 
   describe ".distrusted" do
-    # `tmux` 3.7c answers `?1004;1$y` and `?1006;1$y` because it implements
-    # both modes, and forwards neither by default.
+    # `tmux` 3.7c answers `?1004;1$y` because it implements mode 1004, and
+    # forwards no focus report by default. It does forward a click, so its
+    # `?1006;1$y` is believed.
     it "names the modes a multiplexer answers for itself" do
       expect(TermBuf::EnvironmentDetector.distrusted({"TMUX" => "/tmp/x,1,0"}))
-        .to eq(Cap::FocusEvents | Cap::MouseSgr)
+        .to eq Cap::FocusEvents
+    end
+
+    # `screen` answers no DECRQM at all, so a yes for 1006 under it is the
+    # terminal behind it answering about a click 4.00.03 will not forward.
+    it "distrusts the mouse as well under screen" do
       expect(TermBuf::EnvironmentDetector.distrusted({"STY" => "1.pts-0.host"}))
         .to eq(Cap::FocusEvents | Cap::MouseSgr)
       expect(TermBuf::EnvironmentDetector.distrusted({"TERM" => "screen"}))
@@ -514,13 +542,16 @@ Spectator.describe TermBuf::EnvironmentDetector do
     end
 
     # 2026, 2027 and 2004 are handled by the multiplexer rather than forwarded,
-    # and synchronized output through `tmux` 3.7c was watched working.
+    # and synchronized output through `tmux` 3.7c was watched working. 1006 is
+    # trusted for a different reason: `tmux` answers it and forwards the click
+    # too, which the second round of readings established.
     it "trusts the modes a multiplexer implements on its own account" do
       distrusted = TermBuf::EnvironmentDetector.distrusted({"TMUX" => "/tmp/x,1,0"})
 
       expect(distrusted.includes?(Cap::SynchronizedOutput)).to be_false
       expect(distrusted.includes?(Cap::BracketedPaste)).to be_false
       expect(distrusted.includes?(Cap::GraphemeClusters)).to be_false
+      expect(distrusted.includes?(Cap::MouseSgr)).to be_false
     end
 
     it "distrusts nothing with no multiplexer in the way" do

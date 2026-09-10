@@ -234,23 +234,37 @@ All notable changes to this project are documented here. The format follows
   which its table entry had denied it. It answers no DECRQM, no DECRQSS and no XTGETTCAP, so the
   table was the only evidence there was, and on 2026-09-06 against 470.2 the table was wrong four
   times out of four: mode 1004 sent a focus report, mode 1006 reported a click, OSC 2 renamed the
-  window, and DECSCUSR changed the cursor's shape. See `measurements/terminal/caps.tsv`.
-- A multiplexer loses `FocusEvents`, `MouseSgr` and `Titles`:
-  `EnvironmentDetector::THROUGH_MULTIPLEXER` takes all three off alongside the kitty protocols.
-  Measured on 2026-09-06 — under `tmux` 3.7c with no config neither a focus report nor a click
-  reached the application and the title was never set, because `focus-events`, `mouse` and
-  `set-titles` all ship off; under GNU `screen` 4.00.03 none of the three arrived either. `screen`
-  5.0.2 forwarded the mouse and the title, and nothing in the environment tells 4 from 5, so the
-  worse of the two is what is assumed. `TERMBUF_CAPS=+focus_events,+mouse_sgr,+titles` is how a
-  configuration that does forward them says so. `CursorShape` stays: DECSCUSR got through both.
+  window, and DECSCUSR changed the cursor's shape. See
+  `measurements/apple-terminal-470.2/caps.tsv`.
+- A multiplexer loses `FocusEvents` and `Titles`, and GNU `screen` loses `MouseSgr` on top of
+  that: `EnvironmentDetector::THROUGH_MULTIPLEXER` takes the first two off alongside the kitty
+  protocols, and `THROUGH_SCREEN` takes the mouse off when `STY` is set or `TERM` starts with
+  `screen`. Measured again on 2026-09-10, this time asking for a click with mode 1002 rather than
+  mode 1000: `tmux` 3.7c with no config forwarded the click, where the first round's 1000 saw
+  nothing and the mouse came off every multiplexer for it. `screen` 4.00.03 forwarded no click
+  under 1002 either, 5.0.2 did, and nothing in the environment tells 4 from 5, so the worse of the
+  two is what is assumed. Focus and the title are unchanged: `focus-events` and `set-titles` ship
+  off in `tmux`, and neither reached the application through either `screen`.
+  `TERMBUF_CAPS=+focus_events,+mouse_sgr,+titles` is how a configuration that does forward them
+  says so. `CursorShape` stays: DECSCUSR got through both.
 - `Prober#probe` takes a second argument, a set of capabilities whose *presence* in a mode report
   is not to be believed, and `CapabilityResolver` fills it in from
-  `EnvironmentDetector.distrusted`. `tmux` 3.7c answers `?1004;1$y` and `?1006;1$y` because it
-  implements both modes and forwards neither, so under a multiplexer a yes for 1004 or 1006 is
-  recorded in `Result#answered` and adds nothing. A *no* is still trusted, since nothing forwards a
-  mode it does not know, and 2026, 2027 and 2004 stay trusted outright: those a multiplexer
-  implements on its own account. Existing callers are unaffected; the argument defaults to
-  `Capability::None`.
+  `EnvironmentDetector.distrusted`. `tmux` 3.7c answers `?1004;1$y` because it implements mode
+  1004 and forwards no focus report, so under a multiplexer a yes for 1004 is recorded in
+  `Result#answered` and adds nothing. Its `?1006;1$y` is believed, since the click does get
+  through; under `screen`, which answers no DECRQM of its own, 1006 is distrusted as well, because
+  a yes there is the terminal behind it answering about a click `screen` 4.00.03 will not forward.
+  A *no* is still trusted, since nothing forwards a mode it does not know, and 2026, 2027 and 2004
+  stay trusted outright: those a multiplexer implements on its own account. Existing callers are
+  unaffected; the argument defaults to `Capability::None`.
+- `caps_check`'s click step waits for the release as well as the press before it ends, and each
+  tracking step says **hold the pointer still**, waits a second, turns its mode on and gives the
+  enable its grace, and only then asks for the movement. Both readings were instrument artefacts
+  before: a person holds a button down for longer than the next step's 20 ms drain, so the release
+  landed in mode 1000's enable window, and enabling 1003 under a pointer that was already moving
+  made the movement's first report look like the enable's answer. The
+  `mouse_report_on_enable_1000` and `_1003` cells of the 2026-09-10 runs are void for that reason;
+  `measurements/CAPS.md` says so.
 - `Terminal.new` and `Terminal.open` take keywords. `new` keeps the `Tty` positional and names
   everything after it; `open` keeps the input `IO` positional and names `output`, `env`, `probe`
   and `detect_composed_drift`. Ten mostly-defaulted arguments in a row is the shape that reads

@@ -79,7 +79,7 @@ module TermBuf
     #
     # It answers no DECRQM, no DECRQSS and no XTGETTCAP, so nothing about these
     # four can be asked and the table was the only evidence there was — and the
-    # table said no to all four. Watched on 2026-09-06 against 470.2: mode 1004
+    # table said no to all four. Watched on 2026-09-10 against 470.2: mode 1004
     # sends a focus report on the way out and back in, mode 1006 reports a
     # click, OSC 2 renames the window, and DECSCUSR changes the cursor's shape.
     # See `measurements/CAPS.md`.
@@ -143,45 +143,70 @@ module TermBuf
     # forward everything. The kitty protocols in particular are swallowed,
     # so they come off until a probe says otherwise.
     #
-    # Focus reports, SGR mouse reporting and the window title come off for a
-    # different reason: all three depend on how the multiplexer was configured,
-    # and all three default to off. Watched on 2026-09-06 — under `tmux` 3.7c
-    # with no config, neither a focus report nor a click reached the
-    # application and the title was never set, because `focus-events`, `mouse`
-    # and `set-titles` all ship off; under GNU `screen` 4.00.03 none of the
-    # three arrived either. `screen` 5.0.2 forwarded the mouse and the title
-    # and still not the focus, and nothing in the environment tells 4 from 5.
-    # A configuration that does forward them says so with
-    # `TERMBUF_CAPS=+focus_events,+mouse_sgr,+titles`.
+    # Focus reports and the window title come off for a different reason: both
+    # depend on how the multiplexer was configured, and both default to off.
+    # Watched on 2026-09-10 — under `tmux` 3.7c with no config no focus report
+    # reached the application and the title was never set, because
+    # `focus-events` and `set-titles` ship off; under GNU `screen`, 4.00.03
+    # sent neither and 5.0.2 sent the title and not the focus. A configuration
+    # that does forward them says so with
+    # `TERMBUF_CAPS=+focus_events,+titles`.
+    #
+    # The mouse is not on this list, because `tmux` forwards a click: mode
+    # 1002 with SGR encoding reported one through 3.7c with no config, where
+    # the first round asked with mode 1000 and saw nothing. `THROUGH_SCREEN`
+    # takes it off under `screen` alone.
     #
     # `CursorShape` stays: DECSCUSR reached the terminal through `tmux` and
     # through `screen` 5.0.2, and `screen` 4.00.03 swallowing it costs nothing
     # visible. See `measurements/CAPS.md`.
     THROUGH_MULTIPLEXER = KITTY_EXTRAS | Capability::KittyGraphicsTempFile |
                           Capability::SynchronizedOutput | Capability::FocusEvents |
-                          Capability::MouseSgr | Capability::Titles
+                          Capability::Titles
+
+    # What GNU `screen` costs on top of `THROUGH_MULTIPLEXER`.
+    #
+    # 4.00.03 delivered no mouse report at all on 2026-09-10, under mode 1002
+    # and the SGR encoding, where `tmux` delivered one. 5.0.2 did deliver one,
+    # and nothing in the environment tells 4 from 5 — both set `TERM=screen`,
+    # both pass `TERM_PROGRAM` through from the terminal underneath, and
+    # neither answers XTVERSION — so the worse of the two is assumed and
+    # `TERMBUF_CAPS=+mouse_sgr` is how the better one says what it is.
+    THROUGH_SCREEN = Capability::MouseSgr
 
     # Capabilities a multiplexer answers a mode report for on its own account.
     #
-    # `tmux` 3.7c answers `?1004;1$y` and `?1006;1$y` because it implements
-    # both modes; whether anything reaches the application past it is a
-    # question about its options rather than about the modes, and the answer
-    # measured was no. So a *present* report for these two is evidence about
-    # the multiplexer and not about the terminal, and `Prober` records that it
-    # was answered without letting it add the capability back.
+    # `tmux` 3.7c answers `?1004;1$y` because it implements mode 1004; whether
+    # a focus report reaches the application past it is a question about its
+    # options rather than about the mode, and the answer measured was no. So a
+    # *present* report for 1004 is evidence about the multiplexer and not about
+    # the terminal, and `Prober` records that it was answered without letting
+    # it add the capability back.
+    #
+    # Mode 1006 is not here any more: `tmux` answers `?1006;1$y` and forwards
+    # the report as well, so its yes is worth what it says. `screen` answers no
+    # DECRQM at all, so nothing about it turns on this list either way.
     #
     # An *absent* report is still trusted, and so are the other three modes:
     # 2026, 2027 and 2004 are handled by the multiplexer itself rather than
     # forwarded, and the measurement agrees that synchronized output through
     # `tmux` works.
-    MULTIPLEXER_ANSWERS_FOR_ITSELF = Capability::FocusEvents | Capability::MouseSgr
+    MULTIPLEXER_ANSWERS_FOR_ITSELF = Capability::FocusEvents
 
-    # Which of `MULTIPLEXER_ANSWERS_FOR_ITSELF` apply to this environment: all
-    # of them under a multiplexer and none of them anywhere else. `Prober`
-    # takes this and adds no capability for a mode report that says yes to one
-    # of them.
+    # Which mode reports this environment cannot take at face value: what a
+    # multiplexer answers for itself, and under `screen` what `THROUGH_SCREEN`
+    # took off as well. `Prober` takes this and adds no capability for a mode
+    # report that says yes to one of them.
+    #
+    # `screen` answers no DECRQM of its own, so a yes for 1006 under it came
+    # from the terminal behind it and is about a click `screen` 4.00.03 does
+    # not forward. What the tables take off for `screen`, a mode report does
+    # not give back.
     def distrusted(env : Hash(String, String)) : Capability
-      multiplexed?(env) ? MULTIPLEXER_ANSWERS_FOR_ITSELF : Capability::None
+      flags = Capability::None
+      flags |= MULTIPLEXER_ANSWERS_FOR_ITSELF if multiplexed? env
+      flags |= THROUGH_SCREEN if screened? env
+      flags
     end
 
     # Guesses from `TERM`, `TERM_PROGRAM`, `COLORTERM`, `VTE_VERSION`, and the
@@ -200,6 +225,7 @@ module TermBuf
 
       flags &= ~denied(env)
       flags &= ~THROUGH_MULTIPLEXER if multiplexed? env
+      flags &= ~THROUGH_SCREEN if screened? env
       flags = strip_color flags if no_color? env
 
       Capabilities.new flags
@@ -385,6 +411,17 @@ module TermBuf
       return false unless term
 
       term.starts_with?("screen") || term.starts_with?("tmux")
+    end
+
+    # Whether the multiplexer in the way is GNU `screen` rather than `tmux`.
+    # `screen` sets `STY`, and a `TERM` of `screen` is what it puts there when
+    # it does not; `tmux` sets `TMUX` and a `TERM` of `tmux` or `screen`, so a
+    # `TERM` alone is only asked about when `TMUX` is not set.
+    private def screened?(env : Hash(String, String)) : Bool
+      return true if present? env, "STY"
+      return false if present? env, "TMUX"
+
+      env["TERM"]?.try(&.starts_with?("screen")) || false
     end
 
     # The `NO_COLOR` convention: set to anything non-empty, and colour goes.
