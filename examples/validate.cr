@@ -1202,8 +1202,10 @@ module Validate
         "shown: the bytes of the last mouse report, and the event decoded from them: two different " \
         "claims.",
         "expected: click and button, action Press, at and modifiers fill in; let go and action " \
-        "reads Release; drag with a button held reads Motion; the wheel gives WheelUp and " \
-        "WheelDown; shift or alt shows in modifiers.",
+        "reads Release; drag with a button held reads Motion the whole way, one line per cell " \
+        "crossed; moving with no button held reports nothing, since this page asks for " \
+        "button-event tracking and not any-event; the wheel gives WheelUp and WheelDown; shift " \
+        "or alt shows in modifiers.",
         "no keys of its own; selecting text with the mouse stops working here and works again on " \
         "the next page.",
       ]

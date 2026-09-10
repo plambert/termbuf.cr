@@ -1019,8 +1019,40 @@ Spectator.describe TermBuf::Terminal do
         harness.terminal.enable TermBuf::Tty::MOUSE_SGR
         harness.terminal.paint!
 
-        expect(harness.drain).to contain "\e[?1000h\e[?1006h"
+        expect(harness.drain).to contain "\e[?1002h\e[?1006h"
       end
+    end
+
+    # 1003 is any-event tracking: motion with no button held as well, which is
+    # what a hover wants and what a drag does not need to pay for.
+    it "asks for any-event tracking when that is what was asked for" do
+      with_harness do |harness|
+        harness.drain
+        harness.terminal.enable TermBuf::Tty::MOUSE_SGR_ANY
+        harness.terminal.paint!
+
+        expect(harness.drain).to contain "\e[?1003h\e[?1006h"
+      end
+    end
+
+    # The terminal has one mouse tracking mode, so the two share a registry
+    # name: the second replaces the first rather than stacking on it, and
+    # closing gives back only the one that was asked for last.
+    it "replaces button-event tracking with any-event tracking" do
+      harness = Harness.new
+      harness.terminal.enable TermBuf::Tty::MOUSE_SGR
+      harness.terminal.paint!
+      harness.drain
+      harness.terminal.enable TermBuf::Tty::MOUSE_SGR_ANY
+      harness.terminal.paint!
+
+      expect(harness.drain).to contain "\e[?1003h\e[?1006h"
+
+      harness.close
+      written = harness.output.to_s
+
+      expect(written).to contain "\e[?1006l\e[?1003l"
+      expect(written.scan("\e[?1006l").size).to eq 1
     end
 
     it "delivers a report as an event, in buffer cells" do
@@ -1046,7 +1078,7 @@ Spectator.describe TermBuf::Terminal do
       harness.drain
       harness.close
 
-      expect(harness.output.to_s).to contain "\e[?1006l\e[?1000l"
+      expect(harness.output.to_s).to contain "\e[?1006l\e[?1002l"
     end
   end
 

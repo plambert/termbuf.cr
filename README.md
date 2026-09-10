@@ -348,6 +348,26 @@ arriving. A paste ended that way is still delivered, with `Events::Paste#complet
 `Events::Paste` is the signal to take that notice down. Drawing it is the application's job, because
 the buffer belongs to the application — see page 7 of `examples/validate.cr` for one.
 
+### Mouse
+
+Nothing turns mouse reporting on uninvited: a terminal reporting the mouse is one that no longer
+lets the person select and copy text with it, which is a trade only the application can weigh. The
+application asks for it, and `Terminal#close` gives it back:
+
+```crystal
+terminal.enable TermBuf::Tty::MOUSE_SGR      # press, release, motion with a button held
+terminal.enable TermBuf::Tty::MOUSE_SGR_ANY  # the above, and motion with no button held
+```
+
+`MOUSE_SGR` is mode 1002 in the SGR encoding — button-event tracking, which reports motion while a
+button is held and is what a drag needs. `MOUSE_SGR_ANY` is mode 1003, any-event tracking, which
+reports motion with no button held as well; that is what a hover needs, and it costs a report for
+every cell the pointer travels over. The terminal has one mouse tracking mode and not two, so
+asking for either replaces the other rather than adding to it.
+
+A report arrives as `Events::Mouse`, with its coordinates already converted to 0-based buffer
+cells.
+
 ### Styles and colour
 
 `Style` is a value. The builders return copies:
@@ -688,7 +708,7 @@ here is renamed, removed, or given a new required argument without the major ver
   `LinkId`.
 * **What a terminal is.** `Capability`, `Capabilities`, `Quirk`, `ScreenSize`, `CursorShape`, and
   `Tty::Mode` with the mode constants beside it — `BRACKETED_PASTE`, `FOCUS_EVENTS`, `MOUSE_SGR`,
-  `KITTY_KEYBOARD`.
+  `MOUSE_SGR_ANY`, `KITTY_KEYBOARD`.
 * **Talking to the terminal itself.** `ColorStack`, `Clipboard`, `ImageStore`, `Image`,
   `Placement`.
 * **Unicode.** `Unicode.string_width`, `.each_grapheme`, `.graphemes`, `.truncate`, `.ellipsize`,

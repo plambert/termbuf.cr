@@ -60,9 +60,16 @@ module TermBuf
     # The terminal reports the window gaining and losing focus.
     FOCUS_EVENTS = Mode.new "focus-events", "\e[?1004h", "\e[?1004l"
 
-    # Mouse button reporting in the SGR encoding, which is the one that can
-    # name a column past 223. Both are asked for together, and given back in
-    # the reverse order.
+    # Mouse reporting in the SGR encoding, which is the one that can name a
+    # column past 223. Both are asked for together, and given back in the
+    # reverse order.
+    #
+    # The tracking mode is 1002, button-event tracking: press, release, and
+    # motion while a button is held. Mode 1000 reports only the press and the
+    # release, so a widget that takes the pointer on press never learns where
+    # it went and nothing can be dragged. 1002 supersedes 1000 on every
+    # terminal that has the SGR encoding, which is the only kind this mode is
+    # for, so there is no reason to ask for the lesser one.
     #
     # Enabling this is the application's call — `terminal.enable
     # TermBuf::Tty::MOUSE_SGR` — and nothing in this shard does it uninvited: a
@@ -70,7 +77,28 @@ module TermBuf
     # and copy text with it, which is a trade only the application can weigh.
     # Once it is on, a report arrives as `Events::Mouse` with its coordinates
     # already converted to buffer cells. `Tty#leave` sends the reset.
-    MOUSE_SGR = Mode.new "mouse-sgr", "\e[?1000h\e[?1006h", "\e[?1006l\e[?1000l"
+    #
+    # See `MOUSE_SGR_ANY` for the mode that reports motion with no button held
+    # as well.
+    MOUSE_SGR = Mode.new "mouse-sgr", "\e[?1002h\e[?1006h", "\e[?1006l\e[?1002l"
+
+    # Mouse reporting as `MOUSE_SGR`, but with mode 1003 — any-event tracking,
+    # which reports motion with no button held too. That is what hover needs:
+    # a highlight that follows the pointer, a tooltip, a cursor shape that
+    # changes over a hot spot.
+    #
+    # It is not the default because of what it costs. Every cell the pointer
+    # travels over is a report, so crossing a wide terminal is a hundred events
+    # to read, decode, and act on, and over ssh it is a hundred packets. An
+    # application that only drags wants `MOUSE_SGR`.
+    #
+    # The two share the registry name `mouse-sgr`, because the terminal has one
+    # mouse tracking mode and not two: asking for 1003 after 1002 replaces the
+    # tracking rather than adding to it. `Tty#enable` writes a replacement of
+    # the same name whose bytes differ, so the change reaches the terminal, and
+    # `#leave` sends the one reset that belongs to whichever was asked for
+    # last.
+    MOUSE_SGR_ANY = Mode.new "mouse-sgr", "\e[?1003h\e[?1006h", "\e[?1006l\e[?1003l"
 
     # The kitty keyboard protocol, which tells apart keystrokes an ordinary
     # terminal reports identically. This pushes a flag set onto the terminal's

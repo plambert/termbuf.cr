@@ -193,6 +193,14 @@ All notable changes to this project are documented here. The format follows
 - `Terminal` asks for `Tty::KITTY_KEYBOARD` at takeover when the capability set has
   `Capability::KittyKeyboard`, and tells its decoder so. Through the mode registry, so that closing
   pops the flag set the terminal pushed and a takeover after a suspend pushes it again.
+- `Tty::MOUSE_SGR_ANY`, mouse reporting in the SGR encoding with mode 1003 — any-event tracking,
+  which reports motion with no button held as well. That is what a hover wants: a highlight that
+  follows the pointer, a tooltip, a cursor shape that changes over a hot spot. It is not the
+  default because every cell the pointer travels over is a report, so crossing a wide terminal is a
+  hundred events to read and decode and a hundred packets over ssh. It carries the registry name
+  `mouse-sgr` that `MOUSE_SGR` carries, because the terminal has one mouse tracking mode and not
+  two: asking for one replaces the other where it stands, the replacement's bytes go out, and
+  `#close` sends the single reset belonging to whichever was asked for last.
 
 ### Changed
 
@@ -428,6 +436,12 @@ All notable changes to this project are documented here. The format follows
   capability is `KittyColorStack` and is claimed for kitty alone, and kitty 0.48.2 was seen to
   ignore the xterm form: a tint set after a push stayed after the pop, and stayed after the program
   had gone. Seen on 2026-09-10 on the colours page of `examples/validate.cr`.
+- `Tty::MOUSE_SGR` now asks for mode 1002 rather than 1000, so a drag is reported. Mode 1000 is
+  X10-compatible normal tracking: the press and the release and nothing in between, which meant a
+  widget that took the pointer on press never saw where it went and nothing could be dragged. Mode
+  1002 is button-event tracking — press, release, and motion while a button is held — and
+  supersedes 1000 on every terminal that has the SGR encoding, which is the only kind this mode is
+  for. Seen on iTerm2, kitty and ghostty.
 
 ## [0.2.1] - 2026-09-02
 

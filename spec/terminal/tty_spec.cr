@@ -191,4 +191,43 @@ Spectator.describe TermBuf::Tty do
       end
     end
   end
+
+  describe "the mouse modes" do
+    # 1002 and not 1000: normal tracking reports the press and the release and
+    # nothing in between, so a widget that takes the pointer on press never
+    # learns where it went and nothing can be dragged.
+    it "asks for button-event tracking, which reports motion with a button held" do
+      expect(TermBuf::Tty::MOUSE_SGR.set).to eq "\e[?1002h\e[?1006h"
+      expect(TermBuf::Tty::MOUSE_SGR.reset).to eq "\e[?1006l\e[?1002l"
+    end
+
+    # 1003 reports motion with no button held as well, which is what a hover
+    # wants and what it costs a report per cell of travel to have.
+    it "asks for any-event tracking, which reports motion with no button held" do
+      expect(TermBuf::Tty::MOUSE_SGR_ANY.set).to eq "\e[?1003h\e[?1006h"
+      expect(TermBuf::Tty::MOUSE_SGR_ANY.reset).to eq "\e[?1006l\e[?1003l"
+    end
+
+    # The terminal has one mouse tracking mode and not two, so the two modes
+    # share a registry name: the second replaces the first where it stands, and
+    # leaving sends the one reset that belongs to whichever was asked for last.
+    it "replaces one tracking mode with the other and resets only the last" do
+      with_tty do |tty, output|
+        tty.enter TermBuf::Capabilities::NONE
+        tty.enable TermBuf::Tty::MOUSE_SGR
+        output.clear
+        tty.enable TermBuf::Tty::MOUSE_SGR_ANY
+
+        expect(output.to_s).to eq TermBuf::Tty::MOUSE_SGR_ANY.set
+        expect(tty.modes.count { |mode| mode.name == "mouse-sgr" }).to eq 1
+
+        output.clear
+        tty.leave
+        written = output.to_s
+
+        expect(written).to contain TermBuf::Tty::MOUSE_SGR_ANY.reset
+        expect(written).not_to contain TermBuf::Tty::MOUSE_SGR.reset
+      end
+    end
+  end
 end
