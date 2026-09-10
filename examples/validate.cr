@@ -28,6 +28,21 @@ module Validate
   # a person can watch the title change rather than only see it changed.
   TITLES = ["termbuf validate", "termbuf validate — still here"]
 
+  # The three mouse tracking modes the mouse page cycles with `m`, in the
+  # order it cycles them. All three carry the registry name `mouse-sgr`, so
+  # asking for the next replaces the one on rather than stacking on it.
+  #
+  # The page starts on any-event tracking, the last of them, because that is
+  # the one whose reports are hardest to miss. The other two are here because
+  # what a terminal does under them is worth watching: 1000 and 1002 are
+  # defined not to report motion with nothing held, and not every terminal
+  # obeys that.
+  MOUSE_TRACKING = [
+    {name: "clicks (1000)", mode: TermBuf::Tty::MOUSE_SGR_CLICKS},
+    {name: "buttons (1002)", mode: TermBuf::Tty::MOUSE_SGR},
+    {name: "any (1003)", mode: TermBuf::Tty::MOUSE_SGR_ANY},
+  ]
+
   # One line of the width page: something to draw, and what it is.
   #
   # The point of each is that the terminal has to agree with
@@ -114,6 +129,10 @@ module Validate
       # from, which the event does not carry.
       @mouse = nil.as(Events::Mouse?)
       @mouse_report = nil.as(String?)
+      # Which of `MOUSE_TRACKING` the mouse page is asking for. Any-event
+      # tracking to begin with, which is what the page asked for before there
+      # was a choice.
+      @tracking = (MOUSE_TRACKING.size - 1).as(Int32)
       @decoding = nil.as((Input::Sequence -> Event?)?)
       @titled = 0
     end
@@ -395,6 +414,7 @@ module Validate
       return "[esc] leave the pane  [ctrl-r] redraw" if @focused
       return "[s] shape  [b] blink  [enter] type here  [tab] page  [q] quit" if cursors?
       return "[t] retitle  [tab] page  [ctrl-r] redraw  [q] quit" if title?
+      return "[m] tracking mode  [tab] page  [ctrl-r] redraw  [q] quit" if mouse?
       return "[enter] type here  [tab] page  [ctrl-r] redraw  [q] quit" if typeable?
 
       "[tab]/[shift-tab] page  [ctrl-r] redraw  [q] quit"
@@ -1171,7 +1191,8 @@ module Validate
         claimed ? "detected: this terminal reports SGR" : "not detected: expect nothing here",
         Style::DEFAULT.faint
 
-      field screen, 4, "mode", "#{Tty::MOUSE_SGR_ANY.set.inspect} while this page shows"
+      tracking = MOUSE_TRACKING[@tracking]
+      field screen, 4, "mode", "#{tracking[:name]}: #{tracking[:mode].set.inspect}"
       field screen, 6, "raw", @mouse_report.try(&.inspect) || "—"
 
       report = @mouse
@@ -1194,7 +1215,7 @@ module Validate
           "shown: the mode this page turns on, the bytes the terminal sends, and the event decoded " \
           "from them.",
           "#{Capability::MouseSgr} is not detected on this terminal: expect raw and event to stay " \
-          "as they are however much you click. no keys of its own.",
+          "as they are however much you click. [m] cycles the tracking mode anyway.",
         ]
       end
 
@@ -1202,13 +1223,29 @@ module Validate
         "shown: the bytes of the last mouse report, and the event decoded from them: two different " \
         "claims.",
         "expected: click and button, action Press, at and modifiers fill in; let go and action " \
-        "reads Release; drag with a button held reads Motion the whole way, one line per cell " \
-        "crossed; moving with no button held also reads Motion with button None, since this page " \
-        "asks for any-event tracking; the wheel gives WheelUp and WheelDown; shift or alt shows " \
-        "in modifiers.",
-        "no keys of its own; selecting text with the mouse stops working here and works again on " \
-        "the next page.",
+        "reads Release; the wheel gives WheelUp and WheelDown; shift or alt shows in modifiers.",
+        expected_tracking,
+        "[m] cycles the tracking mode: clicks (1000), buttons (1002), any (1003), and clears what " \
+        "arrived under the last one. if Motion lines appear while nothing is held under 1000 or " \
+        "1002, this terminal over-reports; note it in measurements/CAPS.md.",
+        "selecting text with the mouse stops working here and works again on the next page.",
       ]
+    end
+
+    # What the mode now on is defined to report, which is the claim the screen
+    # is there to check.
+    private def expected_tracking : String
+      case @tracking
+      when 0
+        "under clicks (1000): the press and the release, and nothing else. moving the pointer " \
+        "should report nothing at all, with a button held or without one."
+      when 1
+        "under buttons (1002): motion while a button is held reads Motion, one line per cell " \
+        "crossed. moving with nothing held should report nothing."
+      else
+        "under any (1003): every movement reads Motion, one line per cell crossed, with button " \
+        "None when nothing is held."
+      end
     end
 
     # --------------------------------------------------------------- page 10
@@ -1805,6 +1842,7 @@ module Validate
       when 's' then cycle_cursor_shape if cursors?
       when 'b' then toggle_cursor_blink if cursors?
       when 't' then retitle if title?
+      when 'm' then cycle_mouse_tracking if mouse?
       end
     end
 
@@ -1832,6 +1870,22 @@ module Validate
     private def retitle : Nil
       @titled = (@titled + 1) % TITLES.size
       @terminal.title = TITLES[@titled]
+      @rebuild = true
+    end
+
+    # The next tracking mode round. All three share a registry name, so
+    # enabling the next one replaces the one on rather than turning a second
+    # on beside it, and what leaving the page disables is whichever was last
+    # asked for.
+    #
+    # The last report goes with it: a report that arrived under 1003 says
+    # nothing about 1002, and leaving it on the screen invites reading it as
+    # if it did.
+    private def cycle_mouse_tracking : Nil
+      @tracking = (@tracking + 1) % MOUSE_TRACKING.size
+      @terminal.enable MOUSE_TRACKING[@tracking][:mode]
+      @mouse = nil
+      @mouse_report = nil
       @rebuild = true
     end
 
@@ -1992,7 +2046,7 @@ module Validate
     # putting a second pattern on `CSI <` — the stream's own is registered
     # first and would answer before this one was asked.
     private def watch_mouse : Nil
-      @terminal.enable Tty::MOUSE_SGR_ANY
+      @terminal.enable MOUSE_TRACKING[@tracking][:mode]
       decoder = @terminal.input.decoder
       decoding = decoder.on_sequence
       @decoding = decoding
@@ -2011,7 +2065,7 @@ module Validate
 
       @mouse = nil
       @mouse_report = nil
-      @terminal.disable Tty::MOUSE_SGR_ANY
+      @terminal.disable MOUSE_TRACKING[@tracking][:mode]
     end
 
     # Sends the screen again without touching what is on it. Whatever scribbled

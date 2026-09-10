@@ -193,6 +193,14 @@ Spectator.describe TermBuf::Tty do
   end
 
   describe "the mouse modes" do
+    # 1000 is the mode no application here asks for, kept so that what a
+    # terminal does under it can be measured: motion reported while nothing is
+    # held is the terminal over-reporting.
+    it "asks for normal tracking, which reports the press and the release" do
+      expect(TermBuf::Tty::MOUSE_SGR_CLICKS.set).to eq "\e[?1000h\e[?1006h"
+      expect(TermBuf::Tty::MOUSE_SGR_CLICKS.reset).to eq "\e[?1006l\e[?1000l"
+    end
+
     # 1002 and not 1000: normal tracking reports the press and the release and
     # nothing in between, so a widget that takes the pointer on press never
     # learns where it went and nothing can be dragged.
@@ -208,12 +216,13 @@ Spectator.describe TermBuf::Tty do
       expect(TermBuf::Tty::MOUSE_SGR_ANY.reset).to eq "\e[?1006l\e[?1003l"
     end
 
-    # The terminal has one mouse tracking mode and not two, so the two modes
-    # share a registry name: the second replaces the first where it stands, and
+    # The terminal has one mouse tracking mode and not three, so all three
+    # share a registry name: each replaces the last where it stands, and
     # leaving sends the one reset that belongs to whichever was asked for last.
-    it "replaces one tracking mode with the other and resets only the last" do
+    it "replaces one tracking mode with the next and resets only the last" do
       with_tty do |tty, output|
         tty.enter TermBuf::Capabilities::NONE
+        tty.enable TermBuf::Tty::MOUSE_SGR_CLICKS
         tty.enable TermBuf::Tty::MOUSE_SGR
         output.clear
         tty.enable TermBuf::Tty::MOUSE_SGR_ANY
@@ -227,6 +236,7 @@ Spectator.describe TermBuf::Tty do
 
         expect(written).to contain TermBuf::Tty::MOUSE_SGR_ANY.reset
         expect(written).not_to contain TermBuf::Tty::MOUSE_SGR.reset
+        expect(written).not_to contain TermBuf::Tty::MOUSE_SGR_CLICKS.reset
       end
     end
   end

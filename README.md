@@ -355,15 +355,24 @@ lets the person select and copy text with it, which is a trade only the applicat
 application asks for it, and `Terminal#close` gives it back:
 
 ```crystal
-terminal.enable TermBuf::Tty::MOUSE_SGR      # press, release, motion with a button held
-terminal.enable TermBuf::Tty::MOUSE_SGR_ANY  # the above, and motion with no button held
+terminal.enable TermBuf::Tty::MOUSE_SGR         # press, release, motion with a button held
+terminal.enable TermBuf::Tty::MOUSE_SGR_ANY     # the above, and motion with no button held
+terminal.enable TermBuf::Tty::MOUSE_SGR_CLICKS  # press and release only
 ```
 
 `MOUSE_SGR` is mode 1002 in the SGR encoding — button-event tracking, which reports motion while a
 button is held and is what a drag needs. `MOUSE_SGR_ANY` is mode 1003, any-event tracking, which
 reports motion with no button held as well; that is what a hover needs, and it costs a report for
-every cell the pointer travels over. The terminal has one mouse tracking mode and not two, so
-asking for either replaces the other rather than adding to it.
+every cell the pointer travels over. `MOUSE_SGR_CLICKS` is mode 1000, the X10-compatible tracking
+that reports the press and the release and nothing in between; it is kept to be measured rather
+than to be used, since a widget that takes the pointer on press never learns where it went. The
+terminal has one mouse tracking mode and not three, so asking for any of them replaces whichever
+was asked for last rather than adding to it.
+
+What a terminal actually does under 1000 and 1002 is worth checking rather than assuming: some
+report motion with no button held under both. A motion report is therefore not evidence that a
+button is down — read `Events::Mouse#button`. `scripts/caps_check.cr` measures it per terminal and
+`measurements/CAPS.md` records the readings.
 
 A report arrives as `Events::Mouse`, with its coordinates already converted to 0-based buffer
 cells.
@@ -708,7 +717,7 @@ here is renamed, removed, or given a new required argument without the major ver
   `LinkId`.
 * **What a terminal is.** `Capability`, `Capabilities`, `Quirk`, `ScreenSize`, `CursorShape`, and
   `Tty::Mode` with the mode constants beside it — `BRACKETED_PASTE`, `FOCUS_EVENTS`, `MOUSE_SGR`,
-  `MOUSE_SGR_ANY`, `KITTY_KEYBOARD`.
+  `MOUSE_SGR_ANY`, `MOUSE_SGR_CLICKS`, `KITTY_KEYBOARD`.
 * **Talking to the terminal itself.** `ColorStack`, `Clipboard`, `ImageStore`, `Image`,
   `Placement`.
 * **Unicode.** `Unicode.string_width`, `.each_grapheme`, `.graphemes`, `.truncate`, `.ellipsize`,

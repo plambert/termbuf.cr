@@ -8,6 +8,17 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- `Tty::MOUSE_SGR_CLICKS`, mode 1000 in the SGR encoding — the X10-compatible tracking that
+  reports the press and the release and nothing in between. Registered under the same `mouse-sgr`
+  name as `MOUSE_SGR` and `MOUSE_SGR_ANY`, so asking for one replaces whichever was asked for
+  last. No application here wants it: a widget that takes the pointer on press never learns where
+  it went. It is here to be measured, because what a terminal does under 1000 and 1002 when
+  nothing is held down turns out to differ from what the modes are defined as, and a motion report
+  from such a terminal is not evidence that a button is held.
+- The mouse page of `examples/validate.cr` cycles the tracking mode with `m` — clicks (1000),
+  buttons (1002), any (1003), starting on any as before. The mode field names the one on and shows
+  its bytes, and the expected block says what that mode should and should not report, so a
+  terminal that reports motion with nothing held under 1000 or 1002 can be seen doing it.
 - `Terminal#title=` and `Terminal#title`, the window title, written with OSC 2 in order with the
   frames around it. The title the terminal had is saved on its own stack — `CSI 22 ; 0 t` — the
   first time one is set and popped again by `#close`, so a program that renamed a tab does not

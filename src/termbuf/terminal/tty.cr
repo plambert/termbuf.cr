@@ -60,6 +60,25 @@ module TermBuf
     # The terminal reports the window gaining and losing focus.
     FOCUS_EVENTS = Mode.new "focus-events", "\e[?1004h", "\e[?1004l"
 
+    # Mouse reporting in the SGR encoding with mode 1000 — normal tracking,
+    # which reports the press and the release and nothing in between.
+    #
+    # This is the X10-compatible tracking every terminal has had for forty
+    # years, and no application in this shard wants it: a widget that takes
+    # the pointer on press never learns where it went, so nothing can be
+    # dragged. It is here to be measured. What a terminal does under 1000 and
+    # under 1002 when nothing is held down is a property of that terminal, and
+    # one that has been seen to differ from what the mode is defined as — a
+    # terminal that sends motion reports while no button is down makes a
+    # widget reading a motion report as "a button is held" wrong.
+    # `scripts/caps_check.cr` records the answer per terminal, and the mouse
+    # page of `examples/validate.cr` cycles the three modes so it can be
+    # watched.
+    #
+    # Shares the registry name `mouse-sgr` with the two below it; see
+    # `MOUSE_SGR_ANY` for what that means.
+    MOUSE_SGR_CLICKS = Mode.new "mouse-sgr", "\e[?1000h\e[?1006h", "\e[?1006l\e[?1000l"
+
     # Mouse reporting in the SGR encoding, which is the one that can name a
     # column past 223. Both are asked for together, and given back in the
     # reverse order.
@@ -79,7 +98,8 @@ module TermBuf
     # already converted to buffer cells. `Tty#leave` sends the reset.
     #
     # See `MOUSE_SGR_ANY` for the mode that reports motion with no button held
-    # as well.
+    # as well, and `MOUSE_SGR_CLICKS` for the lesser one, which is kept to be
+    # measured rather than to be used.
     MOUSE_SGR = Mode.new "mouse-sgr", "\e[?1002h\e[?1006h", "\e[?1006l\e[?1002l"
 
     # Mouse reporting as `MOUSE_SGR`, but with mode 1003 — any-event tracking,
@@ -92,9 +112,9 @@ module TermBuf
     # to read, decode, and act on, and over ssh it is a hundred packets. An
     # application that only drags wants `MOUSE_SGR`.
     #
-    # The two share the registry name `mouse-sgr`, because the terminal has one
-    # mouse tracking mode and not two: asking for 1003 after 1002 replaces the
-    # tracking rather than adding to it. `Tty#enable` writes a replacement of
+    # All three share the registry name `mouse-sgr`, because the terminal has
+    # one mouse tracking mode and not three: asking for 1003 after 1002
+    # replaces the tracking rather than adding to it. `Tty#enable` writes a replacement of
     # the same name whose bytes differ, so the change reaches the terminal, and
     # `#leave` sends the one reset that belongs to whichever was asked for
     # last.
