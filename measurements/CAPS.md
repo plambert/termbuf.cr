@@ -65,10 +65,11 @@ scripted run should use.
      mode on was answered with a report before anyone moved. Discarded before the reading below.
    + **`mouse_motion_1000`**, **`mouse_motion_1002`**, **`mouse_motion_1003`** — one reading per
      mouse tracking mode. Each turns its mode on, asks for the pointer to be moved across the
-     window for three seconds with nothing pressed, and records `observed` yes when any SGR
-     report arrived in that window, whatever button it named, and no when none did. The buffer is
-     drained first, so the release that followed the click a step earlier is not counted as this
-     window's answer.
+     window for three seconds with nothing pressed, and records `observed` yes when at least
+     three SGR reports arrived in that window, whatever button they named, and no otherwise. One
+     report is what a terminal sends on its own when the mode is turned on; a moving pointer
+     sends dozens. The buffer is drained first, so neither the release that followed the click a
+     step earlier nor the enable's own answer is counted.
    + **title** — pushes the title with `CSI 22 ; 0 t`, sets it with OSC 2, and asks whether the
      window or tab now says so. Pops it with `CSI 23 ; 0 t` afterwards, which is itself worth
      watching: a terminal that takes OSC 2 and has no title stack leaves the new title behind.
