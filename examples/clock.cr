@@ -35,8 +35,27 @@ TermBuf::Terminal.open do |terminal|
         screen.write 4, 5 + offset, line
       end
 
-      screen.write 2, terminal.size.rows - 2, "press q to quit",
-        TermBuf::Style::DEFAULT.faint
+      # An example is a manual test, and the person running it is at the
+      # terminal rather than in the source: what should be happening has to be
+      # on the screen, or there is no telling a working frame from a broken one.
+      faint = TermBuf::Style::DEFAULT.faint
+      rows = terminal.size.rows
+
+      screen.write 2, rows - 6,
+        "expected: the frame number climbs by about 20 a second when nothing is",
+        faint
+      screen.write 2, rows - 5,
+        "pressed, and nothing flickers — the scheduler paints at the 20 fps it was",
+        faint
+      screen.write 2, rows - 4,
+        "started with, and a frame sends the cells that changed, not the screen.",
+        faint
+      screen.write 2, rows - 3,
+        "every key, paste and resize is listed above, newest last; a resize redraws",
+        faint
+      screen.write 2, rows - 2,
+        "at the new size. [q] quits, and prints 'terminal restored' on the way out.",
+        faint
     end
 
     select

@@ -100,6 +100,10 @@ module Validate
       # The swatch, registered the first time it is wanted and reused after.
       @swatch = nil.as(UInt32?)
       @typed = ""
+      # The block at the foot of the page saying what should be on the screen,
+      # wrapped to this frame's window. Held rather than recomputed, because
+      # how tall it is decides how much of the window the page itself gets.
+      @expected = [] of String
       # What the focus page has seen: the last sequence, what it meant, and
       # how many have arrived.
       @focus_bytes = nil.as(String?)
@@ -135,6 +139,11 @@ module Validate
       rebuild = @rebuild
       @rebuild = false
 
+      # Before anything is drawn: the page is given the window less this, and
+      # the edges page — which is the whole window by definition — says what to
+      # expect in the middle of itself instead.
+      @expected = edges? ? [] of String : expected_lines
+
       @terminal.batch do |screen|
         # Only the motion page carries anything over between frames; the rest
         # redraw the same thing, so clearing them costs nothing in bytes.
@@ -145,6 +154,7 @@ module Validate
         else
           draw_chrome screen
           draw_page screen
+          draw_expected screen
         end
 
         draw_arriving screen
@@ -170,8 +180,40 @@ module Validate
       end
     end
 
+    # An example is a manual test, and a test whose answer is only in the
+    # source is one nobody at the terminal can run. Every page says on the
+    # screen what should be on it and what each of its keys should visibly do,
+    # so that working and broken can be told apart by looking.
+    #
+    # "edges" is not here: it is the whole window by definition, and says what
+    # to expect in the middle of itself instead. See `#draw_edge_help`.
+    #
+    # ameba:disable Metrics/CyclomaticComplexity
+    private def expected : Array(String)
+      case PAGES[@page]
+      when "caps"     then expected_caps
+      when "widths"   then expected_widths
+      when "colours"  then expected_colours
+      when "attrs"    then expected_attrs
+      when "motion"   then expected_motion
+      when "keys"     then expected_keys
+      when "focus"    then expected_focus
+      when "mouse"    then expected_mouse
+      when "title"    then expected_title
+      when "cursors"  then expected_cursors
+      when "measured" then expected_measured
+      when "panels"   then expected_panels
+      when "rich"     then expected_rich
+      else                 [] of String
+      end
+    end
+
     private def motion? : Bool
       PAGES[@page] == "motion"
+    end
+
+    private def edges? : Bool
+      PAGES[@page] == "edges"
     end
 
     private def keys? : Bool
@@ -202,8 +244,21 @@ module Validate
       @terminal.size.columns
     end
 
-    private def rows : Int32
+    # The window itself, which the tab bar, the status line and the expected
+    # block are placed against.
+    private def screen_rows : Int32
       @terminal.size.rows
+    end
+
+    # What a page has to draw in: the window, less the block at the foot of it.
+    # Pages count from the bottom as well as the top, and this is what keeps
+    # the ones that do above the block rather than under it.
+    private def rows : Int32
+      screen_rows - expected_height
+    end
+
+    private def expected_height : Int32
+      @expected.empty? ? 0 : @expected.size + 2
     end
 
     # --------------------------------------------------------------- chrome
@@ -226,7 +281,63 @@ module Validate
         column += label.size
       end
 
-      screen.write 1, rows - 1, status.ljust(Math.max(columns - 1, 0)), Style::DEFAULT.faint
+      screen.write 1, screen_rows - 1, status.ljust(Math.max(columns - 1, 0)),
+        Style::DEFAULT.faint
+    end
+
+    # The most of the block that is drawn before it is bigger than the page it
+    # is describing, which would be a poor trade.
+    EXPECTED_LINES = 8
+
+    # Always the same place — the foot of the window, immediately above the
+    # status line — so that a person moving between pages knows where to look
+    # without hunting for it.
+    private def draw_expected(screen) : Nil
+      return if @expected.empty?
+
+      box = Rect.new 0, screen_rows - 1 - expected_height, columns, expected_height
+      return if box.y < 2 || columns < 24
+
+      draw_box screen, box, PLAIN_BOX, Style::DEFAULT.faint, title: "expected"
+
+      @expected.each_with_index do |line, offset|
+        screen.write 2, box.y + 1 + offset, line, Style::DEFAULT.faint
+      end
+    end
+
+    # This page's block, wrapped to the window and cut to what will fit.
+    private def expected_lines : Array(String)
+      lines = [] of String
+      width = Math.max columns - 4, 24
+
+      expected.each { |line| wrap line, width, lines }
+
+      limit = Math.min EXPECTED_LINES, Math.max(screen_rows // 3, 1)
+      return lines if lines.size <= limit
+
+      kept = lines.first limit
+      kept[-1] = "#{Unicode.truncate(kept[-1], Math.max(width - 2, 4))} …"
+      kept
+    end
+
+    # Greedy, on spaces, and on characters rather than columns: the block is
+    # written in ASCII so that the wrapping cannot itself be a thing the
+    # terminal disagrees about.
+    private def wrap(line : String, width : Int32, into : Array(String)) : Nil
+      current = ""
+
+      line.split(' ').each do |word|
+        if current.empty?
+          current = word
+        elsif current.size + 1 + word.size <= width
+          current = "#{current} #{word}"
+        else
+          into << current
+          current = word
+        end
+      end
+
+      into << current unless current.empty?
     end
 
     # *note* once the page has the keyboard, and how to give it the keyboard
@@ -305,6 +416,16 @@ module Validate
     end
 
     # --------------------------------------------------------------- page 1
+
+    private def expected_caps : Array(String)
+      [
+        "shown: what detection read from the environment, then every Capability, + for held and - for not.",
+        "expected: each held name is drawn in what it names, so a bold that is not bold, or a link " \
+        "that does not click, is a claim this terminal does not keep.",
+        "no keys of its own. TERMBUF_CAPS=+true_color,-blink forces a flag either way, and these " \
+        "marks should follow it on the next run.",
+      ]
+    end
 
     private def draw_caps(screen) : Nil
       row = 2
@@ -442,16 +563,31 @@ module Validate
       end
     end
 
+    # What the other pages say in a box above the status line. This page is the
+    # whole window by definition, so a block at the foot of it would cover the
+    # bottom edge it exists to show; it is said in the middle instead, and says
+    # so.
+    #
+    # Hand wrapped rather than run through `#wrap`, because the width it is
+    # wrapped to is the width of the paragraph and not of the screen.
     private def draw_edge_help(screen) : Nil
       lines = [
         {"the whole screen, edge to edge", Style::DEFAULT.bold},
         {"", Style::DEFAULT},
-        {"the box should be closed on all four sides, with #{columns - 1} and", Style::DEFAULT},
-        {"#{rows - 1} as the last column and row on the rulers. A missing top", Style::DEFAULT},
+        {"expected: a box closed on all four sides, with #{columns - 1} and", Style::DEFAULT},
+        {"#{rows - 1} as the last column and row on the rulers. a missing top", Style::DEFAULT},
         {"edge means writing the bottom right cell scrolled the screen.", Style::DEFAULT},
         {"", Style::DEFAULT},
-        {"[1] fill with digits   [2] fill with mixed widths   [ctrl-r] redraw", Style::DEFAULT.faint},
-        {"[tab] page   [q] quit", Style::DEFAULT.faint},
+        {"[1] fills every cell with its column modulo ten, [2] cycles", Style::DEFAULT.faint},
+        {"#{MIXED_FILL[0]}, #{MIXED_FILL[1]} and a four face family across it; either key", Style::DEFAULT.faint},
+        {"again brings the box back. a hole in a fill is a cell this", Style::DEFAULT.faint},
+        {"terminal would not let the buffer reach.", Style::DEFAULT.faint},
+        {"", Style::DEFAULT},
+        {"every other page carries this block above its status line. here", Style::DEFAULT.faint},
+        {"it is in the middle, because a box at the foot of the window", Style::DEFAULT.faint},
+        {"would cover the edge the page is about.", Style::DEFAULT.faint},
+        {"", Style::DEFAULT},
+        {"[tab] page   [ctrl-r] redraw   [q] quit", Style::DEFAULT.faint},
       ]
 
       top = Math.max (rows - lines.size) // 2, 2
@@ -459,7 +595,7 @@ module Validate
       lines.each_with_index do |(text, style), offset|
         next if top + offset >= rows - 1
 
-        screen.write Math.max((columns - 62) // 2, 6), top + offset, text, style
+        screen.write Math.max((columns - 64) // 2, 6), top + offset, text, style
       end
     end
 
@@ -473,13 +609,45 @@ module Validate
         screen.write 0, row, line, Style::DEFAULT.bg(tint).fg(Color.indexed(15))
       end
 
-      screen.write 2, rows // 2, " #{fill_note} ", Style::DEFAULT.reverse.bold
+      draw_fill_note screen
     end
 
-    private def fill_note : String
-      return "every cell is written; press 1 for the box, 2 for the mixed fill" if @fill.digits?
+    # Reverse video rather than a box, and as few lines as the page can be
+    # described in: every cell under them is one the fill is no longer showing,
+    # so the notice that says what to look for is also the one thing in the way
+    # of looking.
+    private def draw_fill_note(screen) : Nil
+      # Cut to the window rather than wrapped: another line is another row of
+      # the fill nobody can see.
+      lines = fill_note.map { |line| Unicode.truncate line, Math.max(columns - 4, 8) }
+      width = lines.max_of &.size
+      top = Math.max rows // 2 - lines.size // 2, 0
 
-      "narrow, wide, composed; press 2 for the box, 1 for digits"
+      lines.each_with_index do |line, offset|
+        next if top + offset >= rows
+
+        screen.write 2, top + offset, " #{line.ljust(width)} ", Style::DEFAULT.reverse
+      end
+    end
+
+    private def fill_note : Array(String)
+      if @fill.digits?
+        return [
+          "every cell holds its own column modulo ten",
+          "expected: no gaps, and every row starting at 0. a hole is a cell",
+          "this terminal would not let the buffer write",
+          "[1] the box again   [2] the mixed fill",
+          "this notice covers the cells behind it",
+        ]
+      end
+
+      [
+        "narrow, wide and a family cluster, cycled",
+        "expected: the row reaches the right edge. one stopping short is a",
+        "terminal adding up a cluster's code points instead of measuring it",
+        "[2] the box again   [1] the digit fill",
+        "this notice covers the cells behind it",
+      ]
     end
 
     # A digit per column, so the row reads as a ruler and any cell the terminal
@@ -548,16 +716,39 @@ module Validate
       note = shown < SAMPLES.size ? "#{SAMPLES.size - shown} more need a taller window; " : ""
       # Without the wrapper, since the row is only so wide.
       rules = policy.to_s.lchop("WidthPolicy(").rchop(')')
-      screen.write 2, rows - 3, "#{note}measured: #{rules}", Style::DEFAULT.faint
-      screen.write 2, rows - 2, widths_note, Style::DEFAULT.faint
+      screen.write 2, rows - 2, "#{note}measured: #{rules}", Style::DEFAULT.faint
     end
 
-    private def widths_note : String
-      "each row is written as one run, so a bar out of line is a cluster this terminal draws " \
-      "wider or narrower than the shard measured it."
+    private def expected_widths : Array(String)
+      [
+        "shown: #{SAMPLES.size} samples, each row written as one run: the width the shard " \
+        "measured, the sample, dots, then a bar.",
+        "expected: every bar in the one column the header points at. a bar out of line is a " \
+        "cluster this terminal draws wider or narrower than the shard measured it, and text after " \
+        "such a cluster lands in the wrong place.",
+        "no keys of its own.",
+      ]
     end
 
     # -------------------------------------------------------------- page 12
+
+    private def expected_measured : Array(String)
+      if @terminal.width_readings.empty?
+        return [
+          "shown: nothing, because the terminal was never asked how wide anything is.",
+          "expected: this page fills in when the program is run on a real terminal with " \
+          "TERMBUF_WIDTHS unset. no keys of its own.",
+        ]
+      end
+
+      [
+        "shown: what the terminal answered when it was asked how wide a cluster is, beside what " \
+        "the width tables say, one row per probe.",
+        "expected: the two columns agree. a row where they differ is red and marked no rule " \
+        "reaches this, and clusters like it will be drawn in the wrong column. a dash under said " \
+        "is a probe the terminal never answered. no keys of its own.",
+      ]
+    end
 
     # What the terminal said when it was asked how wide a cluster is, beside
     # what the width tables would have assumed. A row where the two differ is
@@ -607,6 +798,26 @@ module Validate
     end
 
     # --------------------------------------------------------------- page 4
+
+    private def expected_colours : Array(String)
+      caps = @terminal.capabilities
+      depth = if caps.includes? Capability::TrueColor
+                "24 bit"
+              elsif caps.includes? Capability::Color256
+                "the 256 colour palette"
+              else
+                "16 colours"
+              end
+
+      [
+        "shown: the 16 palette colours numbered, the 216 cube, the 24 greys, a sweep through every " \
+        "hue, and one hue from black to full.",
+        "expected: sixteen blocks that all differ, six bands with no repeat, and a smooth sweep. " \
+        "the last ramp is smooth on a terminal with #{Capability::TrueColor} and visibly stepped " \
+        "when it is being quantized; this one is capped at #{depth}.",
+        "no keys of its own; the colour stack is on the rich page.",
+      ]
+    end
 
     private def draw_colours(screen) : Nil
       caps = @terminal.capabilities
@@ -728,6 +939,18 @@ module Validate
       {"subscript", Capability::Superscript},
     ]
 
+    private def expected_attrs : Array(String)
+      styles = Underline.values.reject(&.none?).join(", ", &.to_s.downcase)
+
+      [
+        "shown: #{ATTRIBUTES.join(", ", &.first)}, each beside whether the capability is held, " \
+        "then the underline styles #{styles}.",
+        "expected: a row marked yes draws the fox differently from a plain one; conceal draws it " \
+        "as nothing and leaves its name; without #{Capability::ExtendedUnderline} every underline " \
+        "style falls back to a single line. no keys of its own.",
+      ]
+    end
+
     private def draw_attrs(screen) : Nil
       screen.write 2, 2, "attribute      capability   sample", Style::DEFAULT.bold
       row = 4
@@ -809,7 +1032,7 @@ module Validate
         @terminal.capabilities.includes?(Capability::ScrollRegion) ? "DECSTBM available" : "no DECSTBM; expect a redraw",
         Style::DEFAULT.faint
 
-      return draw_motion_help screen if @frozen
+      return if @frozen
 
       screen.scroll box, 1
       @log += 1
@@ -819,14 +1042,32 @@ module Validate
       screen.write box.x + 2, bottom,
         "#{@log.to_s.rjust(6)}  #{"█" * bar.to_i}",
         Style::DEFAULT.fg(Color.indexed(1 + @log % 6))
-
-      draw_motion_help screen
     end
 
-    private def draw_motion_help(screen) : Nil
-      screen.write 2, rows - 3,
-        @frozen ? "frozen: the bytes left are the status line, which still changes. [space] to run" : "[space] freeze, and watch the byte count drop to the status line alone",
-        Style::DEFAULT.faint
+    private def expected_motion : Array(String)
+      held = @terminal.capabilities.includes? Capability::ScrollRegion
+
+      lines = [
+        "shown: a full width region; a numbered line and a bar arrive at the bottom of it every " \
+        "frame and the rest slide up.",
+      ]
+
+      lines << if held
+        "expected: with #{Capability::ScrollRegion} the last paint in the status line " \
+        "stays in the tens of bytes however fast the log runs — one scroll and one row."
+      else
+        "expected: no #{Capability::ScrollRegion} here, so every frame redraws the whole " \
+        "region and the last paint in the status line is a screenful."
+      end
+
+      lines << if @frozen
+        "frozen: nothing moves, and the last paint is the status line alone. [space] " \
+        "runs it again."
+      else
+        "[space] freezes the log, and the last paint should fall to the status line alone."
+      end
+
+      lines
     end
 
     # --------------------------------------------------------------- page 7
@@ -846,11 +1087,27 @@ module Validate
       @presses.last(room).each_with_index do |line, offset|
         screen.write 2, 4 + offset, line
       end
+    end
 
-      screen.write 2, rows - 3,
-        "everything pressed here is listed, except tab, shift-tab, ctrl-r and q, " \
-        "which act. paste to see the notice.",
-        Style::DEFAULT.faint
+    private def expected_keys : Array(String)
+      pasteable = @terminal.capabilities.includes? Capability::BracketedPaste
+
+      lines = [
+        "shown: every key pressed here, as the decoder named it and as the bytes that arrived. " \
+        "the list is emptied on every visit.",
+        "expected: one line per press, and a modified key named rather than left as its bytes. " \
+        "[tab], [shift-tab], [ctrl-r] and [q] act instead of being listed; everything else is.",
+      ]
+
+      lines << if pasteable
+        "paste something: it arrives as one paste line with its byte count, and a paste " \
+        "slow enough to notice draws a pasting… notice first."
+      else
+        "no #{Capability::BracketedPaste} here: a paste arrives as the keys it is made " \
+        "of, one line each."
+      end
+
+      lines
     end
 
     # ---------------------------------------------------------------- page 8
@@ -875,11 +1132,27 @@ module Validate
       field screen, 7, "state", @focus_state || "nothing has arrived"
       field screen, 8, "raw", @focus_bytes.try(&.inspect) || "—"
       field screen, 9, "reports", @focus_count.to_s
+    end
 
-      screen.write 2, rows - 3,
-        "click another window and click back, or press command-tab away and back. " \
-        "a terminal that reports focus sends CSI I and CSI O.",
-        Style::DEFAULT.faint
+    private def expected_focus : Array(String)
+      claimed = @terminal.capabilities.includes? Capability::FocusEvents
+
+      lines = [
+        "shown: the mode this page turns on while it shows, the patterns registered for the two " \
+        "replies, and the last one to arrive.",
+        "expected: switch away from this window and back — by clicking another one, or with " \
+        "command-tab. raw reads \"\\e[O\" then \"\\e[I\", state reads focus out then focus in, " \
+        "and reports counts up by one each time.",
+      ]
+
+      lines << if claimed
+        "no keys of its own; leaving this page turns the mode off again."
+      else
+        "#{Capability::FocusEvents} is not detected on this terminal: expect nothing to " \
+        "arrive and the three lines to stay as they are. no keys of its own."
+      end
+
+      lines
     end
 
     # ---------------------------------------------------------------- page 9
@@ -904,22 +1177,36 @@ module Validate
       report = @mouse
       unless report
         field screen, 7, "event", "nothing has arrived"
-        return draw_mouse_help screen
+        return
       end
 
       field screen, 7, "button", report.button.to_s
       field screen, 8, "action", report.action.to_s
       field screen, 9, "at", "#{report.x}, #{report.y}"
       field screen, 10, "modifiers", report.modifiers.none? ? "none" : report.modifiers.to_s
-
-      draw_mouse_help screen
     end
 
-    private def draw_mouse_help(screen) : Nil
-      screen.write 2, rows - 3,
-        "click, drag and scroll anywhere on this page. selecting text with the " \
-        "mouse stops working while the mode is on, and starts again on the next page.",
-        Style::DEFAULT.faint
+    private def expected_mouse : Array(String)
+      claimed = @terminal.capabilities.includes? Capability::MouseSgr
+
+      unless claimed
+        return [
+          "shown: the mode this page turns on, the bytes the terminal sends, and the event decoded " \
+          "from them.",
+          "#{Capability::MouseSgr} is not detected on this terminal: expect raw and event to stay " \
+          "as they are however much you click. no keys of its own.",
+        ]
+      end
+
+      [
+        "shown: the bytes of the last mouse report, and the event decoded from them: two different " \
+        "claims.",
+        "expected: click and button, action Press, at and modifiers fill in; let go and action " \
+        "reads Release; drag with a button held reads Motion; the wheel gives WheelUp and " \
+        "WheelDown; shift or alt shows in modifiers.",
+        "no keys of its own; selecting text with the mouse stops working here and works again on " \
+        "the next page.",
+      ]
     end
 
     # --------------------------------------------------------------- page 10
@@ -941,11 +1228,27 @@ module Validate
       field screen, 4, "asked for", @terminal.title.try(&.inspect) || "nothing"
       field screen, 5, "saved with", TermBuf::Terminal::TITLE_STACK.set.inspect
       field screen, 6, "given back", TermBuf::Terminal::TITLE_STACK.reset.inspect
+    end
 
-      screen.write 2, rows - 3,
-        "look at the window's title bar, or at its tab. [t] asks for the other title, " \
-        "and leaving this page puts the terminal's own back.",
-        Style::DEFAULT.faint
+    private def expected_title : Array(String)
+      claimed = @terminal.capabilities.includes? Capability::Titles
+      other = TITLES[(@titled + 1) % TITLES.size]
+
+      unless claimed
+        return [
+          "shown: the title asked for and the two sequences that save and restore it.",
+          "#{Capability::Titles} is not detected on this terminal: nothing is sent and the window " \
+          "keeps whatever it was called. [t] changes the line above and nothing else.",
+        ]
+      end
+
+      [
+        "shown: the title asked for and the two sequences that save and restore it. nothing on " \
+        "this screen changes when the title does — look at the window's title bar, or at its tab.",
+        "expected: it reads #{TITLES[@titled].inspect} now. [t] asks for #{other.inspect} and the " \
+        "title bar changes to it.",
+        "leaving this page, or quitting, puts the title the terminal had before back.",
+      ]
     end
 
     # A label and a value on one row, which is the shape all three of the
@@ -977,11 +1280,30 @@ module Validate
       draw_pane_border screen, pane
       stream screen, pane
       draw_escape_samples screen, pane.bottom + 2
+    end
 
-      screen.write 2, rows - 3,
-        "everything but tab and q is typed, pasted text included   " \
-        "[tab] next page   [q] quit",
-        Style::DEFAULT.faint
+    private def expected_cursors : Array(String)
+      shaped = @terminal.capabilities.includes? Capability::CursorShape
+      blink = @terminal.cursor_blink? ? "blinking" : "steady"
+
+      lines = [
+        "shown: the typed text streaming into the pane with the terminal's own cursor after it, " \
+        "and one escape carrying string down two cursors: scanned styles its words, raw prints " \
+        "the same bytes as text.",
+        "expected: the cursor sits where the next character will appear, wrapping at the pane's " \
+        "edge and scrolling at its foot. [enter] takes the keyboard, [esc] gives it back, and " \
+        "between them every key is typed, a paste included.",
+      ]
+
+      lines << if shaped
+        "[s] cycles #{CursorShape.values.join(", ")} (#{@terminal.cursor_shape} now) and " \
+        "[b] the blink (#{blink}); both act only before [enter]."
+      else
+        "no #{Capability::CursorShape} here: [s] and [b] send nothing and the cursor " \
+        "keeps the shape the terminal is configured for."
+      end
+
+      lines
     end
 
     private def draw_pane_border(screen, pane : Rect) : Nil
@@ -1056,6 +1378,18 @@ module Validate
     end
 
     # -------------------------------------------------------------- page 13
+
+    private def expected_panels : Array(String)
+      [
+        "shown: three rows drawn through views, a box that clips, and a half filled bar with a " \
+        "label across the join.",
+        "expected: the highlight runs the middle row's whole width though neither write passes a " \
+        "background; nothing inside the box crosses its border; a wide glyph the last cell cannot " \
+        "hold is dropped, as is one the left edge would halve; a fill blanks the glyph it lands " \
+        "inside.",
+        "the label keeps each cell's own colour as it crosses the caret. no keys of its own.",
+      ]
+    end
 
     # Clipping, a view's own style, and a background that varies under text.
     # A row that reads right proves all three: the bar is painted once, the
@@ -1166,10 +1500,40 @@ module Validate
       draw_rich_links screen, caps
       draw_rich_colors screen, caps
       draw_rich_image screen, caps
+    end
 
-      screen.write 2, rows - 2,
-        "[c] push a tint  [C] pop  [i] place images, then cascade  [x] clear them",
-        Style::DEFAULT.faint
+    # Three capabilities, and a line for each saying what it should do here or
+    # what its absence means, since this page reads differently on every
+    # terminal and a person cannot be expected to know which one they are on.
+    private def expected_rich : Array(String)
+      caps = @terminal.capabilities
+
+      lines = ["shown: an OSC 8 link, the kitty colour stack, and kitty graphics."]
+
+      lines << if caps.includes? Capability::Osc8Links
+        "expected: the two blue phrases are one link; clicking either opens the docs."
+      else
+        "no #{Capability::Osc8Links} here: no link is drawn."
+      end
+
+      lines << if caps.includes? Capability::KittyColorStack
+        "[c] pushes: the terminal's background becomes the next tint, marked ## here. " \
+        "[C] pops back to the tint under it, and at depth 0 to the terminal's own."
+      else
+        "no #{Capability::KittyColorStack} here: [c] and [C] send nothing and the " \
+        "background does not change."
+      end
+
+      lines << if caps.includes? Capability::KittyGraphics
+        "[i] places the swatch over the text on the left and under it on the right, then " \
+        "one more per press stepping #{CASCADE[0]} right and #{CASCADE[1]} down, " \
+        "#{CASCADE_LIMIT} at most; [x] clears them."
+      else
+        "no #{Capability::KittyGraphics} here: [i] and [x] place nothing."
+      end
+
+      lines << "quitting pops any tint and deletes any image, so the terminal is as it was."
+      lines
     end
 
     private def draw_rich_links(screen, caps) : Nil
@@ -1435,11 +1799,18 @@ module Validate
       case key.char
       when '1' then @fill = @fill.digits? ? Fill::None : Fill::Digits
       when '2' then @fill = @fill.mixed? ? Fill::None : Fill::Mixed
-      when ' ' then @frozen = !@frozen
+      when ' ' then toggle_frozen
       when 's' then cycle_cursor_shape if cursors?
       when 'b' then toggle_cursor_blink if cursors?
       when 't' then retitle if title?
       end
+    end
+
+    # The page it says something about does not clear between frames, so the
+    # line that changes has to say that it changed.
+    private def toggle_frozen : Nil
+      @frozen = !@frozen
+      @rebuild = true
     end
 
     # The next shape round, which is how a person sees that a shape asked for
