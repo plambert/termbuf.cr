@@ -1,4 +1,4 @@
-# date	2026-09-06 01:46:33
+# date	2026-09-10 13:11:53
 # term	tmux-256color
 # term_program	tmux
 # term_program_version	3.7c
@@ -16,8 +16,16 @@ bracketed_paste	decrqm	yes
 focus_events	decrqm	yes
 mouse_sgr	decrqm	yes
 cursor_shape	table	yes
-titles	table	yes
+titles	table	no
+focus_report_on_enable	observed	no
 focus_events	observed	no
-mouse_sgr	observed	no
-titles	asked	skipped
+mouse_report_on_enable	observed	no
+mouse_sgr	observed	yes
+mouse_report_on_enable_1000	observed	yes
+mouse_motion_1000	observed	no
+mouse_report_on_enable_1002	observed	no
+mouse_motion_1002	observed	no
+mouse_report_on_enable_1003	observed	yes
+mouse_motion_1003	observed	yes
+titles	asked	no
 cursor_shape	asked	yes
