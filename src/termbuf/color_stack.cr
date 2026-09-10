@@ -23,7 +23,6 @@ module TermBuf
   # `Terminal#close` pops whatever is still pushed, so an application that
   # forgets, or that stops on a signal, still gives the terminal back.
   class ColorStack
-    CSI = "\e["
     OSC = "\e]"
     ST  = "\e\\"
 
@@ -41,12 +40,20 @@ module TermBuf
       @capabilities.includes? Capability::KittyColorStack
     end
 
+    # What kitty's colour stack listens for: `OSC 30001 ST` saves, `OSC 30101
+    # ST` restores. These are the sequences the capability is named for. xterm
+    # later took the idea with `CSI # P` and `CSI # Q`, and kitty accepts those
+    # too on paper, but kitty 0.48.2 was seen to ignore the xterm form and
+    # answer its own.
+    PUSH = "#{OSC}30001#{ST}"
+    POP  = "#{OSC}30101#{ST}"
+
     # Saves the terminal's current colours so `#pop` can put them back.
     def push : Nil
       return unless available?
 
       @depth += 1
-      write "#{CSI}#P"
+      write PUSH
     end
 
     # Restores the colours saved by the matching `#push`. Does nothing when
@@ -57,7 +64,7 @@ module TermBuf
       return if @depth.zero?
 
       @depth -= 1
-      write "#{CSI}#Q"
+      write POP
     end
 
     # Pops everything this object pushed.

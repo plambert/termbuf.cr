@@ -1302,7 +1302,7 @@ Spectator.describe TermBuf::Terminal do
         harness.terminal.paint
 
         written = harness.drain
-        expect(written).to contain "\e[#P"
+        expect(written).to contain "\e]30001\e\\"
         expect(written).to contain "\e]11;rgb:14/1e/28\e\\"
       end
     end
@@ -1318,7 +1318,7 @@ Spectator.describe TermBuf::Terminal do
 
       harness.terminal.close
 
-      expect(harness.drain.scan("\e[#Q").size).to eq 2
+      expect(harness.drain.scan("\e]30101\e\\").size).to eq 2
     end
 
     it "says nothing on a terminal without the stack" do
@@ -1328,7 +1328,7 @@ Spectator.describe TermBuf::Terminal do
         harness.terminal.colors.background = TermBuf::Color::RED
         harness.terminal.paint
 
-        expect(harness.drain).not_to contain "\e[#P"
+        expect(harness.drain).not_to contain "\e]30001"
       end
     end
   end

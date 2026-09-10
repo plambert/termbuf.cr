@@ -421,6 +421,14 @@ All notable changes to this project are documented here. The format follows
   `examples/validate.cr` went with it; the boxes the remaining pages draw are drawn by the example
   itself now.
 
+### Fixed
+
+- `ColorStack#push` and `#pop`, and the pop `Terminal#close` sends for anything still pushed, now
+  use kitty's own `OSC 30001` and `OSC 30101` rather than xterm's `CSI # P` and `CSI # Q`. The
+  capability is `KittyColorStack` and is claimed for kitty alone, and kitty 0.48.2 was seen to
+  ignore the xterm form: a tint set after a push stayed after the pop, and stayed after the program
+  had gone. Seen on 2026-09-10 on the colours page of `examples/validate.cr`.
+
 ## [0.2.1] - 2026-09-02
 
 ### Added

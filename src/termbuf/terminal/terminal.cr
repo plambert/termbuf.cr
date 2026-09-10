@@ -912,7 +912,7 @@ module TermBuf
       stack = @colors
 
       if stack && stack.depth > 0
-        @tty.output << "\e[#Q" * stack.depth
+        @tty.output << ColorStack::POP * stack.depth
         @tty.flush rescue nil
       end
 

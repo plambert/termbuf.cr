@@ -20,7 +20,7 @@ Spectator.describe TermBuf::ColorStack do
 
       made.pop
       expect(made.depth).to eq 1
-      expect(written.to_s).to eq "\e[#P\e[#P\e[#Q"
+      expect(written.to_s).to eq "\e]30001\e\\\e]30001\e\\\e]30101\e\\"
     end
 
     # An extra pop would walk off the end of a stack something else was using.
@@ -38,7 +38,7 @@ Spectator.describe TermBuf::ColorStack do
       made.pop_all
 
       expect(made.depth).to eq 0
-      expect(written.to_s.scan("\e[#Q").size).to eq 3
+      expect(written.to_s.scan("\e]30101\e\\").size).to eq 3
     end
 
     it "puts the colours back however the block ends" do
