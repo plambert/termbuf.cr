@@ -75,6 +75,16 @@ module CapsCheck
   # A press: an SGR report ending in `M` whose button field has no motion bit.
   MOUSE_PRESS = /\e\[<(\d+);\d+;\d+M/
 
+  # A release: an SGR report ending in `m`. The button field names which
+  # button came up, and the click step waits for one before it ends.
+  MOUSE_RELEASE = /\e\[<\d+;\d+;\d+m/
+
+  # How long the person is given to read "hold the pointer still" and stop
+  # moving before a tracking mode is turned on. Without it the enable's own
+  # answer is whatever the pointer was doing a moment earlier, which is a
+  # reading of the previous step rather than of the enable.
+  SETTLE = 1.second
+
   # How many reports a pointer moving for the window must produce before the
   # terminal is credited with reporting motion. One report is what a terminal
   # sends on its own when the mode is turned on; a moving pointer sends dozens.
@@ -218,6 +228,11 @@ module CapsCheck
     # (ghostty sends the pointer's position as a motion report). That is
     # recorded on its own row and drained, and the reading proper wants a
     # press: a report with the motion bit clear.
+    #
+    # The release is waited for too, and the step is not over until it comes.
+    # A person holds a button down for far longer than the next step's drain,
+    # so a release left behind here arrives during the step that follows and
+    # is read there as that mode's answer to its own enable.
     private def check_mouse : Nil
       say "2. Mouse reporting. Click once anywhere in this window. " \
           "(up to #{PATIENCE.total_seconds.to_i} s; q skips)"
@@ -229,10 +244,13 @@ module CapsCheck
       say "   the enable itself was answered with #{on_enable.inspect}" if on_enable
 
       seen = wait_for_press
+      released = seen ? wait_for(MOUSE_RELEASE) : nil
       @tty.write TermBuf::Tty::MOUSE_SGR.reset
       @tty.flush
 
       say seen ? "   saw #{seen.inspect}" : "   no press arrived"
+      say "   and the release #{released.inspect}" if released
+      say "   no release arrived; the next reading may see it" if seen && !released
       say ""
       @rows << Row.new "mouse_report_on_enable", "observed", on_enable ? "yes" : "no"
       @rows << Row.new "mouse_sgr", "observed", seen ? "yes" : "no"
@@ -262,22 +280,32 @@ module CapsCheck
     # The window is fixed rather than patient: what is being measured is what
     # three seconds of pointer movement produces, so nothing arriving is a
     # reading and not a timeout.
+    #
+    # The mode is turned on while the pointer is held still, and the movement
+    # is asked for only after the enable's grace has run out. Turning a mode
+    # on under a pointer that is already moving makes the movement's first
+    # report the enable's answer, which is how every terminal came to look as
+    # though it answered mode 1003.
     private def check_motion(step : Int32, mode_number : String, mode : TermBuf::Tty::Mode) : Nil
-      say "#{step}. Motion under mode #{mode_number}. Move the pointer across the window for " \
-          "#{MOTION_WINDOW.total_seconds.to_i} seconds without pressing anything."
+      say "#{step}. Motion under mode #{mode_number}. Hold the pointer still."
 
-      # The release that followed the click a step ago is still in the buffer,
-      # and reading it here would be this window's answer.
+      # Long enough for the line to be read and the pointer to come to rest,
+      # and then whatever it sent on the way there is thrown away. Both have
+      # to happen before the mode goes on, or the enable's grace measures the
+      # last of the movement instead of the enable.
+      sleep SETTLE
       drain
 
       @tty.write mode.set
       @tty.flush
 
-      # The enable's own answer, if any, is not motion.
+      # The enable's own answer, if any, is not motion: nothing is moving yet.
       on_enable = wait_for MOUSE_REPORT, ENABLE_GRACE
       drain
       say "   the enable itself was answered with #{on_enable.inspect}" if on_enable
 
+      say "   now move the pointer across the window for " \
+          "#{MOTION_WINDOW.total_seconds.to_i} seconds without pressing anything."
       reports = collect MOUSE_REPORT, MOTION_WINDOW
       @tty.write mode.reset
       @tty.flush
