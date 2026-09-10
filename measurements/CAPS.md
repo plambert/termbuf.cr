@@ -60,16 +60,21 @@ scripted run should use.
      whose button field has the motion bit clear. Recorded as `observed` the same way. A terminal
      may answer the enable itself with a report (ghostty sends the pointer's position as a motion
      report, button field 34); that goes on its own row, `mouse_report_on_enable`, and is
-     discarded before the reading.
+     discarded before the reading. The step then waits for the matching release — an SGR report
+     ending in `m` — and only then ends. A person holds a button down for longer than the next
+     step's drain, so a release left here would arrive during the step that follows and be read
+     there as that mode's answer to its own enable.
    + **`mouse_report_on_enable_1000`**, **`_1002`**, **`_1003`** — whether turning that tracking
      mode on was answered with a report before anyone moved. Discarded before the reading below.
    + **`mouse_motion_1000`**, **`mouse_motion_1002`**, **`mouse_motion_1003`** — one reading per
-     mouse tracking mode. Each turns its mode on, asks for the pointer to be moved across the
-     window for three seconds with nothing pressed, and records `observed` yes when at least
-     three SGR reports arrived in that window, whatever button they named, and no otherwise. One
-     report is what a terminal sends on its own when the mode is turned on; a moving pointer
-     sends dozens. The buffer is drained first, so neither the release that followed the click a
-     step earlier nor the enable's own answer is counted.
+     mouse tracking mode. Each says **hold the pointer still**, waits a second for that to be
+     true, drains, turns its mode on, and gives the enable its grace to answer; only then does it
+     say **now move it for three seconds**, and it records `observed` yes when at least three SGR
+     reports arrived in that window, whatever button they named, and no otherwise. One report is
+     what a terminal sends on its own when the mode is turned on; a moving pointer sends dozens.
+     Enabling a mode under a pointer that is already moving makes the movement's first report the
+     enable's answer, which is what the still pointer is for: the on-enable row measures the
+     enable rather than the tail of the step before.
    + **title** — pushes the title with `CSI 22 ; 0 t`, sets it with OSC 2, and asks whether the
      window or tab now says so. Pops it with `CSI 23 ; 0 t` afterwards, which is itself worth
      watching: a terminal that takes OSC 2 and has no title stack leaves the new title behind.
@@ -133,7 +138,7 @@ apart:
 | environment | version | directory | notes |
 |---|---|---|---|
 | Ghostty | 1.3.2 | `ghostty` | expected to answer everything |
-| Terminal.app | 2.15 (build 470.2) | `terminal` | answers no DECRQM at all; the table is all there is |
+| Terminal.app | 2.15 (build 470.2) | `apple-terminal-470.2` | answers no DECRQM at all; the table is all there is |
 | kitty | 0.48.2 | `kitty` | answers DECRQM, silent on DECRQSS |
 | iTerm2 | 3.6.11 | `iterm2` | Automation approval needed the first time |
 | `tmux` | 3.7c | `tmux` | `tmux -L termbuf -f /dev/null new-session -- /tmp/caps_check` |
@@ -142,7 +147,8 @@ apart:
 
 A multiplexer answers for itself and never asks the terminal underneath — that is what the width
 survey found, and it is the reason both are in the list. A focus report has to cross two
-implementations to reach the application, and either of them can drop it.
+implementations to reach the application, and either of them can drop it, and which multiplexer
+it is turns out to matter: `tmux` forwards a click and `screen` 4.00.03 does not.
 
 Private sockets and session names, no config files, and never type into a window this procedure
 did not create. The rules of engagement in `SURVEY.md` apply here unchanged.
@@ -155,56 +161,87 @@ modern does not honour one of them, the capability comes out of the preset and l
 
 ## Results
 
-Seven runs on 2026-09-06, one per directory beside this file: `ghostty`, `kitty`, `iterm2`,
-`terminal`, `tmux`, `screen-4.00.03` and `screen-5.0.2`. Those are the names the runs themselves
-used, and each holds the `caps.tsv` the instrument wrote.
+Seven runs on 2026-09-10, one per directory beside this file: `ghostty`, `kitty`, `iterm2`,
+`apple-terminal-470.2`, `tmux`, `screen-4.00.03` and `screen-5.0.2`. Each holds the `caps.tsv` the
+instrument wrote. This is the second round: the first, on 2026-09-06, asked for a focus report
+without requiring a focus out first and asked for a click under mode 1000, and both questions were
+put again here.
 
-Each cell is what the person or the mode reporter saw, and then what the shard had concluded
-before anyone looked. The seven FocusEvents readings were taken before the focus step required
-a focus out followed by a focus in; on 2026-09-10 ghostty was seen to answer the enable itself
-with `CSI I`, which the old step counted. Those cells need a second run.
+Every cell is what was watched. The last four columns are readings of behaviour that nothing
+claims either way: the three tracking modes with nothing held down, and which enables the terminal
+answered with a report of its own.
 
-| terminal | FocusEvents | MouseSgr | Titles | CursorShape | 1000 | 1002 | 1003 |
-|---|---|---|---|---|---|---|---|
-| ghostty 1.3.2 | yes, DECRQM agreed | yes, DECRQM agreed | yes, table agreed | yes, DECRQSS agreed | — | — | — |
-| kitty 0.48.2 | yes, DECRQM agreed | yes, DECRQM agreed | yes, table agreed | yes, DECRQSS agreed | — | — | — |
-| iTerm2 3.6.11 | yes, DECRQM agreed | yes, DECRQM agreed | yes, table agreed | yes, DECRQSS agreed | — | — | — |
-| Terminal.app 470.2 | yes, table said no | yes, table said no | yes, table said no | yes, table said no | — | — | — |
-| `tmux` 3.7c | no, DECRQM said yes | no, DECRQM said yes | skipped | yes, table agreed | — | — | — |
-| `screen` 4.00.03 | no, table said yes | no, table said yes | no, table said yes | no, table said yes | — | — | — |
-| `screen` 5.0.2 | no, table said yes | yes, table agreed | yes, table agreed | yes, table agreed | — | — | — |
+| terminal | FocusEvents | MouseSgr | Titles | CursorShape | 1000 | 1002 | 1003 | answered the enable |
+|---|---|---|---|---|---|---|---|---|
+| ghostty 1.3.2 | yes | yes | yes | yes | no | **yes** | yes | focus, mouse, 1002 |
+| kitty 0.48.2 | yes | yes | yes | yes | no | no | yes | none |
+| iTerm2 3.6.11 | yes | yes | yes | yes | no | no | yes | none |
+| Terminal.app 470.2 | yes | yes | yes | yes | no | no | yes | none |
+| `tmux` 3.7c | no | yes | no | yes | no | no | yes | none |
+| `screen` 4.00.03 | no | no | no | no | no | no | no | none |
+| `screen` 5.0.2 | no | yes | yes | yes | no | no | yes | none |
 
-The last three columns are the `mouse_motion_*` readings: whether the terminal reported anything
-while the pointer moved with nothing held. All seven runs predate the rows, so every cell is `—`;
-they fill in the next time the instrument is run. A `yes` under 1000 or 1002 there means a motion
-report from that terminal is not evidence a button is held, and a consumer has to read
-`Events::Mouse#button` rather than infer it.
-
-Three things came out of that, and all three are now in the code.
+Where the shard's own conclusion differed from the reading: Terminal.app's table said no to all
+four and every one of them was watched working; `tmux` answered `?1004;1$y` and `?1006;1$y`, and
+only the click arrived; both `screen` builds are credited by the table with everything the
+terminal underneath has, and 4.00.03 delivered none of it. The three current terminals agreed with
+their tables everywhere.
 
 **`Capabilities::MODERN` keeps all four.** On the three terminals with nothing in the way, every
 one of the four was watched working and every query that could be asked agreed with the table.
-There was nothing to prune.
+There is nothing to prune.
 
-**Terminal.app gains all four.** It answers no DECRQM, no DECRQSS and no XTGETTCAP, so the table
-was the only evidence there was, and the table was wrong four times out of four: mode 1004 sent a
-focus report, mode 1006 reported a click, OSC 2 renamed the window, and DECSCUSR changed the
-cursor. `EnvironmentDetector::APPLE_TERMINAL_WATCHED` is those four.
+**Terminal.app gains all four, unchanged from the first round.** It answers no DECRQM, no DECRQSS
+and no XTGETTCAP, so the table was the only evidence there was, and the table was wrong four times
+out of four: mode 1004 sent a focus report out and back in, mode 1002 with SGR encoding reported a
+click, OSC 2 renamed the window, and DECSCUSR changed the cursor.
+`EnvironmentDetector::APPLE_TERMINAL_WATCHED` is those four.
 
-**A multiplexer loses focus, the mouse and the title.** `EnvironmentDetector::THROUGH_MULTIPLEXER`
-takes `FocusEvents`, `MouseSgr` and `Titles` off alongside the kitty protocols. `tmux` answered
-`?1004;1$y` and `?1006;1$y` — it implements both modes — and forwarded neither, because
-`focus-events` and `mouse` default off, and the title question was skipped because `set-titles`
-does too. That is the shape of the thing: a multiplexer answers for the mode it knows rather than
-for what it passes on. So `Prober#probe` now takes a set of capabilities to distrust, named by
-`EnvironmentDetector.distrusted`, and a mode report saying *yes* for one of them is recorded as
-answered and adds nothing. A report saying *no* is still trusted, since nothing forwards a mode it
-does not know, and 2026, 2027 and 2004 stay trusted outright: a multiplexer implements those on
-its own account, and synchronized output through `tmux` 3.7c was watched working.
+**A multiplexer loses focus and the title; only `screen` loses the mouse.** `focus-events` and
+`set-titles` ship off in `tmux` 3.7c and neither reached the application, and neither `screen`
+build sent a focus report; `screen` 4.00.03 set no title either. That is
+`EnvironmentDetector::THROUGH_MULTIPLEXER`. The mouse is the reversal: asked under mode 1002 rather
+than mode 1000, `tmux` forwarded the click, so `MouseSgr` stays through `tmux` and comes off under
+`screen` alone, which is `EnvironmentDetector::THROUGH_SCREEN` — applied when `STY` is set or
+`TERM` starts with `screen`. The distrust set follows the same split: under `tmux` a present
+`?1006;1$y` is believed again and only 1004 is distrusted, and under `screen`, which answers no
+DECRQM of its own, both stay distrusted.
 
 `CursorShape` stays through a multiplexer. DECSCUSR reached the terminal through `tmux` and
 through `screen` 5.0.2, and `screen` 4.00.03 swallowing it costs nothing anyone can see —
 `Terminal#cursor_shape=` writes the sequence and reads nothing back.
+
+### ghostty reports motion nobody asked for
+
+Two readings, and both are ghostty on its own.
+
+Under mode 1002 it reports movement with nothing held: 1002 is defined as motion *while a button
+is held*, and ghostty treats it as 1003. No other terminal in the seven does. And it answers the
+enable of a mouse mode with a report of its own — the pointer's current position, sent the moment
+the mode goes on, with a button field of 34: bit 32, the motion bit, over button 2.
+
+A consumer reading `Events::Mouse#button` sees a right button in a motion report, which is a
+right-button drag. Nothing was pressed. That is worth reporting upstream against ghostty
+1.3.2-main; termbuf does not yet guard against it, so an application that treats a motion report
+as evidence of a drag will drag things nobody grabbed, on ghostty, under a mode that should send
+nothing at all.
+
+### Two cells that measure the instrument
+
+`mouse_report_on_enable_1000` says yes on ghostty, kitty, iTerm2, `tmux` and `screen` 5.0.2, and
+that is the instrument rather than the terminal. The click step ended at the press, and a person
+holds a button down for longer than the next step's 20 ms drain, so the release arrived inside
+mode 1000's enable grace and was recorded as the enable's answer.
+
+`mouse_report_on_enable_1003` says yes everywhere it says anything, for the same kind of reason:
+the pointer was still moving from the step before when 1003 went on, so the movement's first
+report landed in the grace window.
+
+**Both cells are void in this round's files.** The instrument has been fixed — the click step now
+waits for the release, and each tracking step turns its mode on under a pointer held still — and
+the next run measures the enable. What survives from these runs is the mouse enable in the click
+step and the 1002 enable, where only ghostty answered, and the focus enable, where only ghostty
+sent a `CSI I` of its own.
 
 ### The two `screen` builds
 
@@ -218,8 +255,9 @@ configuration that does forward them says so:
 export TERMBUF_CAPS=+focus_events,+mouse_sgr,+titles
 ```
 
-The same line is the answer for a `tmux` with `focus-events on`, `mouse on` and `set-titles on`.
+The same line is the answer for a `tmux` with `focus-events on` and `set-titles on`; `mouse_sgr`
+is already there without it.
 
-The instrument itself is unchanged and still records the raw answer: `scripts/caps_check.cr` calls
-`Prober` without a distrust set, so a future run under a multiplexer will go on reporting
-`focus_events decrqm yes` where the shard concludes no. That is the reading the file is for.
+The instrument itself records the raw answer: `scripts/caps_check.cr` calls `Prober` without a
+distrust set, so a run under a multiplexer goes on reporting `focus_events decrqm yes` where the
+shard concludes no. That is the reading the file is for.
