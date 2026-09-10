@@ -10,8 +10,13 @@
 # Neither is the same as having watched the thing happen: a terminal can know
 # what mode 1004 is and never send a focus report, and there is no query at all
 # for the window title. So this asks what can be asked and then asks the person
-# at the keyboard about the rest — one command per terminal, four questions,
+# at the keyboard about the rest — one command per terminal, seven readings,
 # and a row of TSV for each answer.
+#
+# Three of those seven are not about a capability at all. They ask what the
+# terminal reports under each of the three mouse tracking modes while nothing
+# is held down, because 1000 and 1002 are defined to report nothing there and
+# not every terminal obeys.
 #
 # It needs a real terminal at both ends and someone in front of it. Nothing
 # here goes through `Terminal`: the modes are written straight to the device,
@@ -34,6 +39,12 @@ module CapsCheck
   # and back is slower than it sounds when a prompt has just been read.
   PATIENCE = 45.seconds
 
+  # How long the pointer is watched under each tracking mode. This one is not
+  # patience: it is the length of the window the reading is about, so it ends
+  # whether or not anything arrived, and it is short because there are three
+  # of them in a row.
+  MOTION_WINDOW = 3.seconds
+
   # One reading: what was asked about, how it was asked, and what came back.
   record Row, capability : String, method : String, result : String
 
@@ -55,6 +66,16 @@ module CapsCheck
 
   # An SGR mouse report: `CSI < button ; column ; row` and a final M or m.
   MOUSE_REPORT = /\e\[<\d+;\d+;\d+[Mm]/
+
+  # The three mouse tracking modes, and what to call the row each one leaves
+  # behind. 1000 reports the press and the release, 1002 adds motion while a
+  # button is held, 1003 reports every movement; the reading is what arrives
+  # under each while nothing at all is held down.
+  TRACKING = [
+    {"1000", TermBuf::Tty::MOUSE_SGR_CLICKS},
+    {"1002", TermBuf::Tty::MOUSE_SGR},
+    {"1003", TermBuf::Tty::MOUSE_SGR_ANY},
+  ]
 
   # What the title is set to while the question is on screen. Distinctive
   # enough that a person can say whether it is the one they are looking at.
@@ -124,22 +145,26 @@ module CapsCheck
       end
     end
 
-    # The four questions no query settles, in the order that leaves the
-    # terminal least disturbed if somebody walks away half way through.
+    # The readings no query settles, in the order that leaves the terminal
+    # least disturbed if somebody walks away half way through.
     def checklist : Nil
       unless @interactive
-        %w[focus_events mouse_sgr titles cursor_shape].each do |name|
+        %w[focus_events mouse_sgr mouse_motion_1000 mouse_motion_1002 mouse_motion_1003
+          titles cursor_shape].each do |name|
           @rows << Row.new name, "observed", "skipped"
         end
 
         return
       end
 
-      say "The four questions. Answer y or n; q skips one."
+      say "Seven readings. The last two take y or n; q skips one."
       say ""
 
       check_focus
       check_mouse
+      TRACKING.each_with_index do |(mode_number, mode), index|
+        check_motion index + 3, mode_number, mode
+      end
       check_title
       check_cursor_shape
     end
@@ -175,6 +200,38 @@ module CapsCheck
       @rows << Row.new "mouse_sgr", "observed", seen ? "yes" : "no"
     end
 
+    # What arrives under one tracking mode while nothing is held down.
+    #
+    # Under 1000 and 1002 the answer should be nothing: 1000 is defined to
+    # report the press and the release, 1002 to add motion while a button is
+    # held. A terminal that reports motion under either is over-reporting, and
+    # a consumer that reads a motion report as evidence a button is down is
+    # wrong on that terminal. Under 1003 a report is the mode working, and
+    # silence says this terminal has no any-event tracking.
+    #
+    # The window is fixed rather than patient: what is being measured is what
+    # three seconds of pointer movement produces, so nothing arriving is a
+    # reading and not a timeout.
+    private def check_motion(step : Int32, mode_number : String, mode : TermBuf::Tty::Mode) : Nil
+      say "#{step}. Motion under mode #{mode_number}. Move the pointer across the window for " \
+          "#{MOTION_WINDOW.total_seconds.to_i} seconds without pressing anything."
+
+      # The release that followed the click a step ago is still in the buffer,
+      # and reading it here would be this window's answer.
+      drain
+
+      @tty.write mode.set
+      @tty.flush
+
+      seen = wait_for MOUSE_REPORT, MOTION_WINDOW
+      @tty.write mode.reset
+      @tty.flush
+
+      say seen ? "   saw #{seen.inspect}" : "   nothing arrived"
+      say ""
+      @rows << Row.new "mouse_motion_#{mode_number}", "observed", seen ? "yes" : "no"
+    end
+
     # OSC 2 answers nothing, so the only instrument for it is a person looking
     # at the window's title bar. The title is pushed onto the terminal's own
     # stack first and popped afterwards, which is what the driver does and is
@@ -185,7 +242,7 @@ module CapsCheck
       @tty.write "\e]2;#{TITLE}\e\\"
       @tty.flush
 
-      answer = ask "3. Does the window or tab now say #{TITLE.inspect}?"
+      answer = ask "6. Does the window or tab now say #{TITLE.inspect}?"
 
       @tty.write TermBuf::Terminal::TITLE_STACK.reset
       @tty.flush
@@ -198,7 +255,7 @@ module CapsCheck
       @tty.write "\e[#{TermBuf::CursorShape::Bar.code} q"
       @tty.flush
 
-      answer = ask "4. Is the cursor now a blinking bar rather than a block?"
+      answer = ask "7. Is the cursor now a blinking bar rather than a block?"
 
       @tty.write TermBuf::Terminal::CURSOR_SHAPE_RESET
       @tty.flush
@@ -207,14 +264,14 @@ module CapsCheck
       say ""
     end
 
-    # Reads until something matching *pattern* arrives or the patience runs
-    # out, and answers with what matched. Everything else read on the way is
+    # Reads until something matching *pattern* arrives or *patience* runs out,
+    # and answers with what matched. Everything else read on the way is
     # discarded: it is the person typing while they wait.
-    private def wait_for(pattern : Regex) : String?
+    private def wait_for(pattern : Regex, patience : Time::Span = PATIENCE) : String?
       input = @tty.input
       return unless input.responds_to? :read_timeout=
 
-      deadline = Time.instant + PATIENCE
+      deadline = Time.instant + patience
       seen = IO::Memory.new
       buffer = Bytes.new 256
 
@@ -241,6 +298,28 @@ module CapsCheck
       end
 
       nil
+    end
+
+    # Throws away whatever is already in the buffer, so that the next window
+    # measures what arrives during it rather than what was left over from the
+    # step before.
+    private def drain : Nil
+      input = @tty.input
+      return unless input.responds_to? :read_timeout=
+
+      buffer = Bytes.new 256
+
+      loop do
+        input.read_timeout = 20.milliseconds
+
+        count = begin
+          input.read buffer
+        rescue IO::TimeoutError
+          break
+        end
+
+        break if count.zero?
+      end
     end
 
     # Puts *question* on the screen and waits for one letter.

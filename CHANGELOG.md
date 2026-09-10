@@ -19,6 +19,12 @@ All notable changes to this project are documented here. The format follows
   buttons (1002), any (1003), starting on any as before. The mode field names the one on and shows
   its bytes, and the expected block says what that mode should and should not report, so a
   terminal that reports motion with nothing held under 1000 or 1002 can be seen doing it.
+- `scripts/caps_check.cr` measures that: three readings after the click, one per tracking mode,
+  each watching a three-second window of pointer movement with nothing pressed and recording
+  `mouse_motion_1000`, `mouse_motion_1002` and `mouse_motion_1003` as `observed` yes or no. A yes
+  under 1000 or 1002 is the terminal over-reporting; a no under 1003 says it has no any-event
+  tracking. `--queries-only` records all three as `skipped`. `measurements/CAPS.md` carries the
+  three rows and three columns for them in the results table.
 - `Terminal#title=` and `Terminal#title`, the window title, written with OSC 2 in order with the
   frames around it. The title the terminal had is saved on its own stack — `CSI 22 ; 0 t` — the
   first time one is set and popped again by `#close`, so a program that renamed a tab does not

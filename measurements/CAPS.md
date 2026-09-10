@@ -37,7 +37,7 @@ Then, **in each terminal**, one command:
 ```
 
 It needs a real terminal at both ends and someone in front of it; it refuses to run through a
-pipe. `--queries-only` skips the four questions and records them as `skipped`, which is what a
+pipe. `--queries-only` skips the seven readings and records them as `skipped`, which is what a
 scripted run should use.
 
 ## What it does
@@ -49,20 +49,42 @@ scripted run should use.
    write, ending with the cursor position report every terminal answers.
 3. Prints one row per capability: the capability, the method that settled it (`decrqm`, `decrqss`,
    `table`, or `override` when `TERMBUF_CAPS` had the last word), and the answer.
-4. Walks four questions, restoring everything it turned on as it goes:
+4. Walks seven readings, restoring everything it turned on as it goes:
    + **focus** — turns mode 1004 on and waits up to 45 seconds for `CSI I` or `CSI O`. Click
      another window and click this one back. Recorded as `observed`, yes or no, from whether a
      report arrived rather than from what anyone thought they saw.
    + **mouse** — turns SGR reporting on and waits for one click anywhere in the window.
      Recorded as `observed` the same way.
+   + **`mouse_motion_1000`**, **`mouse_motion_1002`**, **`mouse_motion_1003`** — one reading per
+     mouse tracking mode. Each turns its mode on, asks for the pointer to be moved across the
+     window for three seconds with nothing pressed, and records `observed` yes when any SGR
+     report arrived in that window, whatever button it named, and no when none did. The buffer is
+     drained first, so the release that followed the click a step earlier is not counted as this
+     window's answer.
    + **title** — pushes the title with `CSI 22 ; 0 t`, sets it with OSC 2, and asks whether the
      window or tab now says so. Pops it with `CSI 23 ; 0 t` afterwards, which is itself worth
      watching: a terminal that takes OSC 2 and has no title stack leaves the new title behind.
    + **cursor shape** — asks for a blinking bar with DECSCUSR and asks whether the cursor
      changed, then sends `CSI 0 SP q`.
 
-The four questions take y, n, or q to skip. Nothing is left on: the modes are reset, the title is
-popped, the cursor shape is given back, and the line discipline is put back the way it was found.
+The last two take y, n, or q to skip; the first five are watched rather than asked. Nothing is
+left on: the modes are reset, the title is popped, the cursor shape is given back, and the line
+discipline is put back the way it was found.
+
+### The three tracking modes
+
+Mode 1000 is defined to report the press and the release and nothing in between. Mode 1002 adds
+motion while a button is held. Mode 1003 reports every movement. So under 1000 and 1002, moving
+the pointer with nothing held should produce no report at all, and a `yes` in either row is the
+terminal reporting more than the mode asks for.
+
+That matters to anything reading the reports. A motion report is not evidence that a button is
+down: on a terminal with a `yes` under 1000 or 1002 it can arrive with nothing held, so a widget
+that treats motion as a drag will drag things nobody grabbed. Read `Events::Mouse#button` and
+decide from that.
+
+A `no` under 1003 is a different finding: it says the terminal does not do any-event tracking, so
+hover cannot be built on it there.
 
 ## Output
 
@@ -81,12 +103,17 @@ cursor_shape    decrqss yes
 titles  table   yes
 focus_events    observed        yes
 mouse_sgr       observed        yes
+mouse_motion_1000       observed        no
+mouse_motion_1002       observed        no
+mouse_motion_1003       observed        yes
 titles  asked   yes
 cursor_shape    asked   yes
 ```
 
 Two rows for each of the four under test, and they are meant to be compared: a capability the
-tables claim and the terminal does not honour is exactly the thing this is looking for.
+tables claim and the terminal does not honour is exactly the thing this is looking for. The three
+`mouse_motion_*` rows have no query to be compared against; they are a reading of behaviour that
+nothing claims either way.
 
 ## Where to run it
 
@@ -126,15 +153,21 @@ used, and each holds the `caps.tsv` the instrument wrote.
 Each cell is what the person or the mode reporter saw, and then what the shard had concluded
 before anyone looked.
 
-| terminal | FocusEvents | MouseSgr | Titles | CursorShape |
-|---|---|---|---|---|
-| ghostty 1.3.2 | yes, DECRQM agreed | yes, DECRQM agreed | yes, table agreed | yes, DECRQSS agreed |
-| kitty 0.48.2 | yes, DECRQM agreed | yes, DECRQM agreed | yes, table agreed | yes, DECRQSS agreed |
-| iTerm2 3.6.11 | yes, DECRQM agreed | yes, DECRQM agreed | yes, table agreed | yes, DECRQSS agreed |
-| Terminal.app 470.2 | yes, table said no | yes, table said no | yes, table said no | yes, table said no |
-| `tmux` 3.7c | no, DECRQM said yes | no, DECRQM said yes | skipped | yes, table agreed |
-| `screen` 4.00.03 | no, table said yes | no, table said yes | no, table said yes | no, table said yes |
-| `screen` 5.0.2 | no, table said yes | yes, table agreed | yes, table agreed | yes, table agreed |
+| terminal | FocusEvents | MouseSgr | Titles | CursorShape | 1000 | 1002 | 1003 |
+|---|---|---|---|---|---|---|---|
+| ghostty 1.3.2 | yes, DECRQM agreed | yes, DECRQM agreed | yes, table agreed | yes, DECRQSS agreed | — | — | — |
+| kitty 0.48.2 | yes, DECRQM agreed | yes, DECRQM agreed | yes, table agreed | yes, DECRQSS agreed | — | — | — |
+| iTerm2 3.6.11 | yes, DECRQM agreed | yes, DECRQM agreed | yes, table agreed | yes, DECRQSS agreed | — | — | — |
+| Terminal.app 470.2 | yes, table said no | yes, table said no | yes, table said no | yes, table said no | — | — | — |
+| `tmux` 3.7c | no, DECRQM said yes | no, DECRQM said yes | skipped | yes, table agreed | — | — | — |
+| `screen` 4.00.03 | no, table said yes | no, table said yes | no, table said yes | no, table said yes | — | — | — |
+| `screen` 5.0.2 | no, table said yes | yes, table agreed | yes, table agreed | yes, table agreed | — | — | — |
+
+The last three columns are the `mouse_motion_*` readings: whether the terminal reported anything
+while the pointer moved with nothing held. All seven runs predate the rows, so every cell is `—`;
+they fill in the next time the instrument is run. A `yes` under 1000 or 1002 there means a motion
+report from that terminal is not evidence a button is held, and a consumer has to read
+`Events::Mouse#button` rather than infer it.
 
 Three things came out of that, and all three are now in the code.
 
