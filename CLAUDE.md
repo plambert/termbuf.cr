@@ -72,7 +72,7 @@ All IO is UTF-8.
 
 Input and output should be organized into events which are passed via channels. Direct APIs may of
 course exist which create the events, such as a
-`#write_char(x : Int32, y : Int32, style : BufTerm::Style, char : Char)` method that puts the given
+`#write_char(x : Int32, y : Int32, style : Termbuf::Style, char : Char)` method that puts the given
 character in the given position with the given style.
 
 Output IO objects should be available with associated cursors so that application code can simply
