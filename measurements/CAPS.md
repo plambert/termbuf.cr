@@ -56,8 +56,13 @@ scripted run should use.
      the enable itself with `CSI I` when the window already has focus; that report is recorded
      on its own row, `focus_report_on_enable`, and then discarded, since it says the terminal
      knows the mode and nothing about whether a switch is reported.
-   + **mouse** — turns SGR reporting on and waits for one click anywhere in the window.
-     Recorded as `observed` the same way.
+   + **mouse** — turns SGR reporting on and waits for one press anywhere in the window: a report
+     whose button field has the motion bit clear. Recorded as `observed` the same way. A terminal
+     may answer the enable itself with a report (ghostty sends the pointer's position as a motion
+     report, button field 34); that goes on its own row, `mouse_report_on_enable`, and is
+     discarded before the reading.
+   + **`mouse_report_on_enable_1000`**, **`_1002`**, **`_1003`** — whether turning that tracking
+     mode on was answered with a report before anyone moved. Discarded before the reading below.
    + **`mouse_motion_1000`**, **`mouse_motion_1002`**, **`mouse_motion_1003`** — one reading per
      mouse tracking mode. Each turns its mode on, asks for the pointer to be moved across the
      window for three seconds with nothing pressed, and records `observed` yes when any SGR

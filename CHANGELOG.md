@@ -8,6 +8,11 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- `caps_check` records `mouse_report_on_enable` and one such row per tracking mode: whether the
+  terminal answered turning the mouse on with a report of its own, before anyone moved or pressed.
+  ghostty was seen on 2026-09-10 to send the pointer's position as a motion report on every
+  enable, which the old steps took for the click or the movement. The click reading now wants a
+  press, and a motion reading wants three reports across its window rather than one.
 - `caps_check` records `focus_report_on_enable`: whether the terminal answered turning mode 1004
   on with a focus-in of its own. The focus reading proper now wants a focus out followed by a
   focus in, which only a switch away and back produces; ghostty was seen on 2026-09-10 to answer

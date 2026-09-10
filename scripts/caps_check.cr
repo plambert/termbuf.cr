@@ -72,6 +72,14 @@ module CapsCheck
   # An SGR mouse report: `CSI < button ; column ; row` and a final M or m.
   MOUSE_REPORT = /\e\[<\d+;\d+;\d+[Mm]/
 
+  # A press: an SGR report ending in `M` whose button field has no motion bit.
+  MOUSE_PRESS = /\e\[<(\d+);\d+;\d+M/
+
+  # How many reports a pointer moving for the window must produce before the
+  # terminal is credited with reporting motion. One report is what a terminal
+  # sends on its own when the mode is turned on; a moving pointer sends dozens.
+  MOTION_REPORTS = 3
+
   # The three mouse tracking modes, and what to call the row each one leaves
   # behind. 1000 reports the press and the release, 1002 adds motion while a
   # button is held, 1003 reports every movement; the reading is what arrives
@@ -154,8 +162,9 @@ module CapsCheck
     # least disturbed if somebody walks away half way through.
     def checklist : Nil
       unless @interactive
-        %w[focus_report_on_enable focus_events mouse_sgr mouse_motion_1000 mouse_motion_1002 mouse_motion_1003
-          titles cursor_shape].each do |name|
+        %w[focus_report_on_enable focus_events mouse_report_on_enable mouse_sgr
+          mouse_report_on_enable_1000 mouse_motion_1000 mouse_report_on_enable_1002 mouse_motion_1002
+          mouse_report_on_enable_1003 mouse_motion_1003 titles cursor_shape].each do |name|
           @rows << Row.new name, "observed", "skipped"
         end
 
@@ -203,18 +212,39 @@ module CapsCheck
       @rows << Row.new "focus_events", "observed", seen ? "yes" : "no"
     end
 
+    # As with focus, a terminal may answer the enable with a report of its own
+    # (ghostty sends the pointer's position as a motion report). That is
+    # recorded on its own row and drained, and the reading proper wants a
+    # press: a report with the motion bit clear.
     private def check_mouse : Nil
       say "2. Mouse reporting. Click once anywhere in this window."
       @tty.write TermBuf::Tty::MOUSE_SGR.set
       @tty.flush
 
-      seen = wait_for MOUSE_REPORT
+      on_enable = wait_for MOUSE_REPORT, ENABLE_GRACE
+      drain
+      say "   the enable itself was answered with #{on_enable.inspect}" if on_enable
+
+      seen = wait_for_press
       @tty.write TermBuf::Tty::MOUSE_SGR.reset
       @tty.flush
 
-      say seen ? "   saw #{seen.inspect}" : "   nothing arrived"
+      say seen ? "   saw #{seen.inspect}" : "   no press arrived"
       say ""
+      @rows << Row.new "mouse_report_on_enable", "observed", on_enable ? "yes" : "no"
       @rows << Row.new "mouse_sgr", "observed", seen ? "yes" : "no"
+    end
+
+    # Waits for a report that is a press rather than motion: the button field
+    # with bit 32 clear.
+    private def wait_for_press : String?
+      deadline = Time.instant + PATIENCE
+      while Time.instant < deadline
+        seen = wait_for MOUSE_PRESS, deadline - Time.instant
+        return unless seen
+        button = seen.match(MOUSE_PRESS).try(&.[1].to_i) || 0
+        return seen if button & 32 == 0
+      end
     end
 
     # What arrives under one tracking mode while nothing is held down.
@@ -240,13 +270,46 @@ module CapsCheck
       @tty.write mode.set
       @tty.flush
 
-      seen = wait_for MOUSE_REPORT, MOTION_WINDOW
+      # The enable's own answer, if any, is not motion.
+      on_enable = wait_for MOUSE_REPORT, ENABLE_GRACE
+      drain
+      say "   the enable itself was answered with #{on_enable.inspect}" if on_enable
+
+      reports = collect MOUSE_REPORT, MOTION_WINDOW
       @tty.write mode.reset
       @tty.flush
 
-      say seen ? "   saw #{seen.inspect}" : "   nothing arrived"
+      seen = reports.size >= MOTION_REPORTS
+      say reports.empty? ? "   nothing arrived" : "   #{reports.size} reports, the first #{reports.first.inspect}"
       say ""
+      @rows << Row.new "mouse_report_on_enable_#{mode_number}", "observed", on_enable ? "yes" : "no"
       @rows << Row.new "mouse_motion_#{mode_number}", "observed", seen ? "yes" : "no"
+    end
+
+    # Every match of *pattern* that arrives within *span*, without stopping at
+    # the first.
+    private def collect(pattern : Regex, span : Time::Span) : Array(String)
+      input = @tty.input
+      found = [] of String
+      return found unless input.responds_to? :read_timeout=
+
+      deadline = Time.instant + span
+      seen = IO::Memory.new
+      buffer = Bytes.new 256
+
+      while Time.instant < deadline
+        input.read_timeout = deadline - Time.instant
+        count = begin
+          input.read buffer
+        rescue IO::TimeoutError
+          break
+        end
+        break if count.zero?
+        seen.write buffer[0, count]
+      end
+
+      seen.to_s.scan(pattern) { |match| found << match[0] }
+      found
     end
 
     # OSC 2 answers nothing, so the only instrument for it is a person looking
