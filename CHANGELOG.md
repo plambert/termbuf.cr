@@ -8,6 +8,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- `caps_check` records `focus_report_on_enable`: whether the terminal answered turning mode 1004
+  on with a focus-in of its own. The focus reading proper now wants a focus out followed by a
+  focus in, which only a switch away and back produces; ghostty was seen on 2026-09-10 to answer
+  the enable at once, which the old step took for the switch.
 - `Tty::MOUSE_SGR_CLICKS`, mode 1000 in the SGR encoding — the X10-compatible tracking that
   reports the press and the release and nothing in between. Registered under the same `mouse-sgr`
   name as `MOUSE_SGR` and `MOUSE_SGR_ANY`, so asking for one replaces whichever was asked for
