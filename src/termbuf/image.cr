@@ -37,6 +37,9 @@ module TermBuf
     # :ditto:
     getter height : Int32
 
+    # Pixels in *format*. A raw format needs its dimensions and exactly as many
+    # bytes as they imply; `Png` reads both out of the file. `.rgb`, `.rgba`
+    # and `.png` say the same thing more plainly.
     def initialize(@pixels : Bytes, @format : Format,
                    @width : Int32 = 0, @height : Int32 = 0)
       raise ArgumentError.new "an image needs pixels" if @pixels.empty?

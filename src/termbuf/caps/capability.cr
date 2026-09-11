@@ -121,6 +121,8 @@ module TermBuf
     # The mask itself, already normalized.
     getter flags : Capability
 
+    # A mask carrying *flags* and everything they imply. See `.normalize`, and
+    # `NONE`, `ANSI`, `XTERM` and `MODERN` for the presets.
     def initialize(flags : Capability = Capability::None)
       @flags = Capabilities.normalize flags
     end

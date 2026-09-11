@@ -59,10 +59,13 @@ module TermBuf
     # Which of the underline styles, if any.
     getter underline : Underline
 
-    # OSC 8 hyperlink id, or zero for no link. Populated once link support
-    # lands; the buffer carries it through in the meantime.
+    # OSC 8 hyperlink id, or zero for no link. `Buffer#link` and
+    # `Terminal#link` intern a URI and hand back the id; `#linked` puts it
+    # here. See `LinkTable`.
     getter link : UInt32
 
+    # A style from its parts. `DEFAULT` and the builders on it — `#bold`,
+    # `#fg`, `#bg`, `#underlined` — are the usual way to reach one.
     def initialize(@foreground : Color = Color.default,
                    @background : Color = Color.default,
                    @underline_color : Color = Color.default,

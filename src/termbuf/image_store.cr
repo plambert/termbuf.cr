@@ -8,8 +8,8 @@ module TermBuf
   #
   # Images are not cells. The buffer knows nothing about them: they are drawn
   # over the screen after each frame's cells go out, and an application that
-  # writes text where one sits gets both. That is the whole of the model, and it
-  # is what `CLAUDE.md` asks for — placement and management, not compositing.
+  # writes text where one sits gets both. That is the whole of the model:
+  # placement and management, not compositing.
   #
   # Everything here needs `Capability::KittyGraphics`. Without it nothing is
   # sent and `#place` still returns a placement, so an application does not have

@@ -100,6 +100,9 @@ module TermBuf
     # and its target never change.
     getter origin : {Int32, Int32}
 
+    # A view of *rect* of *target*. `Drawing#view` is the way in: it makes one
+    # of these and hands it the surface's `#policy`, which a view built here
+    # keeps at the default.
     def initialize(@target : Drawing, @rect : Rect, @style : Style = Style::DEFAULT,
                    @blend : Blend? = nil)
       target_x, target_y = @target.origin

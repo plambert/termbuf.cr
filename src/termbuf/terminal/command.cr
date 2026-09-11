@@ -202,6 +202,8 @@ module TermBuf
     # What is being drawn on.
     getter buffer : Buffer
 
+    # A drawing surface over *buffer*. Commands are applied as they arrive,
+    # on whichever fibre issued them.
     def initialize(@buffer : Buffer)
     end
 

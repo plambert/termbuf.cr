@@ -17,11 +17,11 @@ to be able to do. Drawing the same frame twice sends nothing.
   sixteen, then to nothing, depending on what is there
 * UAX #29 grapheme clusters and UAX #11 widths, from generated tables, with cluster widths
   measured from the terminal rather than assumed
-* Keys with modifiers, bracketed paste, resizes, and terminal replies delivered as events on a
-  channel
+* Keys, mouse reports, bracketed paste, resizes, timers, signals, and terminal replies delivered
+  as events on one channel
+* Cursors that wrap and scroll inside a region, with an `IO` for each
 * Widgets — an editable field, layout, focus, and keymaps — in a shard of their own, drawn
   through the same API
-* Cursors that wrap and scroll inside a region, with an `IO` for each
 
 Requires Crystal 1.21 or later.
 
@@ -38,30 +38,68 @@ dependencies:
 That pulls in [termbuf-input](https://github.com/plambert/termbuf-input.cr), which is the input
 side and termbuf's only dependency.
 
-## Usage
+## Getting started
+
+A whole program: take the terminal over, draw a frame, paint it, read an event, give the terminal
+back.
 
 ```crystal
 require "termbuf"
 
 TermBuf::Terminal.open do |terminal|
-  terminal.batch do |screen|
-    screen.clear
-    screen.write 2, 1, "hello", TermBuf::Style::DEFAULT.bold
-  end
-  terminal.paint
+  message = terminal.size.to_s
 
-  terminal.events.receive
+  loop do
+    terminal.batch do |screen|
+      screen.clear
+      screen.write 2, 1, "termbuf #{TermBuf::VERSION}", TermBuf::Style::DEFAULT.bold
+      screen.write 2, 2, message
+      screen.write 2, 4, "press q to leave", TermBuf::Style::DEFAULT.faint
+    end
+    terminal.paint
+
+    case event = terminal.events.receive
+    when TermBuf::Events::Key
+      break if event.key.is? 'q'
+      message = "key #{event.key}"
+    when TermBuf::Events::Resize then message = "resized to #{event.size}"
+    when TermBuf::Events::Closed then break
+    end
+  end
 end
 ```
 
 `Terminal.open` probes the terminal, puts it in raw mode, switches to the alternate screen, and
 starts a fibre that owns the buffer. The block form gives the terminal back however the body ends,
-including on an exception or a signal.
+including on an exception or a signal; without a block, `Terminal#close` does it by hand.
+
+## The public API
+
+| Type | What it is | Reach for |
+|---|---|---|
+| `Terminal` | the device, taken over and given back | `open` `close` `batch` `paint` `events` |
+| `Drawing` | the drawing surface, mixed into four things | `write` `fill` `clear` `scroll` `view` |
+| `Batcher` `View` `BufferSurface` | the other three surfaces | `Drawing`'s methods |
+| `Buffer` | the cells, with no device attached | `write` `blit` `hit` `resize` `to_text` |
+| `Sink` | one output of a buffer | `paint` `commit` `invalidate` `detach` |
+| `Cell` | one cell: cluster, style id, width | `char` `text` `width` `continuation?` |
+| `Style` `Color` `Blend` `Gradient` | what a cell looks like | `bold` `fg` `bg` `underlined` `merge` |
+| `Cursor` `CursorIO` | streamed output inside a region | `print` `puts` `io` `style=` `move_to` |
+| `Region` `Rect` | a scrolling rectangle, and a plain one | `bounds=` `scrollback` `view_offset=` |
+| `Capability` `Capabilities` | what the terminal can do | `includes?` `with` `without` |
+| `Quirk` | what it gets wrong | `per_code_point_columns?` |
+| `Unicode` `WidthPolicy` | measuring and fitting text | `string_width` `truncate` `fit` `window` |
+| `ImageStore` `Image` `Placement` | pictures over the cells | `add` `place` `delete` `clear` |
+| `ColorStack` | the terminal's own colours | `saved` `background=` `[]=` |
+| `Clipboard` | OSC 52 | `copy` |
+| `Events` | everything that arrives on the channel | `Key` `Mouse` `Paste` `Resize` `Timer` |
+
+Coordinates are zero based from the top left, everywhere, and always in cells.
 
 ### Drawing
 
-Coordinates are zero based from the top left. Text goes in one grapheme cluster per cell, and a
-cluster the terminal draws double width takes two.
+Text goes in one grapheme cluster per cell, and a cluster the terminal draws double width takes
+two.
 
 ```crystal
 terminal.write 0, 0, "text", style
@@ -86,7 +124,7 @@ To read the buffer, or to do something the drawing API does not cover, `#sync` r
 owning fibre and waits:
 
 ```crystal
-terminal.sync { |buffer| puts buffer.to_text }
+terminal.sync { |buffer| File.write path, buffer.to_text }
 ```
 
 ### Cursors
@@ -111,11 +149,7 @@ Text written to a cursor is scanned for escape sequences, so `\e[1m` sets the bo
 cells that follow rather than landing in them. Sequences that address the terminal rather than the
 text — cursor movement, screen clearing — are dropped, since the buffer already has its own idea of
 where the cursor is. An application that changes appearance by assigning to `#style` and never
-writes a sequence of its own can skip the scan:
-
-```crystal
-cursor.raw = true
-```
+writes a sequence of its own can skip the scan with `cursor.raw = true`.
 
 Wrapping is deferred the way a terminal defers it: a character landing in the last column leaves the
 cursor at the margin, and only the next character takes it to the row below. Turn `autowrap` off and
@@ -169,16 +203,19 @@ screen.write x, y, "#{percent}%", TermBuf::Style::DEFAULT.bold,
 A blend is given the style already in the cell, the style being written, and the cell's position in
 the buffer, and returns the style to place. `Style::KEEP_BACKGROUND` keeps the colour already there
 and takes everything else from the write; `Style::OVER` merges the two the way a view does; and
-`Style.blend { |under, over| ... }` wraps anything else:
+`Style.blend { |under, over| ... }` wraps anything else. A `Gradient` is a blend built from two
+colours and a rectangle:
 
 ```crystal
-screen.fill panel, ' ', TermBuf::Style::DEFAULT,
-  blend: TermBuf::Style.blend { |under, over| under.merge(over).faint }
+ramp = TermBuf::Gradient.new from, to, panel.bounds, :vertical
+screen.view(rect, blend: ramp.background).clear
 ```
 
+A blend passed to a draw call is asked in the buffer's coordinates; one carried by a view is asked
+in the view's, so a gradient built against `View#bounds` lands wherever the view does.
+
 A cluster covering two cells takes the style its first half lands on. `#write_char`, `#fill` and
-`#clear` take the same argument, and it survives a view's translation and clipping — the position a
-blend is handed is the cell's in the buffer, not in the view.
+`#clear` take the same argument.
 
 One caution: styles are interned and the table only grows, so a blend returning a colour computed
 per cell interns a style per cell. That is bounded by the screen for one frame; across an animation
@@ -186,13 +223,12 @@ it is not, and such a blend should draw from a fixed palette instead.
 
 A `fill`, `scroll`, or `blit` whose edge falls inside a wide character takes the whole character —
 half of one cannot be drawn — and the half lying outside the rectangle keeps the style it had,
-losing only its glyph. So a panel over CJK text is the width it says it is on every row. Writing a
-character over half of one is different: there the displaced half is erased in the style being
-written, which is what a terminal does.
+losing only its glyph. Writing a character over half of one is different: there the displaced half
+is erased in the style being written, which is what a terminal does.
 
 This is clipping, not layering: nothing says a view is on top of anything. Dismissing a panel means
 the next frame does not draw it, and the paint diff then sends the cells it covered and nothing
-else — a batched full frame is the cheap way to do this, not a workaround for the lack of layers.
+else.
 
 ### Off-screen buffers
 
@@ -218,8 +254,7 @@ again between blitting it and painting.
 A `Region` an application makes covers a pane it chose, and the driver does not move it: only the
 screen-wide region follows the window, because nothing tells the buffer whether a pane was meant to
 be a bottom edge, a fixed sidebar, or a third of the width. So a region an application placed keeps
-its rectangle until the application assigns a new one, and a stale region goes on drawing where the
-window used to be.
+its rectangle until the application assigns a new one.
 
 Register the layout once instead of repeating it at every `Events::Resize`:
 
@@ -236,9 +271,12 @@ end
 Handlers run in the order registered, on the fibre that owns the buffer, after the grids have been
 resized and before `Events::Resize` reaches the application — so whatever it draws in response
 already sees panes in their new places. That fibre is the one servicing commands, so a handler must
-not call back into `#batch`, `#paint`, or `#sync`; moving regions and recomputing rectangles is what
-it is for. Anything it raises arrives as an `Events::Failure`, and the remaining handlers still run.
-`#forget_resize` takes a handler back.
+not call back into `#batch`, `#paint`, or `#sync`. Anything it raises arrives as an
+`Events::Failure`, and the remaining handlers still run. `#forget_resize` takes a handler back.
+
+`SIGWINCH` is what normally starts this. An application driving a pty whose size it sets itself
+calls `Terminal#window_resized` in the signal's place, and `#resize_interval` — 50 ms by default —
+is how often a burst of them is acted on.
 
 There is no layout engine here on purpose. Anchors, splits, and constraint solving belong a layer
 up; this shard gives that layer the one hook it needs.
@@ -253,7 +291,9 @@ terminal.hardware_cursor = input_cursor   # shows it, and follows it
 terminal.hide_cursor
 ```
 
-A frame that changes no cells is still sent when this has moved.
+A frame that changes no cells is still sent when this has moved. What the terminal draws it as is
+`#cursor_shape=` and `#cursor_blink=`, and the window title is `#title=`; `#close` gives all three
+back.
 
 ### Painting
 
@@ -273,18 +313,21 @@ It coalesces whatever was drawn between frames, and a paint with nothing to do c
 ### Events
 
 `Terminal#events` is a `Channel(Event)`. Everything the terminal has to say arrives on it in the
-order it happened.
+order it happened. `Event` is a module rather than a union, so this is a `when` and not an `in`:
 
 ```crystal
 case event = terminal.events.receive
-in TermBuf::Events::Key      then handle event.key
-in TermBuf::Events::Paste    then insert event.text
-in TermBuf::Events::Pasting  then show_notice event.bytes
-in TermBuf::Events::Resize   then redraw event.size
-in TermBuf::Events::Response then handle_reply String.new(event.bytes)
-in TermBuf::Events::Warning  then log event.message
-in TermBuf::Events::Failure  then raise event.error
-in TermBuf::Events::Closed   then break
+when TermBuf::Events::Key      then handle event.key
+when TermBuf::Events::Mouse    then click event.x, event.y, event.button
+when TermBuf::Events::Paste    then insert event.text
+when TermBuf::Events::Pasting  then show_notice event.bytes
+when TermBuf::Events::Resize   then redraw event.size
+when TermBuf::Events::Response then handle_reply String.new(event.bytes)
+when TermBuf::Events::Timer    then tick event.nonce
+when TermBuf::Events::Signal   then handle_signal event.signal
+when TermBuf::Events::Warning  then log event.message
+when TermBuf::Events::Failure  then raise event.error
+when TermBuf::Events::Closed   then return
 end
 ```
 
@@ -377,6 +420,68 @@ button is down — read `Events::Mouse#button`. `scripts/caps_check.cr` measures
 A report arrives as `Events::Mouse`, with its coordinates already converted to 0-based buffer
 cells.
 
+### Hit testing
+
+`Terminal#hit` says what is in a cell, which is what a mouse report wants next. The lead of a wide
+cluster is what comes back, so a click on the right half of a CJK glyph names the glyph rather than
+half of one:
+
+```crystal
+terminal.hit event.x, event.y do |hit|
+  next unless hit
+  status.puts "#{hit.text} at #{hit.x}, #{hit.y}"
+end
+```
+
+The read goes through `#sync`, so the block runs on the fibre that owns the buffer — keep it short,
+since the next frame is waiting. `Buffer#hit` is the same thing without a terminal, and `View#local`
+turns a buffer cell back into a panel's own coordinates.
+
+### Timers
+
+`#after` asks for an `Events::Timer` and returns the nonce that will name it. The tick travels the
+event channel, so it is ordered against everything said before it rather than racing it, and it
+arrives no sooner than the span asked for:
+
+```crystal
+nonce = terminal.after 250.milliseconds
+terminal.cancel nonce        # nothing is delivered, even after it has gone off
+```
+
+### Signals
+
+`SIGTERM`, `SIGINT` and `SIGHUP` give the terminal back and re-raise themselves; `SIGWINCH` becomes
+an `Events::Resize`; `SIGTSTP` and `SIGCONT` hand the screen over and take it back. An application
+that wants a first interrupt to ask rather than kill says so:
+
+```crystal
+terminal.signals.mode Signal::INT, TermBuf::Input::Signals::Mode::WarnThenExit
+```
+
+and then draws something on the `Events::Signal` that arrives, calling `Input::Signals#reset_count`
+if the person decides to stay.
+
+### Stages
+
+Every event walks a chain of `Input::Stage` before the application sees it. A stage passes an event
+on, replaces it, consumes it, or emits several. Two are installed at startup: `:resize`, which
+consumes the `SIGWINCH` signal and answers it with a resize, and `:signals`, which passes everything
+through and is there to be replaced.
+
+```crystal
+alias Event = TermBuf::Event
+
+terminal.stages = terminal.stages.map do |stage|
+  next stage unless stage.name == :signals
+
+  TermBuf::Input::Stage.new :signals, ->(event : Event, emit : Proc(Event, Nil)) do
+    emit.call event unless event.is_a? TermBuf::Events::Signal
+  end
+end
+```
+
+The array is swapped rather than mutated, so reordering means assigning a new one.
+
 ### Styles and colour
 
 `Style` is a value. The builders return copies:
@@ -414,16 +519,17 @@ TERMBUF_CAPS=none,+color16,+bold      # start from nothing
 TERMBUF_CAPS=all                      # start from everything
 ```
 
-A name that is not recognised becomes a `Events::Warning` rather than an error.
+A name that is not recognised becomes an `Events::Warning` rather than an error.
 
 Detection is pessimistic by design: a terminal nobody recognises gets plain text, because a screen
 full of escape sequences is worse than no escape sequences. Pass `probe: false` to `Terminal.open`
 to skip the queries.
 
-### Terminal replies
+### Passthrough and terminal replies
 
-A reply from the terminal and a keystroke are not distinguishable by looking at them — an arrow key
-sends `ESC [ A`, and so could a terminal. What separates them is that the application asked for one.
+`Drawing#passthrough` sends bytes to the terminal untouched, once the current frame is out. A reply
+from the terminal and a keystroke are not distinguishable by looking at them — an arrow key sends
+`ESC [ A`, and so could a terminal. What separates them is that the application asked for one.
 Register the shape of the answer before sending the query:
 
 ```crystal
@@ -453,11 +559,11 @@ a double-width cluster that would half-cross the edge is dropped rather than spl
 come back a cell short. `fit` pads that cell back; the others leave it.
 
 ```crystal
-Unicode.truncate  "hello world", 5             # => "hello"
-Unicode.ellipsize "hello world", 8             # => "hello w…"   marker measured too
-Unicode.fit       "42", 6, :right              # => "    42"     exactly 6 cells
-Unicode.fit       "name", 10, :left, '.'       # => "name......"
-Unicode.window    "a long filename", 4, 6      # => "ng fil"     a marquee step
+TermBuf::Unicode.truncate  "hello world", 5         # => "hello"
+TermBuf::Unicode.ellipsize "hello world", 8         # => "hello w…"   marker measured too
+TermBuf::Unicode.fit       "42", 6, :right          # => "    42"     exactly 6 cells
+TermBuf::Unicode.fit       "name", 10, :left, '.'   # => "name......"
+TermBuf::Unicode.window    "a long filename", 4, 6  # => "ng fil"     a marquee step
 ```
 
 `fit` is the one a table row wants: every column comes back exactly the width it was given, whatever
@@ -476,11 +582,11 @@ joiners, and terminals disagree. Measured on one machine:
 | `क्षि` conjunct plus vowel sign | 2 | 2 | 3 |
 | `நி` Tamil na plus vowel sign | 2 | 1 | 2 |
 
-Being right about the standard does not help: a terminal advancing eleven columns for a cluster the
-buffer thinks is two has every later cell on that row nine columns out of place. So the shard asks.
-After the alternate screen is entered and before anything is drawn on it, a batch of discriminating
-samples goes out, each followed by `ESC [ 6 n`, and the columns that come back are the terminal's
-own measurements. One round trip, invisible.
+A terminal advancing eleven columns for a cluster the buffer thinks is two has every later cell on
+that row nine columns out of place. So the shard asks. After the alternate screen is entered and
+before anything is drawn on it, a batch of discriminating samples goes out, each followed by
+`ESC [ 6 n`, and the columns that come back are the terminal's own measurements. One round trip,
+invisible.
 
 ```crystal
 terminal.widths           # => WidthPolicy(ambiguous=1 -emoji_presentation … )
@@ -510,14 +616,12 @@ terminal will misplace:
 
 ```text
 termbuf: this terminal counts a grapheme cluster's columns by adding up its code points, so
-"👨‍👩‍👧‍👦" takes 11 columns where it is drawn in 2. Everything after it on that row is 9 columns
-out of step with every other row, and the last 9 columns of it cannot be reached at all.
+"👨‍👩‍👧‍👦" takes 11 columns where it is drawn in 2. Everything after it on that row sits 9
+columns to the right of where it was put, and the last 9 columns of the row cannot be reached.
 ```
 
 The last part is measured, not inferred: on a 155 column window, a `CUP` to column 155 on such a row
-lands on screen column 146, and asking for 164 clamps at the margin and lands there too. The columns
-the cluster consumes come out of the row's budget, so a right-anchored column vanishes from that row
-and no escape sequence reaches it.
+lands on screen column 146, and asking for 164 clamps at the margin and lands there too.
 
 That goes to stderr with the alternate screen handed back for as long as it takes, and to
 `Events::Warning` as well. `Terminal#warn_composed_drift = false` keeps the event and leaves the
@@ -626,9 +730,7 @@ colour change does.
 Nothing comes back: the terminal answers nothing on a write, so a refusal and a success look the
 same from here. Nor is there anything to chunk into — OSC 52 carries one payload, and the limit on
 it is the terminal's rather than the protocol's — so a caller moving more than a few kilobytes
-should not expect it to arrive, and cannot find out that it did not. The capability is a table
-entry for kitty, ghostty, WezTerm and foot rather than something measured; xterm supports the write
-and ships it off, which from here is the same as not having it.
+should not expect it to arrive, and cannot find out that it did not.
 
 ### Images
 
@@ -659,14 +761,15 @@ this one and `require "termbuf-widgets"`.
 
 ```bash
 crystal run examples/clock.cr     # drawing, input, and resize in one small program
-crystal run examples/validate.cr  # eleven pages checking a real terminal against the shard
+crystal run examples/validate.cr  # fourteen pages checking a terminal against the shard
 ```
 
 `validate.cr` is worth running in any terminal you intend to support: it reports what detection
 concluded, writes every cell of the screen including the bottom-right corner, checks the terminal's
 idea of grapheme widths against the tables, shows what a frame costs in bytes, decodes whatever you
-type, draws clipped panels and a label across a two-colour bar, and gives you a pane to type into
-with the terminal's own cursor following along.
+type, reports focus changes and mouse tracking under each of the three modes, renames the window,
+draws clipped panels and a label across a two-colour bar, and gives you a pane to type into with the
+terminal's own cursor following along.
 
 ## Development
 
@@ -731,7 +834,7 @@ are documented because reading them explains the thing, not because an applicati
 holding one. Anything reached only through tier 1 is free to move.
 
 * **The paint pipeline.** `Grid`, `Cell`, `Damage`, `Painter`, `Encoder`, `Ops` and `Op`,
-  `StyleTable`, `ClusterPool`, `LinkTable`, `SgrScanner`.
+  `ScrollHint`, `StyleTable`, `ClusterPool`, `LinkTable`, `SgrScanner`.
 * **Detection.** `Prober`, `EnvironmentDetector`, `CapabilityResolver`, `CapabilityOverrides`,
   `QuirkOverrides`, `WidthProbe`, `SizeDetector`. What they conclude is tier 1; how they conclude
   it is not.

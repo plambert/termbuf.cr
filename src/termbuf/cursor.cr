@@ -79,6 +79,10 @@ module TermBuf
     @partial : IO::Memory
     @origin : Int32
 
+    # A cursor writing into *region* of *target*, starting at the region's top
+    # left. `Terminal#cursor` is the usual way in: it makes one of these and
+    # hands it the buffer's own `#policy`, which a cursor built here does not
+    # get.
     def initialize(@target : Drawing, @region : Region,
                    @style : Style = Style::DEFAULT,
                    raw : Bool = false,

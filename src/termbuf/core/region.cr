@@ -33,6 +33,8 @@ module TermBuf
     @view_offset = 0
     @scrollback_capacity : Int32
 
+    # A region over *bounds*, keeping up to *scrollback* rows of what leaves
+    # the top. Zero discards them, which is the classic curses model.
     def initialize(@bounds : Rect, scrollback : Int32 = 0)
       raise ArgumentError.new "scrollback capacity #{scrollback} is negative" if scrollback < 0
 

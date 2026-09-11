@@ -424,6 +424,9 @@ module TermBuf
 
     # ------------------------------------------------------------- drawing
 
+    # Sends *command* to the fibre that owns the buffer, which is what every
+    # drawing method here does. A closed terminal drops it rather than raising:
+    # there is nothing left to draw on.
     def issue(command : Command) : Nil
       return if @closed
 
@@ -598,8 +601,8 @@ module TermBuf
     # `Events::Resize`, work it out once here:
     #
     #     terminal.on_resize do |size|
-    #       status.bounds = Rect.new 0, size.rows - 1, size.columns, 1
-    #       log.bounds = Rect.new 0, 0, size.columns, size.rows - 1
+    #       status.region.bounds = Rect.new 0, size.rows - 1, size.columns, 1
+    #       log.region.bounds = Rect.new 0, 0, size.columns, size.rows - 1
     #     end
     #
     # Handlers run in the order they were registered, on the fibre that owns

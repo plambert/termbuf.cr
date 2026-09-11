@@ -4,6 +4,8 @@ require "./region"
 require "./style_table"
 
 module TermBuf
+  # Stability: internal
+  #
   # A scroll the buffer performed on itself, recorded so the painter can reach
   # for the terminal's own scrolling instead of rediscovering the shift from
   # row hashes. The painter still verifies a hint against those hashes before
@@ -85,6 +87,8 @@ module TermBuf
     # this has nothing left to catch up on.
     getter scroll_serial : Int64 = 0_i64
 
+    # A blank buffer *width* cells across and *height* rows down, with no sink
+    # attached and no device anywhere in sight.
     def initialize(@width : Int32, @height : Int32)
       @styles = StyleTable.new
       @clusters = ClusterPool.new

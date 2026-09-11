@@ -54,6 +54,8 @@ module TermBuf
     # Which way the ramp runs.
     getter axis : Axis
 
+    # A ramp from *from* to *to* across *rect*, along *axis*. Reach for
+    # `#foreground` or `#background` to get the `Blend` a draw call takes.
     def initialize(@from : Color, @to : Color, @rect : Rect, @axis : Axis = Axis::Horizontal)
     end
 

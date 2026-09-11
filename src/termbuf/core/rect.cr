@@ -17,6 +17,8 @@ module TermBuf
     # Rows down.
     getter height : Int32
 
+    # *width* cells across and *height* rows down, with its top left corner at
+    # (*x*, *y*). A negative width or height raises.
     def initialize(@x : Int32, @y : Int32, @width : Int32, @height : Int32)
       raise ArgumentError.new "rectangle width #{@width} is negative" if @width < 0
       raise ArgumentError.new "rectangle height #{@height} is negative" if @height < 0

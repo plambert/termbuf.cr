@@ -58,6 +58,10 @@ module TermBuf
     # next paint rewrites the screen.
     UNKNOWN = Cell.new '￿', StyleTable::DEFAULT, 1_u8
 
+    # An output of *buffer* for a terminal that can do *capabilities*, attached
+    # to the buffer as it is made. A sink over a buffer that already holds
+    # content knows nothing about the screen in front of it, so call
+    # `#invalidate` before the first paint.
     def initialize(@buffer : Buffer, @capabilities : Capabilities)
       @front = Grid.new @buffer.width, @buffer.height
       @damage = Damage.new @buffer.height

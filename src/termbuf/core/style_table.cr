@@ -1,6 +1,8 @@
 require "./style"
 
 module TermBuf
+  # Stability: internal
+  #
   # Identifies an interned `Style`. Zero is always `Style::DEFAULT`.
   alias StyleId = UInt32
 

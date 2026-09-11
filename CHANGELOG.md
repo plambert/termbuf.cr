@@ -231,6 +231,9 @@ All notable changes to this project are documented here. The format follows
 
 ### Changed
 
+- The README and the API documentation say what the code does: a getting-started program
+  that compiles, a table of the public types, sections for hit testing, timers, signals and
+  stages, and a correction wherever a name, a signature or a count had gone stale.
 - Terminal.app gains `Capability::FocusEvents`, `MouseSgr`, `Titles` and `CursorShape`, all four of
   which its table entry had denied it. It answers no DECRQM, no DECRQSS and no XTGETTCAP, so the
   table was the only evidence there was, and on 2026-09-06 against 470.2 the table was wrong four

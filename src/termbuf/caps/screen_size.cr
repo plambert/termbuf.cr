@@ -23,6 +23,8 @@ module TermBuf
     # Cells down.
     getter rows : Int32
 
+    # A screen *columns* cells across and *rows* down. Neither may be zero or
+    # negative: a terminal that size cannot be drawn on.
     def initialize(@columns : Int32, @rows : Int32)
       raise ArgumentError.new "column count #{@columns} is not positive" unless @columns > 0
       raise ArgumentError.new "row count #{@rows} is not positive" unless @rows > 0
