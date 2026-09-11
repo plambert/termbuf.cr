@@ -478,16 +478,17 @@ through and is there to be replaced.
 ```crystal
 alias Event = TermBuf::Event
 
-terminal.stages = terminal.stages.map do |stage|
+terminal.stages.replace terminal.stages.map { |stage|
   next stage unless stage.name == :signals
 
   TermBuf::Input::Stage.new :signals, ->(event : Event, emit : Proc(Event, Nil)) do
     emit.call event unless event.is_a? TermBuf::Events::Signal
   end
-end
+}
 ```
 
-The array is swapped rather than mutated, so reordering means assigning a new one.
+`#stages` is an `Input::Stages`: `#push` adds a stage, `#replace` reorders or removes, and both are
+safe from any fibre while events are flowing.
 
 ### Styles and colour
 

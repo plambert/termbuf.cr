@@ -1249,17 +1249,13 @@ module TermBuf
     #   that an application with a policy about signals has somewhere named to
     #   put it: replace that one entry and leave the rest of the chain alone.
     #
-    # See `Input::Stage` for what a stage may do with an event. The array is
-    # swapped rather than mutated, so reordering means assigning a new one:
+    # See `Input::Stage` for what a stage may do with an event and
+    # `Input::Stages` for changing the chain while events are flowing: `#push`
+    # adds one, `#replace` reorders or removes.
     #
-    #     terminal.stages = terminal.stages.reverse
-    def stages : Array(Input::Stage)
+    #     terminal.stages.replace terminal.stages.to_a.reverse
+    def stages : Input::Stages
       @input.stages
-    end
-
-    # :ditto:
-    def stages=(stages : Array(Input::Stage)) : Array(Input::Stage)
-      @input.stages = stages
     end
 
     private def install_stages : Nil
@@ -1280,7 +1276,7 @@ module TermBuf
         emit.call event
       end
 
-      @input.stages = [resize, signals]
+      @input.stages.replace [resize, signals]
     end
 
     # --------------------------------------------------------------- signals

@@ -6,6 +6,11 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- `Terminal#stages` is an `Input::Stages`, changed with `#push` and `#replace`; `Terminal#stages=`
+  is gone.
+
 ### Added
 
 - `caps_check` records `mouse_report_on_enable` and one such row per tracking mode: whether the
