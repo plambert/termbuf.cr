@@ -25,6 +25,13 @@ to be able to do. Drawing the same frame twice sends nothing.
 
 Requires Crystal 1.21 or later.
 
+## Related shards
+
+* **[plambert/termbuf-input.cr](https://github.com/plambert/termbuf-input.cr)** — handle keyboard
+  and mouse input, as well as typical signals
+* **[plambert/termbuf-widgets.cr](https://github.com/plambert/termbuf-widgets.cr)** — layout, focus,
+  keymaps, and widgets such as fields, lists, tables and overlays, drawn through termbuf
+
 ## Installation
 
 Add the dependency to `shard.yml` and run `shards install`:
