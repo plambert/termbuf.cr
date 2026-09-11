@@ -1,5 +1,5 @@
 name: termbuf
-version: 0.2.1
+version: 0.5.0
 
 authors:
   - Paul M. Lambert <plambert@plambert.net>
@@ -21,7 +21,7 @@ description: |
 dependencies:
   termbuf-input:
     github: plambert/termbuf-input.cr
-    version: "~> 0.1"
+    version: "~> 0.5"
 
 development_dependencies:
   spectator:
