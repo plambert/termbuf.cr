@@ -91,18 +91,20 @@ module TermBuf
     }
 
     QUERIES = String.build do |io|
-      io << "\e[c"     # primary device attributes
-      io << "\e[>c"    # secondary device attributes
-      io << "\e[>0q"   # XTVERSION, the terminal's own name
+      io << Input::Query::DEVICE_ATTRIBUTES.request
+      io << Input::Query::SECONDARY_DEVICE_ATTRIBUTES.request
+      io << Input::Query::TERMINAL_NAME.request
       io << TCAP_QUERY # 24 bit colour, asked of terminfo
 
       # DECRQM for every mode above, in the same write as everything else.
-      MODE_CAPABILITIES.each_key { |mode| io << "\e[?" << mode << "$p" }
+      MODE_CAPABILITIES.each_key { |mode| io << Input::Query.mode(mode).request }
 
-      io << "\e[?u"            # kitty keyboard protocol
+      io << Input::Query::KITTY_KEYBOARD.request
       io << CURSOR_STYLE_QUERY # DECSCUSR, asked with DECRQSS
       io << KITTY_GRAPHICS_QUERY
-      io << "\e[6n" # cursor position: the sentinel, always answered
+
+      # The sentinel, always answered.
+      io << Input::Query::CURSOR_POSITION.request
     end
 
     # Sends the queries and folds whatever comes back into *base*.
@@ -133,7 +135,7 @@ module TermBuf
           next false
         end
 
-        reading = interpret String.new(bytes), flags, distrusted
+        reading = interpret Input::Sequence.parse(bytes), flags, distrusted
         flags = reading.flags
         denied |= reading.denied
 
@@ -212,18 +214,12 @@ module TermBuf
       input.read_timeout = remaining > Time::Span.zero ? remaining : 1.millisecond
     end
 
-    CURSOR_POSITION = /\A\e\[(\d+);(\d+)R\z/
-    MODE_REPORT     = /\A\e\[\?(\d+);(\d+)\$y\z/
-
     # `DCS Ps $ r ... ST`, the DECRPSS reply, where a leading 1 means the
     # request was valid and 0 that it was not. The payload of a valid one is
     # the setting itself, `Ps SP q` for a cursor style, and it is matched
     # rather than read: the shape the terminal happens to be in says nothing
     # about whether it will take a new one.
     CURSOR_STYLE_REPORT = /\A\eP([01])\$r(\d* q)?\e\\\z/
-    KITTY_KEYBOARD      = /\A\e\[\?\d*u\z/
-    PRIMARY_ATTRIBUTES  = /\A\e\[\?[\d;]*c\z/
-    TERMINAL_NAME       = /\A\eP>\|(.*)\e\\\z/m
 
     # What one response told us: the capabilities after folding it in, which
     # query it answered, and anything else it happened to carry.
@@ -235,20 +231,24 @@ module TermBuf
       # Capabilities the terminal said outright that it does not have.
       denied : Capability = Capability::None
 
-    private def interpret(response : String, flags : Capability,
+    # The replies termbuf-input decodes are read with `Input::Replies`; the
+    # three it does not — kitty graphics, XTGETTCAP and DECRQSS — are read
+    # here.
+    private def interpret(sequence : Input::Sequence, flags : Capability,
                           distrusted : Capability) : Reading
-      if match = response.match CURSOR_POSITION
-        return Reading.new flags, :cursor_position,
-          cursor: {match[2].to_i - 1, match[1].to_i - 1}
+      if position = Input::Replies.cursor_position sequence
+        return Reading.new flags, :cursor_position, cursor: {position.x, position.y}
       end
 
-      if match = response.match MODE_REPORT
-        return interpret_decrpm match, flags, distrusted
+      if report = Input::Replies.mode_report sequence
+        return interpret_decrpm report, flags, distrusted
       end
 
-      if response.matches? KITTY_KEYBOARD
+      if Input::Replies.kitty_keyboard sequence
         return Reading.new flags | Capability::KittyKeyboard, :kitty_keyboard
       end
+
+      response = String.new sequence.bytes
 
       if response.starts_with? "\e_G"
         return Reading.new interpret_graphics(response, flags), :kitty_graphics
@@ -262,14 +262,15 @@ module TermBuf
         return interpret_cursor_style match, flags
       end
 
-      if match = response.match TERMINAL_NAME
-        name = match[1]
+      if terminal = Input::Replies.terminal_name sequence
+        name = terminal.text
         told = (flags | from_name(name)) & ~EnvironmentDetector.denials(name)
         return Reading.new told, :xtversion, name: name
       end
 
-      return Reading.new flags, :secondary_attributes if response.starts_with? "\e[>"
-      return Reading.new flags, :primary_attributes if response.matches? PRIMARY_ATTRIBUTES
+      if attributes = Input::Replies.device_attributes sequence
+        return Reading.new flags, attributes.secondary ? :secondary_attributes : :primary_attributes
+      end
 
       Reading.new flags, nil
     end
@@ -288,15 +289,15 @@ module TermBuf
     # it implements and does not forward, which is what *distrusted* names. The
     # answer is still recorded as answered — it arrived — and the capability is
     # left where the environment put it.
-    private def interpret_decrpm(match : Regex::MatchData, flags : Capability,
+    private def interpret_decrpm(report : Input::Events::ModeReport, flags : Capability,
                                  distrusted : Capability) : Reading
-      mode = match[1].to_i?
-      capability = mode ? MODE_CAPABILITIES[mode]? : nil
-      return Reading.new flags, nil unless mode && capability
+      mode = report.mode
+      capability = MODE_CAPABILITIES[mode]?
+      return Reading.new flags, nil unless capability
 
       query = MODE_QUERIES[mode]?
 
-      if match[2].in? "1", "2", "3"
+      if report.state.supported?
         return Reading.new flags, query if distrusted.includes? capability
 
         return Reading.new flags | capability, query
@@ -363,7 +364,7 @@ module TermBuf
       File.write path, Bytes[0, 0, 0]
 
       @output << "\e_Gi=32,s=1,v=1,a=q,t=f,f=24;" << Base64.strict_encode(path) << "\e\\"
-      @output << "\e[6n"
+      @output << Input::Query::CURSOR_POSITION.request
       @output.flush
 
       supported = false
@@ -373,7 +374,7 @@ module TermBuf
 
         response = String.new bytes
         supported = true if response.starts_with?("\e_G") && response.includes?("OK")
-        response.matches? /\A\e\[\d+;\d+R\z/
+        !Input::Replies.cursor_position(Input::Sequence.parse(bytes)).nil?
       end
 
       supported
