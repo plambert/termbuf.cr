@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-09-27
+
 ### Changed
 
 - Requires termbuf-input 0.6. `Tty::Mode` is an alias for `Input::Mode`, which gained an optional
@@ -802,7 +804,8 @@ First release. Everything below is new.
 - OSC 8 links, kitty graphics, and the kitty colour stack are detected but not emitted.
 - Mouse reporting is not enabled or decoded.
 
-[Unreleased]: https://github.com/plambert/termbuf.cr/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/plambert/termbuf.cr/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/plambert/termbuf.cr/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/plambert/termbuf.cr/compare/v0.2.1...v0.5.0
 [0.2.1]: https://github.com/plambert/termbuf.cr/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/plambert/termbuf.cr/compare/v0.1.6...v0.2.0
