@@ -1,0 +1,30 @@
+termbuf-input 0.5.0 (d614b5d) examples/queries.cr
+TERM=xterm-256color TERM_PROGRAM=Apple_Terminal TERM_PROGRAM_VERSION=488
+TMUX=unset 2026-09-27 03:34:13 -0700
+
+PASS as expected. FAIL a bug, here or in the terminal. UNSUPPORTED the terminal does not
+do this, which is fine. SKIP skipped. INFO recorded, nothing to judge.
+
+INFO        device attributes             1;2
+INFO        secondary device attributes   1;95;0
+UNSUPPORTED terminal name
+PASS        cursor position               column 9, row 4, where it was put
+PASS        text area size                155 × 41, as stty size says
+INFO        text area pixels              1725 × 958
+UNSUPPORTED cell pixels
+UNSUPPORTED kitty keyboard
+UNSUPPORTED bracketed paste (2004)        no answer to DECRQM
+UNSUPPORTED focus events (1004)           no answer to DECRQM
+UNSUPPORTED SGR mouse (1006)              no answer to DECRQM
+UNSUPPORTED button-event mouse (1002)     no answer to DECRQM
+UNSUPPORTED any-event mouse (1003)        no answer to DECRQM
+UNSUPPORTED SGR-Pixels mouse (1016)       no answer to DECRQM
+UNSUPPORTED synchronized output (2026)    no answer to DECRQM
+UNSUPPORTED colour scheme updates (2031)  no answer to DECRQM
+UNSUPPORTED in-band resize (2048)         no answer to DECRQM
+PASS        background colour             #1e1e1e
+PASS        foreground colour             #ffffff
+PASS        cursor colour                 #9d9d9d
+PASS        palette colours               0 #000000, 1 #990000, 15 #e6e6e6
+
+6 pass, 12 unsupported, 3 info

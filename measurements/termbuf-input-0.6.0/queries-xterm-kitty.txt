@@ -1,0 +1,31 @@
+termbuf-input 0.5.0 (d614b5d) examples/queries.cr
+TERM=xterm-kitty TERM_PROGRAM= TERM_PROGRAM_VERSION=
+TMUX=unset 2026-09-27 03:33:29 -0700
+
+PASS as expected. FAIL a bug, here or in the terminal. UNSUPPORTED the terminal does not
+do this, which is fine. SKIP skipped. INFO recorded, nothing to judge.
+
+INFO        device attributes             62;52
+INFO        secondary device attributes   1;4000;49
+INFO        terminal name                 kitty(0.49.0)
+PASS        cursor position               column 9, row 4, where it was put
+PASS        text area size                123 × 37, as stty size says
+INFO        text area pixels              3444 × 1998
+INFO        cell pixels                   28 × 54
+PASS        pixel sizes agree             cells × cell size is 3444 × 1998, text area is 3444 × 1998
+INFO        kitty keyboard                flags 0
+INFO        bracketed paste (2004)        supported, Reset
+INFO        focus events (1004)           supported, Reset
+INFO        SGR mouse (1006)              supported, Reset
+INFO        button-event mouse (1002)     supported, Reset
+INFO        any-event mouse (1003)        supported, Reset
+INFO        SGR-Pixels mouse (1016)       supported, Reset
+INFO        synchronized output (2026)    supported, Reset
+INFO        colour scheme updates (2031)  supported, Reset
+INFO        in-band resize (2048)         supported, Reset
+PASS        background colour             #000000
+PASS        foreground colour             #dddddd
+PASS        cursor colour                 #cccccc
+PASS        palette colours               0 #000000, 1 #cc0403, 15 #ffffff
+
+7 pass, 15 info

@@ -1,0 +1,30 @@
+termbuf-input 0.5.0 (d614b5d) examples/queries.cr
+TERM=xterm-256color TERM_PROGRAM=iTerm.app TERM_PROGRAM_VERSION=3.7.2
+TMUX=unset 2026-09-27 03:32:32 -0700
+
+PASS as expected. FAIL a bug, here or in the terminal. UNSUPPORTED the terminal does not
+do this, which is fine. SKIP skipped. INFO recorded, nothing to judge.
+
+INFO        device attributes             64;1;2;4;6;17;18;21;22;52
+INFO        secondary device attributes   64;2500;0
+INFO        terminal name                 iTerm2 3.7.3
+PASS        cursor position               column 9, row 4, where it was put
+PASS        text area size                112 × 36, as stty size says
+INFO        text area pixels              1242 × 828
+UNSUPPORTED cell pixels
+INFO        kitty keyboard                flags 0
+INFO        bracketed paste (2004)        supported, Reset
+INFO        focus events (1004)           supported, Reset
+INFO        SGR mouse (1006)              supported, Reset
+INFO        button-event mouse (1002)     supported, Reset
+INFO        any-event mouse (1003)        supported, Reset
+UNSUPPORTED SGR-Pixels mouse (1016)       PermanentlyReset
+INFO        synchronized output (2026)    supported, Reset
+INFO        colour scheme updates (2031)  supported, Reset
+INFO        in-band resize (2048)         supported, Reset
+PASS        background colour             #15191e
+PASS        foreground colour             #dcdcdc
+PASS        cursor colour                 #ffffff
+PASS        palette colours               0 #15191e, 1 #a74532, 15 #ffffff
+
+6 pass, 2 unsupported, 13 info

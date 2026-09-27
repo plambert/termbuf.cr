@@ -82,7 +82,9 @@ module TermBuf
     # table said no to all four. Watched on 2026-09-10 against 470.2: mode 1004
     # sends a focus report on the way out and back in, mode 1006 reports a
     # click, OSC 2 renames the window, and DECSCUSR changes the cursor's shape.
-    # See `measurements/CAPS.md`.
+    # Seen again on 2026-09-27 against 488, still answering no DECRQM: focus,
+    # the SGR mouse with drag and mode 1003, and bracketed paste. See
+    # `measurements/CAPS.md`.
     APPLE_TERMINAL_WATCHED = Capability::FocusEvents | Capability::MouseSgr |
                              Capability::Titles | Capability::CursorShape
 

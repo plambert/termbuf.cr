@@ -240,6 +240,24 @@ The 1002 behaviour is worth reporting upstream against ghostty 1.3.2-main. termb
 against it, so on ghostty a consumer should not take a motion report under 1002 as proof that a
 button is held; read `Events::Mouse#button` and decide from that.
 
+### termbuf-input 0.6.0, on 2026-09-27
+
+termbuf-input's own example programs, `examples/queries.cr` and `examples/checklist.cr`, run once
+each on ghostty 1.3.2-main (`73534c468`), kitty 0.49.0, iTerm2 3.7.3 and Terminal.app 488. The
+reports are in `termbuf-input-0.6.0`. Nothing failed that was the shard's to fix; the one FAIL,
+Terminal.app's modifyOtherKeys step, was the checklist judging the next key after a Ctrl+. that sent
+nothing, and the checklist now says silence is an answer.
+
+* **Terminal.app 488** still answers no DECRQM, and focus, bracketed paste, the SGR mouse with
+  drag, the wheel and mode 1003 all work. `APPLE_TERMINAL_WATCHED` stands.
+* **ghostty's motion under 1002 did not reproduce.** Five seconds of moving the pointer with nothing
+  held gave no motion reports on ghostty, where round three saw a phantom right-button drag. The
+  build differs, so this says the main branch may have fixed it, not that termbuf can rely on it.
+* **Pixel sizes are in the terminal's own units.** ghostty and kitty report device pixels, doubled
+  on a Retina display; iTerm2 and Terminal.app report points and do not answer `CSI 16 t`.
+* **Mode 2048 and 2031** — in-band resize and colour-scheme updates — are supported by ghostty,
+  kitty and iTerm2. Terminal.app does not say.
+
 ### Rounds
 
 Round one, on 2026-09-06, asked for a focus report without requiring a focus out first and asked
