@@ -326,6 +326,7 @@ order it happened. `Event` is a module rather than a union, so this is a `when` 
 case event = terminal.events.receive
 when TermBuf::Events::Key      then handle event.key
 when TermBuf::Events::Mouse    then click event.x, event.y, event.button
+when TermBuf::Events::Focus    then dim unless event.focused
 when TermBuf::Events::Paste    then insert event.text
 when TermBuf::Events::Pasting  then show_notice event.bytes
 when TermBuf::Events::Resize   then redraw event.size
@@ -426,6 +427,17 @@ button is down — read `Events::Mouse#button`. `scripts/caps_check.cr` measures
 
 A report arrives as `Events::Mouse`, with its coordinates already converted to 0-based buffer
 cells.
+
+### Focus
+
+`Events::Focus` arrives when the window gains or loses focus, once mode 1004 is on. Detection says
+whether the terminal has it:
+
+```crystal
+if terminal.capabilities.includes? TermBuf::Capability::FocusEvents
+  terminal.enable TermBuf::Tty::FOCUS_EVENTS
+end
+```
 
 ### Hit testing
 
@@ -533,12 +545,33 @@ Detection is pessimistic by design: a terminal nobody recognises gets plain text
 full of escape sequences is worse than no escape sequences. Pass `probe: false` to `Terminal.open`
 to skip the queries.
 
+### Asking the terminal
+
+`Terminal#queries` is termbuf-input's `Input::Queries`, writing in order with the frames around it.
+The answer arrives on `#events`, or `Events::Unanswered` when the terminal has none:
+
+```crystal
+terminal.queries.ask TermBuf::Input::Query::BACKGROUND
+terminal.queries.ask TermBuf::Input::Query::CURSOR_POSITION
+
+case event = terminal.events.receive
+when TermBuf::Events::Color          then theme = event.dark? ? :dark : :light
+when TermBuf::Events::CursorPosition then anchor event.x, event.y
+when TermBuf::Events::Unanswered     then fallback event.query
+end
+```
+
+The cursor position, the text area in cells and pixels, the cell in pixels, the default, cursor and
+palette colours, a mode's support, the kitty keyboard flags, the device attributes and the
+terminal's name can all be asked. `Terminal#close` waits for outstanding answers before giving the
+terminal back.
+
 ### Passthrough and terminal replies
 
 `Drawing#passthrough` sends bytes to the terminal untouched, once the current frame is out. A reply
 from the terminal and a keystroke are not distinguishable by looking at them — an arrow key sends
 `ESC [ A`, and so could a terminal. What separates them is that the application asked for one.
-Register the shape of the answer before sending the query:
+For a question `#queries` does not cover, register the shape of the answer before sending it:
 
 ```crystal
 pattern = terminal.expect_response "\e[?", "$y"

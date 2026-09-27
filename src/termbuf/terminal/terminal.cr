@@ -8,6 +8,7 @@ require "../input"
 require "./command"
 require "./event"
 require "./meter"
+require "./quiet_writer"
 require "./tty"
 
 module TermBuf
@@ -536,6 +537,22 @@ module TermBuf
       Clipboard.new(@capabilities) { |bytes| issue Commands::Quiet.new(bytes) }
     end
 
+    # Questions for the terminal — where the cursor is, how big the window
+    # is, what colour the background is, whether a mode is supported — with
+    # the answers arriving on `#events`. See `Input::Queries`.
+    #
+    #     terminal.queries.ask TermBuf::Input::Query::BACKGROUND
+    #
+    # The questions go out in order with the frames around them, the way a
+    # colour change does. `#close` waits for outstanding answers before
+    # giving the terminal back, so none lands on the shell's command line.
+    getter queries : Input::Queries { build_queries }
+
+    private def build_queries : Input::Queries
+      writer = QuietWriter.new { |bytes| issue Commands::Quiet.new(bytes) }
+      Input::Queries.new @input, writer
+    end
+
     # Interns a hyperlink and returns the id a `Style` carries it by.
     #
     #     link = terminal.link "https://example.com"
@@ -884,6 +901,10 @@ module TermBuf
     # call from an exception handler.
     def close : Nil
       return if @closed
+
+      # An answer still in flight once raw mode is off is echoed as text.
+      @queries.try &.settle
+
       @closed = true
       stop_frame_scheduler
 

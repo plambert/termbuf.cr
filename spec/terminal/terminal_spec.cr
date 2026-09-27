@@ -1365,6 +1365,53 @@ Spectator.describe TermBuf::Terminal do
     end
   end
 
+  describe "queries" do
+    it "asks in order with the frames around it" do
+      with_harness do |harness|
+        harness.drain
+        harness.terminal.write 0, 0, "before"
+        harness.terminal.paint
+        harness.terminal.queries.ask TermBuf::Input::Query::BACKGROUND
+        harness.terminal.write 0, 1, "after"
+        harness.terminal.paint
+
+        written = harness.drain
+        leading, asked, trailing = written.partition "\e]11;?\a\e[c"
+        expect(asked).not_to be_empty
+        expect(leading).to contain "before"
+        expect(trailing).to contain "after"
+      end
+    end
+
+    it "delivers the answer on the terminal's events" do
+      with_harness do |harness|
+        harness.terminal.queries.ask TermBuf::Input::Query::CURSOR_POSITION
+        harness.type "\e[3;7R\e[?62c"
+
+        expect(harness.event_of(TermBuf::Events::CursorPosition))
+          .to eq TermBuf::Events::CursorPosition.new(6, 2)
+      end
+    end
+
+    # An answer arriving once the terminal is back in cooked mode is echoed
+    # onto the shell's command line.
+    it "waits for an outstanding answer before giving the terminal back" do
+      harness = Harness.new
+      queries = harness.terminal.queries
+      queries.ask TermBuf::Input::Query::CURSOR_POSITION
+
+      spawn do
+        sleep 100.milliseconds
+        harness.type "\e[3;7R\e[?62c"
+      end
+
+      harness.terminal.close
+      expect(queries.pending).to eq 0
+    ensure
+      harness.try &.close
+    end
+  end
+
   describe "the clipboard" do
     private CLIPPING = TermBuf::Capabilities.new(
       TermBuf::Capabilities::MODERN.flags | TermBuf::Capability::Osc52Clipboard)

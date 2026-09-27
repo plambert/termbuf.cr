@@ -6,6 +6,25 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- Requires termbuf-input 0.6. `Tty::Mode` is an alias for `Input::Mode`, which gained an optional
+  `query`, and the `Tty` mode constants are termbuf-input's. Names and sequences are unchanged.
+- The capability probe reads replies with `Input::Replies` and builds its requests from
+  `Input::Query`, in place of regexes and strings of its own.
+
+### Added
+
+- `Terminal#queries`, termbuf-input's `Input::Queries` writing through the owning fibre, so a
+  question goes out in order with the frames around it. `Terminal#close` waits for outstanding
+  answers before giving the terminal back.
+- `Events::Focus`, and aliases for the query answers: `Events::CursorPosition`, `TextAreaSize`,
+  `TextAreaPixels`, `CellPixels`, `ModeReport`, `KittyKeyboard`, `Color`, `DeviceAttributes`,
+  `TerminalName` and `Unanswered`.
+- `Tty::MODIFY_OTHER_KEYS`.
+- `measurements/termbuf-input-0.6.0`: termbuf-input's query and checklist reports from ghostty,
+  kitty, iTerm2 and Terminal.app 488, summarised in `measurements/CAPS.md`.
+
 ## [0.5.0] - 2026-09-11
 
 ### Changed
