@@ -21,7 +21,7 @@ description: |
 dependencies:
   termbuf-input:
     github: plambert/termbuf-input.cr
-    version: "~> 0.5"
+    version: "~> 0.6"
 
 development_dependencies:
   spectator:

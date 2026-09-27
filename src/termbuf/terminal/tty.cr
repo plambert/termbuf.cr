@@ -41,7 +41,8 @@ module TermBuf
     # Stability: stable — changes only in a major release.
     #
     # A terminal mode that can be turned on and off, and the sequences that do
-    # it.
+    # it. Defined in termbuf-input as `Input::Mode`, with the constants below,
+    # so a program that only reads the keyboard has them too.
     #
     # The *name* is what identity means here, not the sequences: turning the
     # same mode on twice must not send its set sequence twice. `KITTY_KEYBOARD`
@@ -49,81 +50,47 @@ module TermBuf
     # the one pop that `#leave` sends would leave the keyboard changed after
     # the program has gone.
     #
-    # The record and the mode constants below it are the stable part of `Tty`;
+    # The alias and the mode constants below it are the stable part of `Tty`;
     # the class around them is internal.
-    record Mode, name : String, set : String, reset : String
+    alias Mode = Input::Mode
 
-    # Pasted text arrives marked as pasted, rather than as a very fast typist
-    # triggering every key binding on the way past.
-    BRACKETED_PASTE = Mode.new "bracketed-paste", "\e[?2004h", "\e[?2004l"
+    # Pasted text arrives marked as pasted. See `Input::Mode::BRACKETED_PASTE`.
+    BRACKETED_PASTE = Input::Mode::BRACKETED_PASTE
 
-    # The terminal reports the window gaining and losing focus.
-    FOCUS_EVENTS = Mode.new "focus-events", "\e[?1004h", "\e[?1004l"
+    # The terminal reports the window gaining and losing focus, as
+    # `Events::Focus`. See `Input::Mode::FOCUS_EVENTS`.
+    FOCUS_EVENTS = Input::Mode::FOCUS_EVENTS
 
-    # Mouse reporting in the SGR encoding with mode 1000 — normal tracking,
-    # which reports the press and the release and nothing in between.
-    #
-    # This is the X10-compatible tracking every terminal has had for forty
-    # years, and no application in this shard wants it: a widget that takes
-    # the pointer on press never learns where it went, so nothing can be
-    # dragged. It is here to be measured. What a terminal does under 1000 and
-    # under 1002 when nothing is held down is a property of that terminal, and
-    # one that has been seen to differ from what the mode is defined as — a
-    # terminal that sends motion reports while no button is down makes a
-    # widget reading a motion report as "a button is held" wrong.
-    # `scripts/caps_check.cr` records the answer per terminal, and the mouse
-    # page of `examples/validate.cr` cycles the three modes so it can be
-    # watched.
-    #
-    # Shares the registry name `mouse-sgr` with the two below it; see
-    # `MOUSE_SGR_ANY` for what that means.
-    MOUSE_SGR_CLICKS = Mode.new "mouse-sgr", "\e[?1000h\e[?1006h", "\e[?1006l\e[?1000l"
+    # Mouse reporting in the SGR encoding with mode 1000, press and release
+    # only. Kept to be measured: `scripts/caps_check.cr` records what each
+    # terminal does under 1000 and 1002 with nothing held, and the mouse page
+    # of `examples/validate.cr` cycles the three modes so it can be watched.
+    MOUSE_SGR_CLICKS = Input::Mode::MOUSE_SGR_CLICKS
 
-    # Mouse reporting in the SGR encoding, which is the one that can name a
-    # column past 223. Both are asked for together, and given back in the
-    # reverse order.
-    #
-    # The tracking mode is 1002, button-event tracking: press, release, and
-    # motion while a button is held. Mode 1000 reports only the press and the
-    # release, so a widget that takes the pointer on press never learns where
-    # it went and nothing can be dragged. 1002 supersedes 1000 on every
-    # terminal that has the SGR encoding, which is the only kind this mode is
-    # for, so there is no reason to ask for the lesser one.
+    # Mouse reporting in the SGR encoding with mode 1002: press, release, and
+    # motion while a button is held. The one to reach for.
     #
     # Enabling this is the application's call — `terminal.enable
-    # TermBuf::Tty::MOUSE_SGR` — and nothing in this shard does it uninvited: a
-    # terminal reporting the mouse is one that no longer lets the person select
-    # and copy text with it, which is a trade only the application can weigh.
-    # Once it is on, a report arrives as `Events::Mouse` with its coordinates
-    # already converted to buffer cells. `Tty#leave` sends the reset.
-    #
-    # See `MOUSE_SGR_ANY` for the mode that reports motion with no button held
-    # as well, and `MOUSE_SGR_CLICKS` for the lesser one, which is kept to be
-    # measured rather than to be used.
-    MOUSE_SGR = Mode.new "mouse-sgr", "\e[?1002h\e[?1006h", "\e[?1006l\e[?1002l"
+    # TermBuf::Tty::MOUSE_SGR` — since a terminal reporting the mouse no longer
+    # lets the person select text with it. Reports arrive as `Events::Mouse`
+    # in buffer cells, and `Tty#leave` sends the reset.
+    MOUSE_SGR = Input::Mode::MOUSE_SGR
 
-    # Mouse reporting as `MOUSE_SGR`, but with mode 1003 — any-event tracking,
-    # which reports motion with no button held too. That is what hover needs:
-    # a highlight that follows the pointer, a tooltip, a cursor shape that
-    # changes over a hot spot.
+    # As `MOUSE_SGR`, with mode 1003: motion with no button held too, which is
+    # what hover needs. Every cell the pointer crosses is a report.
     #
-    # It is not the default because of what it costs. Every cell the pointer
-    # travels over is a report, so crossing a wide terminal is a hundred events
-    # to read, decode, and act on, and over ssh it is a hundred packets. An
-    # application that only drags wants `MOUSE_SGR`.
-    #
-    # All three share the registry name `mouse-sgr`, because the terminal has
-    # one mouse tracking mode and not three: asking for 1003 after 1002
-    # replaces the tracking rather than adding to it. `Tty#enable` writes a replacement of
-    # the same name whose bytes differ, so the change reaches the terminal, and
-    # `#leave` sends the one reset that belongs to whichever was asked for
-    # last.
-    MOUSE_SGR_ANY = Mode.new "mouse-sgr", "\e[?1003h\e[?1006h", "\e[?1006l\e[?1003l"
+    # All three mouse modes share the name `mouse-sgr`, because the terminal
+    # has one tracking mode. `Tty#enable` writes a replacement of the same name
+    # whose bytes differ, and `#leave` sends the reset of whichever was asked
+    # for last.
+    MOUSE_SGR_ANY = Input::Mode::MOUSE_SGR_ANY
 
-    # The kitty keyboard protocol, which tells apart keystrokes an ordinary
-    # terminal reports identically. This pushes a flag set onto the terminal's
-    # own stack and the reset pops it.
-    KITTY_KEYBOARD = Mode.new "kitty-keyboard", "\e[>1u", "\e[<u"
+    # The kitty keyboard protocol. The set pushes a flag set onto the
+    # terminal's own stack and the reset pops it.
+    KITTY_KEYBOARD = Input::Mode::KITTY_KEYBOARD
+
+    # xterm's modifyOtherKeys at level 2. See `Input::Mode::MODIFY_OTHER_KEYS`.
+    MODIFY_OTHER_KEYS = Input::Mode::MODIFY_OTHER_KEYS
 
     # Every mode registered on this terminal, in the order it was enabled.
     # `#leave` resets them in the reverse of that order.
