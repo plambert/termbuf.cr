@@ -79,6 +79,36 @@ module TermBuf
       nil
     end
 
+    # How many pixels one cell measures, from the same ioctl, or `nil` when the
+    # terminal does not say.
+    #
+    # `TIOCGWINSZ` carries the window in pixels beside the window in cells, and
+    # one divided by the other is a cell. Plenty of terminals fill in the cells
+    # and leave the pixels at zero, which is why this answers `nil` rather than
+    # guessing: a cell's shape cannot be inferred from anything else, and an
+    # image scaled against a guess comes out the wrong shape. See
+    # `ImageStore#cell_size`.
+    #
+    # There is no environment or `stty` fallback. Neither reports pixels.
+    def cell_pixels(fd : Int32? = nil) : {Int32, Int32}?
+      descriptors = fd ? [fd] : [1, 0, 2]
+
+      descriptors.each do |descriptor|
+        size = uninitialized LibC::TermBufWinsize
+        next unless LibC.ioctl(descriptor, TIOCGWINSZ, pointerof(size)).zero?
+        next if size.ws_col.zero? || size.ws_row.zero?
+        next if size.ws_xpixel.zero? || size.ws_ypixel.zero?
+
+        width = size.ws_xpixel.to_i // size.ws_col.to_i
+        height = size.ws_ypixel.to_i // size.ws_row.to_i
+        next unless width > 0 && height > 0
+
+        return {width, height}
+      end
+
+      nil
+    end
+
     # `COLUMNS` and `LINES`, which a shell exports and which can be set by hand
     # when nothing else knows.
     def from_env(env : Hash(String, String)) : ScreenSize?

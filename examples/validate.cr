@@ -1565,10 +1565,11 @@ module Validate
       end
 
       lines << if caps.includes? Capability::KittyGraphics
-        "[i] shows the swatch over the text on the left and under it on the right, then " \
-        "one more per press stepping #{CASCADE[0]} right and #{CASCADE[1]} down, " \
-        "#{CASCADE_LIMIT} at most. Each of those shows one quarter of the swatch, so a " \
-        "terminal that ignores a crop draws the whole gradient instead; [x] clears them."
+        "[i] shows the swatch over the text on the left and under it on the right, both " \
+        "stretched across their box, then one more per press stepping #{CASCADE[0]} right " \
+        "and #{CASCADE[1]} down, #{CASCADE_LIMIT} at most. Each of those shows one quarter " \
+        "of the swatch and keeps it square, so a terminal that ignores a crop draws the " \
+        "whole gradient and one that ignores the fit draws it wide; [x] clears them."
       else
         "no #{Capability::KittyGraphics} here: [i] and [x] place nothing."
       end
@@ -1682,8 +1683,11 @@ module Validate
       image = (@swatch ||= images.register swatch)
 
       if image.placements.empty?
-        image.show inset(OVER_BOX), z: 1
-        image.show inset(UNDER_BOX), z: -1
+        # Stretched, because what these two are for is showing which of the
+        # picture and the text is on top, and a picture that kept its
+        # proportions would leave half the text uncovered.
+        image.show inset(OVER_BOX), z: 1, fit: :stretch
+        image.show inset(UNDER_BOX), z: -1, fit: :stretch
         return
       end
 

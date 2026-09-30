@@ -6,13 +6,27 @@ module TermBuf
   # One showing of an image: which image, the cells it covers, and which of its
   # pixels it shows.
   #
-  # A handle rather than a value. `#move`, `#z=` and `#crop=` change what is
-  # on screen and send nothing but the new position, because the terminal
+  # A handle rather than a value. `#move`, `#z=`, `#crop=` and `#fit=` change
+  # what is on screen and send nothing but the new position, because the terminal
   # already has the pixels.
   #
   # One image may be on screen any number of times, each showing a different
   # part of it, which is how a sheet of sprites works. See `#crop`.
   class Placement
+    # What to do when the picture and the cells it was given are not the same
+    # shape.
+    enum Fit
+      # Draw the whole picture inside those cells, at its own proportions, and
+      # centre it in what it does not fill. The default, because a picture shown
+      # in a box is a picture somebody wants to look at.
+      Inside
+
+      # Draw it across exactly those cells whatever that does to it. What a
+      # backdrop wants, and what to say for a picture that is meant to be
+      # stretched.
+      Stretch
+    end
+
     # Which image this shows.
     getter image : Image
 
@@ -47,6 +61,21 @@ module TermBuf
     # where they are left out.
     getter crop : Rect?
 
+    # What to do when the picture and `#bounds` are not the same shape.
+    getter fit : Fit
+
+    # The cells the picture is actually drawn across.
+    #
+    # `#bounds` is what was asked for; this is what that came to. Under
+    # `Fit::Inside` it is as large as the picture's own proportions allow inside
+    # `#bounds`, centred in it, so a portrait cover in a wide box covers the
+    # middle of it and no more. Under `Fit::Stretch` the two are the same.
+    #
+    # They are also the same where the fit could not be worked out, which is
+    # where `ImageStore#cell_size` is unknown or the picture's own size is. See
+    # `Fit`.
+    getter drawn : Rect
+
     # Whether this is still on screen. `#hide` is what takes one off, and
     # nothing can be done with it afterwards.
     getter? shown : Bool = true
@@ -55,7 +84,10 @@ module TermBuf
     # screen, and one made without the store knowing would name a placement id
     # the terminal has never heard of.
     protected def initialize(@image : Image, @id : UInt32, @bounds : Rect,
-                             @z : Int32 = 0, @crop : Rect? = nil)
+                             @z : Int32 = 0, @crop : Rect? = nil,
+                             @fit : Fit = Fit::Inside)
+      # Until the store has measured it, which it does before anything goes out.
+      @drawn = @bounds
     end
 
     # Whether this sits beneath the text rather than over it.
@@ -104,6 +136,15 @@ module TermBuf
       rect
     end
 
+    # Draws the picture the other way in the same cells. See `Fit`.
+    def fit=(value : Fit) : Fit
+      return value if value == @fit
+
+      @fit = value
+      repeat
+      value
+    end
+
     # Takes this one showing off the screen and leaves the pixels at the far
     # end. Other placements of the same image stay where they are.
     def hide : Nil
@@ -113,6 +154,12 @@ module TermBuf
     # Set by the store, once, from `#hide`.
     protected def shown=(value : Bool) : Bool
       @shown = value
+    end
+
+    # Set by the store every time it works the geometry out, which is every time
+    # anything about this placement changes.
+    protected def drawn=(value : Rect) : Rect
+      @drawn = value
     end
 
     # Sends the placement again, which is what changing one amounts to.
@@ -129,7 +176,9 @@ module TermBuf
     def to_s(io : IO) : Nil
       io << "#<TermBuf::Placement i=" << @image.id << " p=" << @id
       io << " at " << @bounds
+      io << " drawn " << @drawn unless @drawn == @bounds
       io << " z=" << @z unless @z.zero?
+      io << ' ' << @fit.to_s.downcase unless @fit.inside?
       if window = @crop
         io << " of " << window
       end

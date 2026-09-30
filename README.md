@@ -96,7 +96,7 @@ including on an exception or a signal; without a block, `Terminal#close` does it
 | `Capability` `Capabilities` | what the terminal can do | `includes?` `with` `without` |
 | `Quirk` | what it gets wrong | `per_code_point_columns?` |
 | `Unicode` `WidthPolicy` | measuring and fitting text | `string_width` `truncate` `fit` `window` |
-| `ImageStore` `Pixels` `Image` `Placement` | pictures over the cells | `register` `show` `frame` |
+| `ImageStore` `Pixels` `Image` `Placement` | pictures over the cells | `register` `show` `frame` `fit` |
 | `ColorStack` | the terminal's own colours | `saved` `background=` `[]=` |
 | `Clipboard` | OSC 52 | `copy` |
 | `Events` | everything that arrives on the channel | `Key` `Mouse` `Paste` `Resize` `Timer` |
@@ -782,7 +782,7 @@ Three things with three lifetimes. `Pixels` are a value with no id and no termin
 ```crystal
 sparkline = terminal.images.register TermBuf::Pixels.rgb(bytes, 64, 16)
 sparkline.upload                                                 # the bytes, no placement
-here = sparkline.show TermBuf::Rect.new(2, 4, 16, 2)
+here = sparkline.show TermBuf::Rect.new(2, 4, 16, 2)             # fitted, not stretched
 under = sparkline.show TermBuf::Rect.new(2, 8, 16, 2), z: -1      # under the text
 here.move TermBuf::Rect.new(4, 4, 16, 2)                         # the position, not the pixels
 under.hide                                                       # this showing only
@@ -803,6 +803,26 @@ sent again on a forced repaint, and the pictures come down when the terminal is 
 
 A placement is permanent. Nothing takes one off the screen until something asks, so a background
 picture behind a panel is put up once and forgotten about.
+
+#### Fitting and stretching
+
+A picture and the cells it is given are rarely the same shape. `Placement#fit` says what to do about
+that, and the default is to keep the picture's proportions:
+
+```crystal
+cover.show TermBuf::Rect.new(0, 0, 79, 17)                   # the whole picture, centred
+cover.show TermBuf::Rect.new(0, 0, 79, 17), fit: :stretch    # across all of it, out of shape
+```
+
+A 255 by 340 cover in 79 by 17 cells comes out 204 by 272 pixels, 26 cells wide, in the middle of
+the box. `Placement#bounds` is what was asked for and `Placement#drawn` is what that came to, so an
+application can see both.
+
+The fit is worked out from `ImageStore#cell_size`, which `Terminal#images` reads from `TIOCGWINSZ`.
+Many terminals answer that with zeroes, and an application that knows better can set it. Where it is
+unknown, or where a `Pixels.png` carried a header that would not parse, there is nothing to fit
+against and the rectangle is filled instead — which at least stays inside the cells that were asked
+for.
 
 #### A sheet of sprites
 

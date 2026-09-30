@@ -18,6 +18,31 @@ private def box(x = 0, y = 0, width = 2, height = 1) : TermBuf::Rect
   TermBuf::Rect.new x, y, width, height
 end
 
+# What every terminal this shard was measured against calls a cell.
+private CELL = {8, 16}
+
+# A store that knows how large a cell is, which is what a fit needs.
+private def fitting(capabilities = graphics) : TermBuf::ImageStore
+  made = TermBuf::ImageStore.new capabilities
+  made.cell_size = CELL
+  made
+end
+
+# The first bytes of a real PNG: the signature, then the length and the type of
+# the `IHDR` chunk, then the width and the height as big-endian 32 bit counts.
+# Nothing past that is read, so nothing past that is built.
+private def png_header(width : UInt32, height : UInt32, marker = "IHDR") : Bytes
+  bytes = IO::Memory.new
+  bytes.write Bytes[137, 80, 78, 71, 13, 10, 26, 10]
+  bytes.write_bytes 13_u32, IO::ByteFormat::BigEndian
+  bytes << marker
+  bytes.write_bytes width, IO::ByteFormat::BigEndian
+  bytes.write_bytes height, IO::ByteFormat::BigEndian
+  # The rest of IHDR: bit depth, colour type, compression, filter, interlace.
+  bytes.write Bytes[8, 2, 0, 0, 0]
+  bytes.to_slice
+end
+
 # The escape sequences a store has queued, with the cursor moves left out.
 private def sequences(made : TermBuf::ImageStore) : Array(String)
   made.take_pending.select &.starts_with? "\e_G"
@@ -42,6 +67,33 @@ Spectator.describe TermBuf::Pixels do
   # to be told them.
   it "takes a png without dimensions" do
     expect(TermBuf::Pixels.png(Bytes[137_u8, 80_u8]).width).to eq 0
+  end
+
+  describe "a png's own size" do
+    it "reads the width and the height out of the header" do
+      pixels = TermBuf::Pixels.png png_header(7_u32, 11_u32)
+
+      expect(pixels.width).to eq 7
+      expect(pixels.height).to eq 11
+      expect(pixels.format).to eq TermBuf::Pixels::Format::Png
+    end
+
+    # The shard does not decode and does not validate. Bytes that are not a PNG
+    # are still bytes a terminal may know what to do with.
+    it "leaves both at zero for anything it cannot read" do
+      expect(TermBuf::Pixels.png(Bytes[1_u8, 2_u8, 3_u8, 4_u8]).width).to eq 0
+      expect(TermBuf::Pixels.png(png_header(7_u32, 11_u32)[0, 20]).width).to eq 0
+      expect(TermBuf::Pixels.png(png_header(7_u32, 11_u32, "iTXt")).width).to eq 0
+      broken = png_header 7_u32, 11_u32
+      broken[1] = 0_u8
+      expect(TermBuf::Pixels.png(broken).width).to eq 0
+    end
+
+    # Nothing this shard can hold and nothing any terminal will draw.
+    it "leaves them at zero for a size past what an Int32 holds" do
+      expect(TermBuf::Pixels.png(png_header(0xFFFF_FFFF_u32, 11_u32)).width).to eq 0
+      expect(TermBuf::Pixels.png(png_header(7_u32, 0xFFFF_FFFF_u32)).height).to eq 0
+    end
   end
 
   it "refuses pixels that do not match the dimensions" do
@@ -281,6 +333,149 @@ Spectator.describe TermBuf::ImageStore do
       expect(sent.count(&.includes? "a=T")).to eq 1
       expect(sent.count(&.includes? "a=p")).to eq 1
       expect(sheet.placements.size).to eq 2
+    end
+  end
+
+  # A put carrying both `c=` and `r=` fills those cells whatever that does to the
+  # picture's proportions. Measured against ghostty 1.3.2: a 255x340 cover put
+  # across 79x17 cells came out 632x272 pixels, which is 2.32 wide to tall where
+  # the picture is 0.75. A put carrying one of them works the other out and keeps
+  # the proportions, which is what fitting sends.
+  describe "a fit" do
+    # A cover the shape the application that found this draws: taller than wide.
+    def cover : TermBuf::Pixels
+      swatch 255, 340
+    end
+
+    it "names one side and lets the terminal work the other out" do
+      made = fitting
+      made.register(cover).show TermBuf::Rect.new(0, 0, 79, 17)
+
+      sent = sequences(made).first
+      expect(sent).to contain "r=17,"
+      expect(sent).not_to contain "c="
+    end
+
+    it "names both sides when it is told to stretch" do
+      made = fitting
+      made.register(cover).show TermBuf::Rect.new(0, 0, 79, 17), fit: :stretch
+
+      sent = sequences(made).first
+      expect(sent).to contain "c=79,r=17,"
+    end
+
+    # The box is 632x272 pixels, the picture 255x340, so the height runs out
+    # first and 204 pixels of width is 26 cells of the 79.
+    it "centres a tall picture in a wide box" do
+      made = fitting
+      here = made.register(cover).show TermBuf::Rect.new(0, 0, 79, 17)
+
+      expect(here.bounds).to eq TermBuf::Rect.new(0, 0, 79, 17)
+      expect(here.drawn).to eq TermBuf::Rect.new(26, 0, 26, 17)
+    end
+
+    # The other way round: 320x80 pixels in 20x20 cells is 160x160 pixels, so the
+    # width runs out first and 40 pixels of height is 3 cells of the 20.
+    it "centres a wide picture in a tall box" do
+      made = fitting
+      here = made.register(swatch 320, 80).show TermBuf::Rect.new(0, 0, 20, 20)
+
+      expect(here.drawn).to eq TermBuf::Rect.new(0, 8, 20, 3)
+      expect(sequences(made).first).to contain "c=20,"
+    end
+
+    # The cursor goes to the top left of what is drawn, not of what was asked
+    # for, which is the whole of the centring.
+    it "puts the cursor where the picture starts" do
+      made = fitting
+      made.register(cover).show TermBuf::Rect.new(0, 0, 79, 17)
+
+      expect(made.take_pending.first).to eq "\e[1;27H"
+    end
+
+    it "fills a box the picture is already the shape of" do
+      made = fitting
+      here = made.register(swatch 160, 160).show TermBuf::Rect.new(0, 0, 20, 10)
+
+      expect(here.drawn).to eq here.bounds
+    end
+
+    # A crop is the part being shown, so a crop decides the proportions.
+    # Measured: `c=4` of a 16x16 crop of a 64x16 image came out square.
+    it "goes by the crop where there is one" do
+      made = fitting
+      sheet = made.register swatch 320, 80
+      here = sheet.show TermBuf::Rect.new(0, 0, 20, 20), crop: TermBuf::Rect.new(0, 0, 80, 80)
+
+      expect(here.drawn).to eq TermBuf::Rect.new(0, 5, 20, 10)
+    end
+
+    it "fills the box when nothing has said how large a cell is" do
+      made = store
+      here = made.register(cover).show TermBuf::Rect.new(0, 0, 79, 17)
+
+      expect(made.cell_size).to be_nil
+      expect(here.drawn).to eq here.bounds
+      expect(sequences(made).first).to contain "c=79,r=17,"
+    end
+
+    # A `Png` whose header would not parse has no size to fit against.
+    it "fills the box when the picture's own size is unknown" do
+      made = fitting
+      unknown = TermBuf::Pixels.png Bytes[1_u8, 2_u8, 3_u8, 4_u8]
+      here = made.register(unknown).show TermBuf::Rect.new(0, 0, 79, 17)
+
+      expect(here.drawn).to eq here.bounds
+      expect(sequences(made).first).to contain "c=79,r=17,"
+    end
+
+    it "measures again and puts everything back when the cell size changes" do
+      made = store
+      here = made.register(cover).show TermBuf::Rect.new(0, 0, 79, 17)
+      made.take_pending
+
+      made.cell_size = CELL
+
+      expect(here.drawn).to eq TermBuf::Rect.new(26, 0, 26, 17)
+      expect(sequences(made).count(&.includes? "r=17,")).to eq 1
+    end
+
+    it "says nothing when the cell size did not change" do
+      made = fitting
+      made.register(cover).show TermBuf::Rect.new(0, 0, 79, 17)
+      made.take_pending
+
+      made.cell_size = CELL
+
+      expect(made.take_pending).to be_empty
+    end
+
+    it "draws the picture the other way without sending it again" do
+      made = fitting
+      here = made.register(cover).show TermBuf::Rect.new(0, 0, 79, 17)
+      made.take_pending
+
+      here.fit = :stretch
+
+      sent = sequences made
+      expect(sent.size).to eq 1
+      expect(sent.first).to contain "a=p"
+      expect(sent.first).to contain "c=79,r=17,"
+      expect(here.drawn).to eq here.bounds
+    end
+
+    it "takes a frame's placement back only when the fit is the same" do
+      made = fitting
+      image = made.register cover
+      wide = TermBuf::Rect.new 0, 0, 79, 17
+      made.frame &.show(image, wide)
+      made.take_pending
+
+      made.frame &.show(image, wide)
+      expect(made.take_pending).to be_empty
+
+      made.frame &.show(image, wide, fit: :stretch)
+      expect(sequences(made).count(&.includes? "c=79,r=17,")).to eq 1
     end
   end
 

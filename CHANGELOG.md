@@ -6,6 +6,37 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- A placement no longer distorts the picture. Every put carried both `c=` and `r=`, and a put with
+  both scales the picture to fill those cells whatever shape it was: measured against ghostty 1.3.2,
+  a 255x340 cover put across 79x17 cells came out 632x272 pixels, 2.32 wide to tall where the
+  picture is 0.75. A put carrying one of the two works the other side out itself and keeps the
+  proportions, so that is what goes now, for whichever side runs out of room first, and the cells
+  left over centre what is drawn. The same cover now comes out 204x272 across 26 of the 79 columns.
+
+  This changes what an existing `#show` draws, which is the point: it was a defect. `fit: :stretch`
+  is the old behaviour, by name.
+
+### Added
+
+- `Placement#fit`, a `Placement::Fit` of `Inside` or `Stretch`, taken by `Image#show` and
+  `ImageStore::Frame#show` and settable afterwards. `Inside` is the default.
+- `Placement#drawn`, the cells the picture is actually drawn across, against `#bounds` which is what
+  was asked for. Under `Fit::Inside` the first sits centred inside the second.
+- `ImageStore#cell_size`, how many pixels one cell measures, which is the only thing a fit cannot be
+  worked out without: a box of cells is a wide rectangle or a tall one depending on it.
+  `Terminal#images` sets it from `TIOCGWINSZ` and sets it again on a resize, since changing the font
+  changes it; an application that knows better can set it itself. Unknown, a placement fills its box
+  and says so through `#drawn`.
+- `SizeDetector.cell_pixels` and `Tty#cell_size`, the ioctl behind that. `nil` where the terminal
+  answers with zeroes, which many do. There is no environment or `stty` fallback, because neither
+  reports pixels.
+- `Pixels.png` reads the width and the height out of the `IHDR`, so a fit has something to work
+  from without anything being decoded. `Pixels.png_dimensions` is the parse on its own. Bytes that
+  are not a PNG still come through, with both left at zero, because the shard does not validate and
+  a terminal may still know what to do with them.
+
 ## [0.7.0] - 2026-09-29
 
 ### Changed

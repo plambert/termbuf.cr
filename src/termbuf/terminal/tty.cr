@@ -148,6 +148,13 @@ module TermBuf
       SizeDetector.detect @output_fd
     end
 
+    # How many pixels one cell measures, or `nil` where the terminal does not
+    # say. Asked afresh for the same reason, since changing the font changes it.
+    # See `SizeDetector.cell_pixels`.
+    def cell_size : {Int32, Int32}?
+      SizeDetector.cell_pixels @output_fd
+    end
+
     # Blanks the line the cursor is on, using nothing but a carriage return and
     # spaces.
     #

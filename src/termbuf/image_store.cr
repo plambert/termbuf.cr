@@ -86,6 +86,20 @@ module TermBuf
     # and which transport carries it.
     getter capabilities : Capabilities
 
+    # How many pixels one cell measures, or `nil` where nothing has said.
+    #
+    # This is what a fit is worked out from: without it there is no telling
+    # whether a box of cells is a wide rectangle or a tall one, and a picture
+    # scaled against a guess comes out the wrong shape. A placement whose fit
+    # cannot be worked out fills its box instead, which at least stays inside
+    # what the application asked for. See `Placement#fit`.
+    #
+    # `Terminal#images` sets it from `TIOCGWINSZ`, which plenty of terminals
+    # answer with zeroes. An application that knows better — because it asked the
+    # terminal with a `CSI 16 t`, or because it was told — can set it here, and
+    # every placement is measured again and put back.
+    getter cell_size : {Int32, Int32}?
+
     def initialize(@capabilities : Capabilities)
       @mutex = Mutex.new
       @registry = {} of UInt32 => Image
@@ -98,6 +112,17 @@ module TermBuf
       @files = [] of String
       @pending = [] of String
       @lost = [] of UInt32
+    end
+
+    # Says how large a cell is, and puts every placement back at the size that
+    # makes. See `#cell_size`.
+    def cell_size=(size : {Int32, Int32}?) : {Int32, Int32}?
+      return size if size == @cell_size
+
+      @cell_size = size
+      absorb_lost
+      @screen.each { |placement| draw placement }
+      size
     end
 
     # A path in the system temporary directory named so that a terminal will
@@ -312,10 +337,11 @@ module TermBuf
     end
 
     # Puts an image on the screen. See `Image#show`.
-    protected def show(image : Image, bounds : Rect, z : Int32, crop : Rect?) : Placement
+    protected def show(image : Image, bounds : Rect, z : Int32, crop : Rect?,
+                       fit : Placement::Fit) : Placement
       check image
       absorb_lost
-      place image, bounds, z, crop
+      place image, bounds, z, crop, fit
     end
 
     # Takes every placement of an image off the screen. See `Image#hide`.
@@ -368,15 +394,15 @@ module TermBuf
 
     # What `Frame#show` does. Kept here because the diffing is the store's.
     protected def frame_show(image : Image, bounds : Rect, z : Int32,
-                             crop : Rect?) : Placement
+                             crop : Rect?, fit : Placement::Fit) : Placement
       check image
 
-      if taken = take_held image, bounds, z, crop
+      if taken = take_held image, bounds, z, crop, fit
         @owned << taken
         return taken
       end
 
-      placement = place image, bounds, z, crop
+      placement = place image, bounds, z, crop, fit
       @owned << placement
       placement
     end
@@ -407,12 +433,12 @@ module TermBuf
     # A placement the last frame put up that is exactly what is being asked for,
     # taken off the held list so `#settle` leaves it alone.
     private def take_held(image : Image, bounds : Rect, z : Int32,
-                          crop : Rect?) : Placement?
+                          crop : Rect?, fit : Placement::Fit) : Placement?
       return if @held.empty?
 
       index = @held.index do |placement|
         placement.image.same?(image) && placement.bounds == bounds &&
-          placement.z == z && placement.crop == crop
+          placement.z == z && placement.crop == crop && placement.fit == fit
       end
       return unless index
 
@@ -420,9 +446,9 @@ module TermBuf
     end
 
     private def place(image : Image, bounds : Rect, z : Int32,
-                      crop : Rect?) : Placement
+                      crop : Rect?, fit : Placement::Fit) : Placement
       @next_placement += 1
-      placement = Placement.new image, @next_placement, bounds, z, crop
+      placement = Placement.new image, @next_placement, bounds, z, crop, fit
       @screen << placement
       reput image, except: placement if draw placement
       placement
@@ -509,30 +535,109 @@ module TermBuf
     # has not got them. Answers whether the pixels went, because that takes the
     # image's other placements with it. See `#reput`.
     private def draw(placement : Placement) : Bool
+      box, extent = measure placement
+      placement.drawn = box
       return false unless available?
 
       # The cursor has to be where the image goes, and must not be moved by the
       # placement itself, or the encoder's idea of where it is stops being true.
-      emit "\e[#{placement.y + 1};#{placement.x + 1}H"
+      # Where a fit left cells over, this is the middle of the box rather than
+      # its corner, which is the whole of the centring.
+      emit "\e[#{box.y + 1};#{box.x + 1}H"
 
       image = placement.image
       if image.uploaded?
-        emit "#{APC}a=p,#{placement_keys placement}#{ST}"
+        emit "#{APC}a=p,#{placement_keys placement, extent}#{ST}"
         return false
       end
 
-      transmit image, placement
+      transmit image, placement, extent
       true
     end
 
-    private def placement_keys(placement : Placement) : String
+    # The cells a placement covers, and the `c=` or `r=` that puts it there.
+    #
+    # `Fit::Stretch` sends both, which fills the rectangle and distorts whatever
+    # is not already its shape. `Fit::Inside` sends one, because a put given only
+    # `c=` or only `r=` works the other side out itself and keeps the picture's
+    # proportions: measured against ghostty 1.3.2, where an 8x32 image put with
+    # `c=10` came out 80x320 pixels across 10x20 cells, with `r=4` came out 16x64
+    # across 2x4, and with both keys came out 80x64 across the 10x4 it was told.
+    # The key that goes is for whichever side runs out of room first, so what is
+    # drawn never spills past the rectangle, and the cells left over are split to
+    # centre it.
+    #
+    # A crop decides the proportions where there is one, since that is the part
+    # being shown — also measured: `c=4` of a 16x16 crop of a 64x16 image came out
+    # square.
+    #
+    # Filling is the fallback wherever the fit cannot be worked out: without
+    # `#cell_size` there is no telling a wide box of cells from a tall one, and
+    # without the picture's own size there is nothing to fit. Filling at least
+    # stays inside the cells the application asked for, which naming one key
+    # would not: the same 8x32 image put with `c=10` alone wants twenty rows.
+    private def measure(placement : Placement) : {Rect, String}
+      box = placement.bounds
+      filled = {box, "c=#{box.width},r=#{box.height},"}
+      return filled if placement.fit.stretch? || box.empty?
+
+      cell = @cell_size
+      return filled unless cell && cell[0] > 0 && cell[1] > 0
+
+      shown = shown_size placement
+      return filled unless shown
+
+      room = {box.width * cell[0], box.height * cell[1]}
+      # Cross-multiplied rather than divided, so nothing rounds before the
+      # comparison: the picture is wider than the room if w/h > room_w/room_h.
+      if shown[0] * room[1] >= shown[1] * room[0]
+        across = box.width
+        down = in_cells shown[1] * room[0] // shown[0], cell[1], box.height
+        keys = "c=#{box.width},"
+      else
+        down = box.height
+        across = in_cells shown[0] * room[1] // shown[1], cell[0], box.width
+        keys = "r=#{box.height},"
+      end
+
+      {centred(box, across, down), keys}
+    end
+
+    # The pixels a placement shows: its crop, or the whole picture, or nothing at
+    # all for a `Png` whose header would not parse.
+    private def shown_size(placement : Placement) : {Int32, Int32}?
+      if crop = placement.crop
+        return crop.width > 0 && crop.height > 0 ? {crop.width, crop.height} : nil
+      end
+
+      pixels = placement.image.pixels
+      return unless pixels.width > 0 && pixels.height > 0
+
+      {pixels.width, pixels.height}
+    end
+
+    # How many cells *pixels* reach across, rounded up the way a terminal counts
+    # them — measured against ghostty 1.3.2, where 200 pixels of a 16 pixel cell
+    # came out thirteen cells and not twelve. Never more than the box and never
+    # less than one.
+    private def in_cells(pixels : Int32, cell : Int32, limit : Int32) : Int32
+      ((pixels + cell - 1) // cell).clamp 1, limit
+    end
+
+    # *box* with a picture *across* by *down* cells in the middle of it, with any
+    # odd cell left at the right or the bottom.
+    private def centred(box : Rect, across : Int32, down : Int32) : Rect
+      Rect.new box.x + (box.width - across) // 2, box.y + (box.height - down) // 2,
+        across, down
+    end
+
+    private def placement_keys(placement : Placement, extent : String) : String
       # `z` is left out at zero rather than sent as `z=0`, which is what the
       # protocol defaults to: bytes on the wire for nothing said.
       depth = placement.z.zero? ? "" : "z=#{placement.z},"
 
       "i=#{placement.image.id},p=#{placement.id}," \
-      "c=#{placement.bounds.width},r=#{placement.bounds.height}," \
-      "#{crop_keys placement.crop}#{depth}C=1,#{QUIET}"
+      "#{extent}#{crop_keys placement.crop}#{depth}C=1,#{QUIET}"
     end
 
     # The rectangle of the image a placement shows, in the image's own pixels,
@@ -548,12 +653,13 @@ module TermBuf
     # `a=T` transmits and puts in one sequence, which is what an application
     # that has just fetched a picture and wants it on screen now needs. `a=t`
     # transmits and puts nothing, which is what `Image#upload` is.
-    private def transmit(image : Image, placement : Placement?) : Nil
+    private def transmit(image : Image, placement : Placement?,
+                         extent : String = "") : Nil
       return unless available?
 
       pixels = image.pixels
       action = placement ? "a=T" : "a=t"
-      tail = placement ? placement_keys(placement) : "i=#{image.id},#{QUIET}"
+      tail = placement ? placement_keys(placement, extent) : "i=#{image.id},#{QUIET}"
       keys = "#{action},f=#{pixels.format.value},#{dimensions pixels}#{tail}"
 
       image.uploaded = true
@@ -632,11 +738,12 @@ module TermBuf
 
       # Asks for *image* across the cells of *bounds* for this frame.
       #
-      # *z* decides what it sits over and *crop* which of the image's own
-      # pixels it shows. See `Placement#z` and `Placement#crop`.
-      def show(image : Image, bounds : Rect, z : Int32 = 0,
-               crop : Rect? = nil) : Placement
-        @store.frame_show image, bounds, z, crop
+      # *z* decides what it sits over, *crop* which of the image's own pixels it
+      # shows, and *fit* what to do when the picture is not the shape of the
+      # cells. See `Placement#z`, `Placement#crop` and `Placement#fit`.
+      def show(image : Image, bounds : Rect, z : Int32 = 0, crop : Rect? = nil,
+               fit : Placement::Fit = Placement::Fit::Inside) : Placement
+        @store.frame_show image, bounds, z, crop, fit
       end
     end
   end

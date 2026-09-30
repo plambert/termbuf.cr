@@ -72,8 +72,13 @@ module TermBuf
     # *crop* shows a rectangle of the image's own pixels rather than all of
     # them, which is how one sheet of sprites shows a different cell in each of
     # several places. See `Placement#crop`.
-    def show(bounds : Rect, z : Int32 = 0, crop : Rect? = nil) : Placement
-      @store.show self, bounds, z, crop
+    #
+    # *fit* says what to do when the picture is not the shape of the cells it was
+    # given. The whole picture goes inside them at its own proportions unless
+    # something asks for it stretched across them. See `Placement#fit`.
+    def show(bounds : Rect, z : Int32 = 0, crop : Rect? = nil,
+             fit : Placement::Fit = Placement::Fit::Inside) : Placement
+      @store.show self, bounds, z, crop, fit
     end
 
     # Everywhere this image is on screen, oldest first.

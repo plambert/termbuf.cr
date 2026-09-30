@@ -482,6 +482,11 @@ module TermBuf
 
     private def build_image_store : ImageStore
       store = ImageStore.new @capabilities
+      # How large a cell is, which is what a picture's shape is worked out
+      # against. The same ioctl the screen size comes from; many terminals answer
+      # it with zeroes, and then a placement fills its box instead of fitting
+      # inside it. An application that knows better can say so.
+      store.cell_size = @tty.cell_size
 
       # A graphics reply is an escape sequence the application did not ask for,
       # and without a pattern registered the decoder would hand it over as
@@ -1215,7 +1220,13 @@ module TermBuf
       # An image that no longer fits is gone; the terminal dropped it when the
       # screen shrank under it, and keeping a placement it does not have would
       # have the next forced repaint redraw a picture into the wrong cells.
-      @images.try &.resize size.columns, size.rows
+      # The cell size is asked again as well, since a window resized by changing
+      # the font is a resize too and every fit is measured against it.
+      images = @images
+      if images
+        images.resize size.columns, size.rows
+        images.cell_size = @tty.cell_size
+      end
       @buffer.invalidate
 
       run_resize_handlers size

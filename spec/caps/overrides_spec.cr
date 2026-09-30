@@ -199,4 +199,31 @@ Spectator.describe TermBuf::SizeDetector do
       expect(size.rows).to be > 0
     end
   end
+
+  # There is no answer to check against: whether the ioctl reports pixels at all
+  # depends on the terminal the suite happens to be running under, and a pipe
+  # reports nothing. What can be checked is that it either says nothing or says
+  # something usable, and never raises or divides by zero.
+  describe ".cell_pixels" do
+    it "answers a cell's size or nothing at all" do
+      cell = TermBuf::SizeDetector.cell_pixels
+
+      if cell
+        expect(cell[0]).to be > 0
+        expect(cell[1]).to be > 0
+      else
+        expect(cell).to be_nil
+      end
+    end
+
+    it "says nothing for a descriptor that is not a terminal" do
+      reader, writer = IO.pipe
+      begin
+        expect(TermBuf::SizeDetector.cell_pixels(writer.fd)).to be_nil
+      ensure
+        reader.close
+        writer.close
+      end
+    end
+  end
 end
