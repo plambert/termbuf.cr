@@ -6,6 +6,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-09-30
+
 ### Fixed
 
 - `Tty#cell_size` asks its own descriptor and no other. It fell through to the process's standard
@@ -908,7 +910,8 @@ First release. Everything below is new.
 - OSC 8 links, kitty graphics, and the kitty colour stack are detected but not emitted.
 - Mouse reporting is not enabled or decoded.
 
-[Unreleased]: https://github.com/plambert/termbuf.cr/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/plambert/termbuf.cr/compare/v0.8.1...HEAD
+[0.8.1]: https://github.com/plambert/termbuf.cr/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/plambert/termbuf.cr/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/plambert/termbuf.cr/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/plambert/termbuf.cr/compare/v0.5.0...v0.6.0
