@@ -6,6 +6,64 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- `Image` is no longer the pixels. The three lifetimes an image has are three types now, because
+  `ImageStore` conflated them and an application could not say "register this now, show it later" or
+  "leave this one up".
+  - `Pixels` is what `Image` was: a struct of bytes, a format and dimensions, with `.png`, `.rgb`
+    and `.rgba` on it and nothing about a terminal. `Image#pixels` is now `Pixels#bytes`.
+  - `Image` is one image in a terminal's registry: an id, the pixels behind it, `#uploaded?`,
+    `#upload`, `#show`, `#placements`, `#hide` and `#forget`. Only `ImageStore#register` builds one.
+  - `Placement` is a class rather than a struct, because it is a handle to something on screen.
+    `#image` is an `Image` rather than a bare id, and `#move`, `#z=` and `#crop=` change what is on
+    screen and send the position and nothing else.
+  - Nothing named `Image` carries a `.png` factory any more, so every call site that meant the
+    pixels fails at compile time rather than drifting.
+- An image is no longer retransmitted for a frame that wants it where it already is. An application
+  that draws from a tree says every frame what it wants on screen, and each of those placements put
+  the pixels on the wire: a 400KB cover went down an ssh connection once per repaint. See
+  `ImageStore#frame`.
+- `ImageStore#clear` takes the images as well as the placements, and every `Image` it handed out is
+  dead afterwards. `d=A` frees the pixels at the far end too — measured against ghostty 1.3.2, where
+  it leaves the registry empty while `d=a` keeps it.
+- `ImageStore#placements` answers a copy, so hiding one while walking the list is safe.
+- `ImageStore#add`, `#place` and `#delete` are gone. `#register`, `#show`, `Placement#hide` and
+  `Image#forget` are what to say instead.
+
+### Added
+
+- `ImageStore#register`, which mints an id and sends nothing, and `#images`, the live ones. Ids are
+  monotonic and never reused, so a sequence naming a forgotten id can never land on a later image.
+- `Image#upload`, which sends the pixels with no placement at all (`a=t`). `#show` still sends them
+  itself the first time (`a=T`), so "fetch it and put it up now" is one call and "upload now, show
+  three times later" is the same methods in another order. Asking twice is free, and has to be:
+  measured against ghostty 1.3.2, a transmission over an id the terminal already holds takes every
+  placement of that id off the screen.
+- `Placement#crop`, the rectangle of the image's own pixels a placement shows, which is what makes
+  one image into a sheet of sprites. `x=`, `y=`, `w=` and `h=` on the put, in image pixels. The
+  protocol calls it the source rectangle; `crop` is the same thing in a word a reader can guess.
+  Measured against ghostty 1.3.2, which records it on a put and on a transmit-and-put alike, and
+  reports the whole image where the keys are left out.
+- `ImageStore#frame`, which brackets one frame's worth of pictures and takes off whatever the last
+  frame put up and this one did not ask for again. A picture asked for in the same cells at the same
+  depth showing the same part of itself is taken back and nothing at all is sent for it, not even
+  the cursor move. Nesting raises. A placement made with `Image#show` is not a frame's and no frame
+  touches it, which is what makes a background picture behind a panel something to put up and forget
+  about.
+- Sending an image's pixels again puts the rest of its showings back on the screen. A transmission
+  over an id the terminal is already holding takes every placement of that id off — measured against
+  ghostty 1.3.2, where a second transmission for a live id leaves the registry entry and no
+  placements at all — so an image the terminal has lost brings its other showings with it.
+- `ImageStore#answered`, which reads a reply from the terminal and marks an image the terminal says
+  it has lost as no longer uploaded, so the next `#show` sends the pixels rather than putting a
+  placement over nothing. `Terminal#images` wires it up, so an application has nothing to connect.
+  Measured against ghostty 1.3.2, which answers a put naming an id it does not hold with
+  `ENOENT: image not found` and does not suppress that under `q=1`. kitty drops images when its
+  cache fills and a reset from another program wipes them, so this is not a corner.
+- `examples/validate.cr` shows each step of its cascade cropped to a different quarter of the
+  swatch, so a terminal that drops the crop keys is visibly showing the whole gradient.
+
 ## [0.6.0] - 2026-09-27
 
 ### Changed

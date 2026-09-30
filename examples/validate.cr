@@ -113,7 +113,7 @@ module Validate
       @presses = [] of String
       @arriving = nil.as(Int32?)
       # The swatch, registered the first time it is wanted and reused after.
-      @swatch = nil.as(UInt32?)
+      @swatch = nil.as(Image?)
       @typed = ""
       # The block at the foot of the page saying what should be on the screen,
       # wrapped to this frame's window. Held rather than recomputed, because
@@ -1565,9 +1565,10 @@ module Validate
       end
 
       lines << if caps.includes? Capability::KittyGraphics
-        "[i] places the swatch over the text on the left and under it on the right, then " \
+        "[i] shows the swatch over the text on the left and under it on the right, then " \
         "one more per press stepping #{CASCADE[0]} right and #{CASCADE[1]} down, " \
-        "#{CASCADE_LIMIT} at most; [x] clears them."
+        "#{CASCADE_LIMIT} at most. Each of those shows one quarter of the swatch, so a " \
+        "terminal that ignores a crop draws the whole gradient instead; [x] clears them."
       else
         "no #{Capability::KittyGraphics} here: [i] and [x] place nothing."
       end
@@ -1666,34 +1667,45 @@ module Validate
     # The most that fit on the page before they walk off the bottom.
     CASCADE_LIMIT = 6
 
+    # The swatch is square, and its size has to divide by two for `#quarter`.
+    SWATCH = 32
+
     # An image over the text, one under it, and then one per press stepping
     # down and to the right so that each is visibly its own.
     private def place_images : Nil
       images = @terminal.images
       return unless @terminal.capabilities.includes? Capability::KittyGraphics
 
-      # Registered once and placed as often as wanted: the pixels go out with
-      # the first placement and every one after it costs a short sequence. The
-      # cascade would otherwise send the same three kilobytes six times.
-      id = (@swatch ||= images.add swatch)
+      # Registered once and shown as often as wanted: the pixels go out with the
+      # first showing and every one after it costs a short sequence. The cascade
+      # would otherwise send the same three kilobytes six times.
+      image = (@swatch ||= images.register swatch)
 
-      if images.placements.empty?
-        images.place id, inset(OVER_BOX), z: 1
-        images.place id, inset(UNDER_BOX), z: -1
+      if image.placements.empty?
+        image.show inset(OVER_BOX), z: 1
+        image.show inset(UNDER_BOX), z: -1
         return
       end
 
-      return if images.placements.size >= 2 + CASCADE_LIMIT
+      step = image.placements.size - 1
+      return if step > CASCADE_LIMIT
 
-      step = images.placements.size - 1
       bounds = inset OVER_BOX
       offset = Rect.new bounds.x + step * CASCADE[0], bounds.y + step * CASCADE[1],
         bounds.width, bounds.height
       return unless Rect.full(columns, rows).contains? offset
 
       # Each one above the last, so the newest is on top and the pile reads in
-      # the order it was made.
-      images.place id, offset, z: 1 + step
+      # the order it was made, and each shows a different quarter of the swatch,
+      # so a terminal that drops the crop keys is showing the whole gradient.
+      image.show offset, z: 1 + step, crop: quarter(step - 1)
+    end
+
+    # One quarter of the swatch, in its own pixels, stepping round the four of
+    # them so a cascade of any length stays inside the picture.
+    private def quarter(step : Int32) : Rect
+      half = SWATCH // 2
+      Rect.new (step % 2) * half, (step // 2 % 2) * half, half, half
     end
 
     private def inset(box : Rect) : Rect
@@ -1706,21 +1718,19 @@ module Validate
 
     # A gradient, so that a wrong stride or a swapped channel is visible rather
     # than merely wrong.
-    private def swatch : Image
-      width = 32
-      height = 32
-      pixels = Bytes.new width * height * 3
+    private def swatch : Pixels
+      bytes = Bytes.new SWATCH * SWATCH * 3
 
-      height.times do |row|
-        width.times do |column|
-          at = (row * width + column) * 3
-          pixels[at] = (column * 8).to_u8
-          pixels[at + 1] = (row * 8).to_u8
-          pixels[at + 2] = 160_u8
+      SWATCH.times do |row|
+        SWATCH.times do |column|
+          at = (row * SWATCH + column) * 3
+          bytes[at] = (column * 8).to_u8
+          bytes[at + 1] = (row * 8).to_u8
+          bytes[at + 2] = 160_u8
         end
       end
 
-      Image.rgb pixels, width, height
+      Pixels.rgb bytes, SWATCH, SWATCH
     end
 
     private def rich_key(key : Key) : Bool

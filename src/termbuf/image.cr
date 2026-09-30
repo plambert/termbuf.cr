@@ -1,124 +1,117 @@
-require "base64"
-
-require "./caps/capability"
-require "./core/rect"
+require "./pixels"
 
 module TermBuf
   # Stability: stable — changes only in a major release.
   #
-  # Pixels ready to be sent to a terminal that draws them.
+  # One image in a terminal's registry: an id the protocol refers to it by, and
+  # the pixels behind that id.
   #
-  # The shard does not decode or scale anything. An application hands over the
-  # bytes it already has, says what they are, and says how many cells to draw
-  # them across; the terminal does the scaling.
-  struct Image
-    # What the bytes are, by the numbers the graphics protocol uses.
-    enum Format
-      # Three bytes per pixel.
-      Rgb = 24
-
-      # Four bytes per pixel, the fourth being alpha.
-      Rgba = 32
-
-      # A PNG file, header and all.
-      Png = 100
-    end
-
-    # The bytes as the terminal will receive them.
-    getter pixels : Bytes
-
-    # What those bytes are.
-    getter format : Format
-
-    # Pixel dimensions. A terminal needs these for the raw formats and reads
-    # them out of the file for `Png`, where they may be left at zero.
-    getter width : Int32
-
-    # :ditto:
-    getter height : Int32
-
-    # Pixels in *format*. A raw format needs its dimensions and exactly as many
-    # bytes as they imply; `Png` reads both out of the file. `.rgb`, `.rgba`
-    # and `.png` say the same thing more plainly.
-    def initialize(@pixels : Bytes, @format : Format,
-                   @width : Int32 = 0, @height : Int32 = 0)
-      raise ArgumentError.new "an image needs pixels" if @pixels.empty?
-      raise ArgumentError.new "image width #{@width} is negative" if @width < 0
-      raise ArgumentError.new "image height #{@height} is negative" if @height < 0
-
-      return if @format.png?
-      raise ArgumentError.new "a raw image needs its dimensions" if @width.zero? || @height.zero?
-
-      expected = @width * @height * (@format.rgb? ? 3 : 4)
-      return if @pixels.size == expected
-
-      raise ArgumentError.new "#{@format} #{@width}x#{@height} needs #{expected} bytes, " \
-                              "got #{@pixels.size}"
-    end
-
-    # Three bytes a pixel, row by row from the top left.
-    def self.rgb(pixels : Bytes, width : Int32, height : Int32) : Image
-      new pixels, Format::Rgb, width, height
-    end
-
-    # :ditto:
-    def self.rgba(pixels : Bytes, width : Int32, height : Int32) : Image
-      new pixels, Format::Rgba, width, height
-    end
-
-    # A PNG file as it came off disk.
-    def self.png(data : Bytes) : Image
-      new data, Format::Png
-    end
-
-    # :ditto:
-    def self.png(path : String | Path) : Image
-      png File.read(path).to_slice
-    end
-  end
-
-  # Stability: stable — changes only in a major release.
+  # Registering, uploading and showing are three things, and an application can
+  # do them at three different times:
   #
-  # An image on screen: which image, and the cells it covers.
-  struct Placement
-    # Which image, by the id the protocol refers to it with.
-    getter image : UInt32
-
-    # Which placement of that image, since one image may be on screen more
-    # than once.
+  #     cover = store.register Pixels.png(path)   # an id, and nothing sent
+  #     cover.upload                              # the bytes, no placement
+  #     here = cover.show Rect.new(2, 1, 20, 12)  # on screen
+  #     there = cover.show Rect.new(40, 1, 20, 12), z: -1
+  #     here.move Rect.new(4, 1, 20, 12)          # no bytes but the position
+  #     cover.forget                              # both ends, and it is dead
+  #
+  # `#upload` is optional. `#show` sends the pixels itself the first time, which
+  # is what an application that has just fetched a picture and wants it on
+  # screen now should do.
+  #
+  # An `Image` outlives the frames drawn around it. One shown with `#show`
+  # stays until something takes it off: no `ImageStore::Frame` touches it, which
+  # is what makes a background picture behind a panel something to put up and
+  # forget about. `ImageStore#clear` takes those down, and so does giving the
+  # terminal back.
+  class Image
+    # The id the protocol refers to this image by.
+    #
+    # Monotonic within a store and never reused, so a sequence naming a
+    # forgotten id can never land on a later image.
     getter id : UInt32
 
-    # The cells it covers.
-    getter bounds : Rect
+    # The bytes behind the id.
+    getter pixels : Pixels
 
-    # Where this sits in the stack against the text and the other placements.
+    # The registry this belongs to.
+    getter store : ImageStore
+
+    # Whether the far end is holding the bytes.
     #
-    # Zero is over the text, which is the default and what an image drawn to be
-    # looked at wants. Negative is under it, so the cells keep their glyphs and
-    # the picture shows through wherever they are blank — a chart behind a
-    # table, a watermark. Higher covers lower among placements, so a cascade is
-    # a rising *z* and nothing else.
+    # False until something sends them, and false again once the terminal says
+    # it has lost them. See `ImageStore#answered`.
+    getter? uploaded : Bool = false
+
+    # Whether this image is dead. `#forget` is what kills one, and nothing can
+    # be done with it afterwards.
+    getter? forgotten : Bool = false
+
+    # Only `ImageStore#register` builds one. An `Image` is a row in a store's
+    # registry, and one made without the store knowing would name an id the
+    # terminal has never heard of.
+    protected def initialize(@store : ImageStore, @id : UInt32, @pixels : Pixels)
+    end
+
+    # Sends the pixels without putting them anywhere, so a later `#show` is a
+    # position and nothing more.
     #
-    # The protocol's own rule for the boundary: text is drawn between `-1` and
-    # `0`, so `-1` is the topmost layer still beneath it.
-    getter z : Int32
-
-    def initialize(@image : UInt32, @id : UInt32, @bounds : Rect, @z : Int32 = 0)
+    # Nothing is sent if the far end already has them. That is not only
+    # economy: measured against ghostty 1.3.2, a transmission over an id the
+    # terminal already holds takes every placement of that id off the screen.
+    def upload : Nil
+      @store.upload self
     end
 
-    # Whether this sits beneath the text rather than over it.
-    def under_text? : Bool
-      @z.negative?
+    # Puts the pixels across the cells of *bounds*, sending them first if the
+    # far end has not got them.
+    #
+    # *z* decides what this sits over. See `Placement#z`.
+    #
+    # *crop* shows a rectangle of the image's own pixels rather than all of
+    # them, which is how one sheet of sprites shows a different cell in each of
+    # several places. See `Placement#crop`.
+    def show(bounds : Rect, z : Int32 = 0, crop : Rect? = nil) : Placement
+      @store.show self, bounds, z, crop
     end
 
-    # Column of the left edge.
-    def x : Int32
-      @bounds.x
+    # Everywhere this image is on screen, oldest first.
+    def placements : Array(Placement)
+      @store.placements.select &.image.same?(self)
     end
 
-    # Row of the top edge.
-    def y : Int32
-      @bounds.y
+    # Takes the image off the screen everywhere and leaves the pixels at the far
+    # end, so showing it again costs a position and no more.
+    def hide : Nil
+      @store.hide self
+    end
+
+    # Takes the image off the screen and the pixels out of the terminal.
+    #
+    # The image is dead afterwards: `#show` on it raises, and the store has
+    # forgotten it. Registering the same pixels again mints a new id.
+    def forget : Nil
+      @store.forget self
+    end
+
+    # Set by the store when the bytes go out, and unset when the terminal says
+    # it has lost them or when a forced repaint gives up on what is there.
+    protected def uploaded=(value : Bool) : Bool
+      @uploaded = value
+    end
+
+    # Set by the store, once, from `#forget`.
+    protected def forgotten=(value : Bool) : Bool
+      @forgotten = value
+    end
+
+    def to_s(io : IO) : Nil
+      io << "#<TermBuf::Image i=" << @id
+      io << " " << @pixels.format
+      io << (@uploaded ? " uploaded" : " not uploaded")
+      io << " forgotten" if @forgotten
+      io << '>'
     end
   end
 end

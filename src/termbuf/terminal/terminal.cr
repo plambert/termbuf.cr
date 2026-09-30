@@ -481,13 +481,23 @@ module TermBuf
     getter images : ImageStore { build_image_store }
 
     private def build_image_store : ImageStore
+      store = ImageStore.new @capabilities
+
       # A graphics reply is an escape sequence the application did not ask for,
       # and without a pattern registered the decoder would hand it over as
       # keystrokes. Registered here rather than at startup, since a terminal
       # never asked for a picture never sends one. See `ImageStore::QUIET` for
       # what is left unsuppressed and why.
-      expect_response ImageStore::APC, ImageStore::ST
-      ImageStore.new @capabilities
+      #
+      # The store reads every one of them on the way past. A reply saying the
+      # terminal has lost an image is what tells it to send those pixels again,
+      # and the application still gets the reply as an event.
+      watch_response(ImageStore::APC, ImageStore::ST) do |bytes|
+        store.answered bytes
+        Events::Response.new bytes
+      end
+
+      store
     end
 
     # Images are written straight to the device after the frame's cells, not
@@ -589,11 +599,19 @@ module TermBuf
     # An application that wants the reply as something more than its bytes can
     # register with `Input::Patterns` directly and return an event of its own.
     def expect_response(prefix : String, terminator : String) : Input::Pattern
+      watch_response(prefix, terminator) { |bytes| Events::Response.new bytes }
+    end
+
+    # The same, with the event to raise decided by the caller, so something
+    # inside the driver can read a reply on the way past. See
+    # `#build_image_store`.
+    private def watch_response(prefix : String, terminator : String,
+                               &build : Bytes -> Event) : Input::Pattern
       raise ArgumentError.new "a response pattern needs a terminator" if terminator.empty?
 
       kind, head = Input::Prefix.split prefix
       @input.patterns.register(kind, head, terminator) do |sequence|
-        Events::Response.new sequence.bytes
+        build.call sequence.bytes
       end
     end
 
@@ -928,8 +946,11 @@ module TermBuf
       # time a signal handler or `at_exit` gets here there may be no fibre left
       # to ask, and a terminal left a different colour than it was found is
       # exactly what the stack exists to prevent.
+      # `d=A` takes the placements and the pixels both, which is what giving the
+      # terminal back means: a picture this application put up is not the next
+      # program's to inherit, and neither is the memory behind it.
       images = @images
-      if images && !images.placements.empty?
+      if images && !(images.placements.empty? && images.images.empty?)
         @tty.output << "\e_Ga=d,d=A,q=2\e\\"
       end
 

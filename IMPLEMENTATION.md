@@ -257,10 +257,10 @@ After B10 and C8.
   timing properties); `Drawing` and everything mixing it in (`Batcher`, `BufferSurface`, `View`);
   `Buffer` minus `front`/`commit_paint`/`painted?`; `Sink`; `Cursor`, `CursorIO`, `Region`,
   `Rect`; `Style`, `Blend`, `Gradient`, `Color`, `Attributes`, `Underline`, `Link`, `LinkId`;
-  `Capability`, `Capabilities`, `Quirk`; `ColorStack`, `Clipboard`, `ImageStore`, `Image`,
-  `Placement`; `Unicode` (`string_width`, `each_grapheme`, `graphemes`, `truncate`, `ellipsize`,
-  `fit`, `window`, `WidthPolicy`); `ScreenSize`; `TERMBUF_CAPS/QUIRKS/WIDTHS`; `Events::*` as
-  re-exported from the input shard.
+  `Capability`, `Capabilities`, `Quirk`; `ColorStack`, `Clipboard`, `ImageStore`,
+  `ImageStore::Frame`, `Pixels`, `Image`, `Placement`; `Unicode` (`string_width`,
+  `each_grapheme`, `graphemes`, `truncate`, `ellipsize`, `fit`, `window`, `WidthPolicy`);
+  `ScreenSize`; `TERMBUF_CAPS/QUIRKS/WIDTHS`; `Events::*` as re-exported from the input shard.
 * Tier 2, documented "internal, may change in a minor": `Grid`, `Cell`, `Damage`, `Painter`,
   `Encoder`, `Ops`/`Op`, `StyleTable`, `ClusterPool`, `LinkTable`, `Tty`, `Prober`,
   `EnvironmentDetector`, `CapabilityResolver`, `CapabilityOverrides`, `QuirkOverrides`,

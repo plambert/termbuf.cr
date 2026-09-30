@@ -96,7 +96,7 @@ including on an exception or a signal; without a block, `Terminal#close` does it
 | `Capability` `Capabilities` | what the terminal can do | `includes?` `with` `without` |
 | `Quirk` | what it gets wrong | `per_code_point_columns?` |
 | `Unicode` `WidthPolicy` | measuring and fitting text | `string_width` `truncate` `fit` `window` |
-| `ImageStore` `Image` `Placement` | pictures over the cells | `add` `place` `delete` `clear` |
+| `ImageStore` `Pixels` `Image` `Placement` | pictures over the cells | `register` `show` `frame` |
 | `ColorStack` | the terminal's own colours | `saved` `background=` `[]=` |
 | `Clipboard` | OSC 52 | `copy` |
 | `Events` | everything that arrives on the channel | `Key` `Mouse` `Paste` `Resize` `Timer` |
@@ -775,20 +775,82 @@ should not expect it to arrive, and cannot find out that it did not.
 
 ### Images
 
+Three things with three lifetimes. `Pixels` are a value with no id and no terminal behind them.
+`ImageStore#register` turns one into an `Image`, which is an id the terminal will come to know.
+`Image#show` turns that into a `Placement`, which is one showing of it.
+
 ```crystal
-sparkline = TermBuf::Image.rgb(pixels, 64, 16)
-id = terminal.images.add sparkline
-terminal.images.place id, TermBuf::Rect.new(2, 4, 16, 2)
-terminal.images.place id, TermBuf::Rect.new(2, 8, 16, 2), z: -1   # under the text
+sparkline = terminal.images.register TermBuf::Pixels.rgb(bytes, 64, 16)
+sparkline.upload                                                 # the bytes, no placement
+here = sparkline.show TermBuf::Rect.new(2, 4, 16, 2)
+under = sparkline.show TermBuf::Rect.new(2, 8, 16, 2), z: -1      # under the text
+here.move TermBuf::Rect.new(4, 4, 16, 2)                         # the position, not the pixels
+under.hide                                                       # this showing only
+sparkline.forget                                                 # both ends, and it is dead
 ```
+
+`#upload` is optional: `#show` sends the pixels itself the first time, which is what an application
+that has just fetched a picture and wants it on screen now should do. `#register` sends nothing at
+all, so a picture can be given an id long before there is anywhere to put it.
 
 Images are not cells. They are drawn over the screen after each frame rather than into the buffer,
 so an application that writes text where one sits gets both. `z` decides which of them is on top:
 zero and above covers the text, negative sits beneath it so the glyphs stay readable and the picture
 shows through where the cells are blank. Among placements, higher covers lower. Pixels travel once
-however many placements follow; the transport — a temp file or base64 down the escape sequence — is
+however many showings follow; the transport — a temp file or base64 down the escape sequence — is
 chosen by a probe at startup. Placements that no longer fit are dropped on a resize, everything is
 sent again on a forced repaint, and the pictures come down when the terminal is given back.
+
+A placement is permanent. Nothing takes one off the screen until something asks, so a background
+picture behind a panel is put up once and forgotten about.
+
+#### A sheet of sprites
+
+`Placement#crop` shows a rectangle of the image's own pixels rather than all of them, so one image
+can be in several places showing something different in each:
+
+```crystal
+sheet = terminal.images.register TermBuf::Pixels.png(path)
+walk = sheet.show TermBuf::Rect.new(10, 4, 4, 2), crop: TermBuf::Rect.new(0, 0, 32, 32)
+walk.crop = TermBuf::Rect.new(32, 0, 32, 32)   # the next cell, and no pixels on the wire
+```
+
+The rectangle is in image pixels, not cells. The protocol calls it the source rectangle; `crop` is
+the same thing in a word a reader can guess. Measured against ghostty 1.3.2, which records it from
+`x=`, `y=`, `w=` and `h=` on a put and on a transmit-and-put alike, and reports the whole image
+where they are left out.
+
+#### A frame at a time
+
+A widget tree does not know what the last frame put up, only what this one wants, so it says the
+whole of it every time. `#frame` is what keeps that from costing anything:
+
+```crystal
+terminal.images.frame do |frame|
+  frame.show cover, box          # the pixels, once
+end
+
+terminal.images.frame do |frame|
+  frame.show cover, box          # nothing on the wire at all
+end
+```
+
+Only what a `Frame` put up is diffed. A picture asked for in the same cells at the same depth
+showing the same part of itself is taken back and sends no bytes — not even the cursor move. One
+whose box moved is repositioned rather than sent again. One nobody asked for again comes off the
+screen, and an image left with no placements anywhere is forgotten, which frees the pixels at the
+far end. A placement made with `Image#show` is not a frame's business and no frame touches it.
+`TermBuf::Widgets::Renderer.render` wraps its whole walk in one of these.
+
+#### When the terminal loses an image
+
+A terminal is allowed to drop images: kitty does it when its cache fills, and a reset from another
+program wipes them. `ImageStore#answered` reads the terminal's reply and marks the id as no longer
+there, so the next `#show` sends the pixels instead of putting a placement over nothing.
+`Terminal#images` wires it up, so an application driving a terminal has nothing to do. Measured
+against ghostty 1.3.2, which answers a put naming an id it does not hold with
+`\e_Gi=99,p=1;ENOENT: image not found\e\\` and does not suppress it under `q=1` — one reason this
+shard never sends `q=2`.
 
 ## Widgets
 
@@ -862,8 +924,8 @@ here is renamed, removed, or given a new required argument without the major ver
 * **What a terminal is.** `Capability`, `Capabilities`, `Quirk`, `ScreenSize`, `CursorShape`, and
   `Tty::Mode` with the mode constants beside it — `BRACKETED_PASTE`, `FOCUS_EVENTS`, `MOUSE_SGR`,
   `MOUSE_SGR_ANY`, `MOUSE_SGR_CLICKS`, `KITTY_KEYBOARD`.
-* **Talking to the terminal itself.** `ColorStack`, `Clipboard`, `ImageStore`, `Image`,
-  `Placement`.
+* **Talking to the terminal itself.** `ColorStack`, `Clipboard`, `ImageStore`,
+  `ImageStore::Frame`, `Pixels`, `Image`, `Placement`.
 * **Unicode.** `Unicode.string_width`, `.each_grapheme`, `.graphemes`, `.truncate`, `.ellipsize`,
   `.fit`, `.window`, and `WidthPolicy`.
 * **Events.** Everything in `TermBuf::Events`, `Events::Resize` included.

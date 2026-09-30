@@ -1455,8 +1455,8 @@ Spectator.describe TermBuf::Terminal do
     it "sends an image after the cells of the frame it belongs to" do
       with_harness capabilities: GRAPHICAL do |harness|
         harness.terminal.write 0, 0, "under"
-        harness.terminal.images.place TermBuf::Image.rgb(Bytes.new(12, 0_u8), 2, 2),
-          TermBuf::Rect.new(0, 0, 2, 1)
+        harness.terminal.images.register(TermBuf::Pixels.rgb(Bytes.new(12, 0_u8), 2, 2))
+          .show TermBuf::Rect.new(0, 0, 2, 1)
         harness.terminal.paint
 
         written = harness.drain
@@ -1466,8 +1466,8 @@ Spectator.describe TermBuf::Terminal do
 
     it "sends the pixels again when the repaint is forced" do
       with_harness capabilities: GRAPHICAL do |harness|
-        harness.terminal.images.place TermBuf::Image.rgb(Bytes.new(12, 0_u8), 2, 2),
-          TermBuf::Rect.new(0, 0, 2, 1)
+        harness.terminal.images.register(TermBuf::Pixels.rgb(Bytes.new(12, 0_u8), 2, 2))
+          .show TermBuf::Rect.new(0, 0, 2, 1)
         harness.terminal.paint
         harness.drain
 
@@ -1478,8 +1478,8 @@ Spectator.describe TermBuf::Terminal do
 
     it "takes the pictures down when the terminal is given back" do
       harness = Harness.new capabilities: GRAPHICAL
-      harness.terminal.images.place TermBuf::Image.rgb(Bytes.new(12, 0_u8), 2, 2),
-        TermBuf::Rect.new(0, 0, 2, 1)
+      harness.terminal.images.register(TermBuf::Pixels.rgb(Bytes.new(12, 0_u8), 2, 2))
+        .show TermBuf::Rect.new(0, 0, 2, 1)
       harness.terminal.paint
       harness.drain
 
@@ -1497,8 +1497,8 @@ Spectator.describe TermBuf::Terminal do
         harness.terminal.paint
         harness.drain
 
-        harness.terminal.images.place TermBuf::Image.rgb(Bytes.new(12, 0_u8), 2, 2),
-          TermBuf::Rect.new(0, 0, 2, 1)
+        harness.terminal.images.register(TermBuf::Pixels.rgb(Bytes.new(12, 0_u8), 2, 2))
+          .show TermBuf::Rect.new(0, 0, 2, 1)
         harness.terminal.paint
 
         written = harness.drain
@@ -1508,11 +1508,30 @@ Spectator.describe TermBuf::Terminal do
 
     it "sends nothing on a terminal that draws no pictures" do
       with_harness do |harness|
-        harness.terminal.images.place TermBuf::Image.rgb(Bytes.new(12, 0_u8), 2, 2),
-          TermBuf::Rect.new(0, 0, 2, 1)
+        harness.terminal.images.register(TermBuf::Pixels.rgb(Bytes.new(12, 0_u8), 2, 2))
+          .show TermBuf::Rect.new(0, 0, 2, 1)
         harness.terminal.paint
 
         expect(harness.drain).not_to contain "\e_G"
+      end
+    end
+
+    # The store reads the terminal's own complaints, so an image the far end
+    # has dropped is sent again rather than positioned over nothing. The
+    # application still gets the reply as an event.
+    it "sends the pixels again after the terminal says it lost the image" do
+      with_harness capabilities: GRAPHICAL do |harness|
+        image = harness.terminal.images.register TermBuf::Pixels.rgb(Bytes.new(12, 0_u8), 2, 2)
+        image.show TermBuf::Rect.new(0, 0, 2, 1)
+        harness.terminal.paint
+        harness.drain
+
+        harness.type "\e_Gi=#{image.id},p=1;ENOENT: image not found\e\\"
+        expect(harness.event_of TermBuf::Events::Response).not_to be_nil
+
+        image.show TermBuf::Rect.new(4, 0, 2, 1)
+        harness.terminal.paint
+        expect(harness.drain).to contain "a=T"
       end
     end
   end
