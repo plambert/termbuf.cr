@@ -1692,6 +1692,33 @@ Spectator.describe TermBuf::Tty do
     expect(tty.entered?).to be_false
   end
 
+  # A screen size from the wrong descriptor is still a plausible screen size, so
+  # `SizeDetector` falls through to the process's other two on purpose. A cell
+  # size from the wrong descriptor belongs to a different terminal with a
+  # different font, and a picture scaled against it comes out the wrong shape.
+  describe "#cell_size" do
+    it "says nothing for a tty over something that is not a descriptor" do
+      tty = TermBuf::Tty.new IO::Memory.new, IO::Memory.new, managed: false
+
+      expect(tty.cell_size).to be_nil
+      # Where the screen size still answers, from whatever it can find.
+      expect(tty.size.columns).to be > 0
+    end
+
+    it "asks its own descriptor and not the process's others" do
+      reader, writer = IO.pipe
+      begin
+        tty = TermBuf::Tty.new reader, writer, managed: false
+        # A pipe reports no pixels, and the answer is that rather than whatever
+        # terminal the suite happens to be running under.
+        expect(tty.cell_size).to be_nil
+      ensure
+        reader.close
+        writer.close
+      end
+    end
+  end
+
   # A terminal that does not recognise a query prints its payload, so probing
   # leaves rubbish on the screen the person was looking at. Terminal.app does
   # this with XTGETTCAP, DECRPM and the kitty graphics query.

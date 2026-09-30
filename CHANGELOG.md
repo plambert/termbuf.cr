@@ -6,6 +6,17 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- `Tty#cell_size` asks its own descriptor and no other. It fell through to the process's standard
+  output, input and error, which is what `SizeDetector.detect` does for the screen size on purpose —
+  a program with its output redirected often still has a terminal on one of the others. A cell size
+  is not the same question: one read from a descriptor this `Tty` is not writing to belongs to a
+  different terminal with a different font, and a picture scaled against it comes out the wrong
+  shape, which is worse than not knowing, since not knowing fills the box that was asked for. Only
+  a `Tty` built over something that is not a file descriptor is affected, which in practice means a
+  test harness; `Tty.standard` is unchanged.
+
 ## [0.8.0] - 2026-09-29
 
 ### Fixed

@@ -151,8 +151,21 @@ module TermBuf
     # How many pixels one cell measures, or `nil` where the terminal does not
     # say. Asked afresh for the same reason, since changing the font changes it.
     # See `SizeDetector.cell_pixels`.
+    #
+    # Only ever this `Tty`'s own descriptor, where `#size` would go on to try the
+    # process's other two. The two questions differ on that. A screen size from
+    # the wrong descriptor is still a plausible screen size, and `SizeDetector`
+    # falls through to them deliberately, because a program with its output
+    # redirected often still has a terminal on one of the others. A cell size
+    # from the wrong descriptor belongs to a different terminal with a different
+    # font, and a picture scaled against it comes out the wrong shape — worse
+    # than not knowing, which at least fills the box it was given. See
+    # `ImageStore#cell_size`.
     def cell_size : {Int32, Int32}?
-      SizeDetector.cell_pixels @output_fd
+      fd = @output_fd
+      return unless fd
+
+      SizeDetector.cell_pixels fd
     end
 
     # Blanks the line the cursor is on, using nothing but a carriage return and
