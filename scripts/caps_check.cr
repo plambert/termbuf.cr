@@ -76,6 +76,12 @@ module CapsCheck
   # A press: an SGR report ending in `M` whose button field has no motion bit.
   MOUSE_PRESS = /\e\[<(\d+);\d+;\d+M/
 
+  # An X10 mouse report: `CSI M` and three raw bytes. Nothing here asks for
+  # this encoding. One arriving means mouse tracking is on that this script
+  # did not turn on, which a Windows console does when it wants the mouse for
+  # itself, and a motion reading taken then is not about the mode it names.
+  X10_REPORT = /\e\[M.../
+
   # A release: an SGR report ending in `m`. The button field names which
   # button came up, and the click step waits for one before it ends.
   MOUSE_RELEASE = /\e\[<\d+;\d+;\d+m/
@@ -107,6 +113,28 @@ module CapsCheck
       # Every wait here has a deadline. A Windows console ignores
       # `IO#read_timeout`, and this reads through the console there.
       @reader = TermBuf::TimedRead.new @tty.input
+
+      # What the person typed, decoded. The terminal's own reports arrive on
+      # the same input, and their bytes are not keys: an X10 mouse report
+      # carries its column as a raw byte, and column 81 is a `q`. Every
+      # decision about a key is made on what this decodes, never on bytes.
+      @decoder = TermBuf::Input::Decoder.new
+      @keys = Deque(TermBuf::Input::Key).new
+    end
+
+    # Decodes *bytes*, keeping the keys in them.
+    private def decode_keys(bytes : Bytes) : Nil
+      @decoder.feed(bytes) do |event|
+        @keys << event.key if event.is_a?(TermBuf::Input::Events::Key)
+      end
+    end
+
+    # Whether a key that means "skip this" was typed: q, or Ctrl+C. Forgets
+    # every key it looked at.
+    private def skip_typed? : Bool
+      skip = @keys.any? { |key| key.is?('q') || key.is?('Q') || (key.ctrl? && key.char == 'c') }
+      @keys.clear
+      skip
     end
 
     # Everything that can be asked of the terminal without asking the person.
@@ -337,21 +365,21 @@ module CapsCheck
         return
       end
 
-      reports = collect MOUSE_REPORT, MOTION_WINDOW
+      reports, x10 = collect MOUSE_REPORT, X10_REPORT, MOTION_WINDOW
       @tty.write mode.reset
       @tty.flush
 
       seen = reports.size >= MOTION_REPORTS
       say reports.empty? ? "   nothing arrived" : "   #{reports.size} reports, the first #{reports.first.inspect}"
+      say "   and #{x10.size} in the X10 encoding, which nothing here asked for" unless x10.empty?
       say ""
       @rows << Row.new "mouse_report_on_enable_#{mode_number}", "observed", on_enable ? "yes" : "no"
       @rows << Row.new "mouse_motion_#{mode_number}", "observed", seen ? "yes" : "no"
     end
 
-    # Every match of *pattern* that arrives within *span*, without stopping at
-    # the first.
-    private def collect(pattern : Regex, span : Time::Span) : Array(String)
-      found = [] of String
+    # Every match of *pattern*, and of *other*, that arrives within *span*,
+    # without stopping at the first.
+    private def collect(pattern : Regex, other : Regex, span : Time::Span) : {Array(String), Array(String)}
       deadline = Time.instant + span
       seen = IO::Memory.new
       buffer = Bytes.new 256
@@ -360,8 +388,10 @@ module CapsCheck
         seen.write buffer[0, count]
       end
 
-      seen.to_s.scan(pattern) { |match| found << match[0] }
-      found
+      # Scrubbed, because an X10 report past column or row 95 carries bytes
+      # that are not UTF-8, and a regular expression raises on those.
+      text = seen.to_s.scrub
+      {text.scan(pattern).map(&.[0]), text.scan(other).map(&.[0])}
     end
 
     # OSC 2 answers nothing, so the only instrument for it is a person looking
@@ -406,7 +436,7 @@ module CapsCheck
 
       while count = @reader.read(buffer, deadline)
         seen.write buffer[0, count]
-        text = seen.to_s
+        text = seen.to_s.scrub
 
         if match = text.match pattern
           return match[0]
@@ -414,7 +444,8 @@ module CapsCheck
 
         # A way out for a terminal that will never answer, and for a person
         # who has decided it will not.
-        break if text.includes?('q') || text.includes?('\u{3}')
+        decode_keys buffer[0, count]
+        break if skip_typed?
       end
 
       nil
@@ -429,6 +460,10 @@ module CapsCheck
       # Until 20 milliseconds go by with nothing arriving.
       while count = @reader.read(buffer, Time.instant + 20.milliseconds)
       end
+
+      # And whatever was half decoded or not yet taken goes with it.
+      @decoder.flush { }
+      @keys.clear
     end
 
     # Puts *question* on the screen and waits for one letter.
@@ -460,13 +495,23 @@ module CapsCheck
       answer
     end
 
-    # One keystroke, or nothing if the patience runs out.
+    # One typed character, decoded, or nothing if the patience runs out.
+    # Ctrl+C comes back as `\u{3}`. Named keys and the terminal's reports are
+    # passed over.
     private def key(patience : Time::Span = PATIENCE) : Char?
       deadline = Time.instant + patience
-      buffer = Bytes.new 1
+      buffer = Bytes.new 256
 
-      while count = @reader.read(buffer, deadline)
-        return buffer[0].unsafe_chr if count > 0
+      loop do
+        while key = @keys.shift?
+          return '\u{3}' if key.ctrl? && key.char == 'c'
+          return key.char if key.character? && (key.modifiers & ~TermBuf::Input::Modifiers::Shift).none?
+        end
+
+        count = @reader.read(buffer, deadline)
+        return unless count
+
+        decode_keys buffer[0, count]
       end
     end
 
