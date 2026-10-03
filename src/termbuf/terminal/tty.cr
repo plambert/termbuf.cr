@@ -134,6 +134,18 @@ module TermBuf
       @input_fd = descriptor @input
       @output_fd = descriptor @output
       @managed = managed.nil? ? terminal? : managed
+
+      {% if flag?(:win32) %}
+        # Crystal writes to a Windows console unbuffered, so every piece of a
+        # frame would be a call through the console to the terminal: slow, and
+        # a terminal can draw a frame half written. Everything here flushes
+        # when it has finished writing, as it must for a pipe anyway.
+        output = @output
+        if @managed && output.is_a?(IO::FileDescriptor)
+          output.sync = false
+          output.flush_on_newline = false
+        end
+      {% end %}
     end
 
     # The process's own terminal.

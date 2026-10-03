@@ -3,6 +3,7 @@ require "base64"
 require "../image_store"
 require "./capability"
 require "./environment"
+require "./timed_read"
 require "../input"
 
 module TermBuf
@@ -41,6 +42,7 @@ module TermBuf
 
     def initialize(@input : IO, @output : IO, @timeout : Time::Span = DEFAULT_TIMEOUT)
       @scanner = Input::SequenceScanner.new
+      @reader = TimedRead.new @input
     end
 
     # A one pixel RGB image, asked about rather than displayed.
@@ -178,7 +180,7 @@ module TermBuf
       done = false
 
       until done || Time.instant >= deadline
-        count = read_some buffer, deadline
+        count = @reader.read buffer, deadline
         break if count.nil?
         next if count.zero?
 
@@ -188,30 +190,6 @@ module TermBuf
       end
 
       @scanner.flush { |kind, bytes| yield kind, bytes }
-    end
-
-    # Returns the bytes read, zero if nothing was ready, or `nil` when there is
-    # no point asking again.
-    private def read_some(buffer : Bytes, deadline : Time::Instant) : Int32?
-      apply_read_timeout deadline
-
-      count = @input.read buffer
-      count.zero? ? nil : count
-    rescue IO::TimeoutError
-      nil
-    rescue IO::Error
-      nil
-    end
-
-    # A real terminal blocks until something arrives, so the read needs a
-    # deadline of its own; an in-memory stream returns straight away and needs
-    # none. Assigning to a local is what lets the compiler narrow the type.
-    private def apply_read_timeout(deadline : Time::Instant) : Nil
-      input = @input
-      return unless input.responds_to? :read_timeout=
-
-      remaining = deadline - Time.instant
-      input.read_timeout = remaining > Time::Span.zero ? remaining : 1.millisecond
     end
 
     # `DCS Ps $ r ... ST`, the DECRPSS reply, where a leading 1 means the
