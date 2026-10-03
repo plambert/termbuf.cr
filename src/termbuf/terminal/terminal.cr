@@ -1360,7 +1360,13 @@ module TermBuf
       # A terminal left in raw mode on the alternate screen makes the user's
       # shell unusable, so `Mode::Exit` restores before letting the default
       # happen. `TERM`, `INT` and `HUP` are on that mode already.
-      signals.before_exit { restore }
+      #
+      # A terminal that has gone away has nothing to restore, and writing to it
+      # could spend the seconds Windows gives a closing console that the
+      # application's own hooks need.
+      signals.before_exit do |departure|
+        restore unless departure.disconnected?
+      end
 
       {% unless flag?(:win32) %}
         install_suspend_handlers signals
