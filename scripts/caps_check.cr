@@ -41,9 +41,10 @@ module CapsCheck
 
   # How long the pointer is watched under each tracking mode. This one is not
   # patience: it is the length of the window the reading is about, so it ends
-  # whether or not anything arrived, and it is short because there are three
-  # of them in a row.
-  MOTION_WINDOW = 3.seconds
+  # whether or not anything arrived. It starts when the person presses Space,
+  # and includes the moment it takes to move a hand from the keyboard to the
+  # mouse.
+  MOTION_WINDOW = 5.seconds
 
   # One reading: what was asked about, how it was asked, and what came back.
   record Row, capability : String, method : String, result : String
@@ -78,12 +79,6 @@ module CapsCheck
   # A release: an SGR report ending in `m`. The button field names which
   # button came up, and the click step waits for one before it ends.
   MOUSE_RELEASE = /\e\[<\d+;\d+;\d+m/
-
-  # How long the person is given to read "hold the pointer still" and stop
-  # moving before a tracking mode is turned on. Without it the enable's own
-  # answer is whatever the pointer was doing a moment earlier, which is a
-  # reading of the previous step rather than of the enable.
-  SETTLE = 1.second
 
   # How many reports a pointer moving for the window must produce before the
   # terminal is credited with reporting motion. One report is what a terminal
@@ -185,7 +180,8 @@ module CapsCheck
       end
 
       say "Seven readings. The first two wait for the terminal, up to " \
-          "#{PATIENCE.total_seconds.to_i} s each; the last two take y or n. q skips any one."
+          "#{PATIENCE.total_seconds.to_i} s each; the three motion readings start when " \
+          "you press Space; the last two take y or n. q skips any one."
       say ""
 
       check_focus
@@ -271,6 +267,27 @@ module CapsCheck
       end
     end
 
+    # Waits for Space after showing *prompt*. Answers `false` for q, Ctrl+C,
+    # or no answer within `PATIENCE`. Anything else, a stray mouse report
+    # included, is ignored.
+    private def ready(prompt : String) : Bool
+      say prompt
+
+      loop do
+        case key
+        when ' '                    then return true
+        when 'q', 'Q', '\u{3}', nil then return false
+        end
+      end
+    end
+
+    private def skip_motion(mode_number : String) : Nil
+      say "   skipped"
+      say ""
+      @rows << Row.new "mouse_report_on_enable_#{mode_number}", "observed", "skipped"
+      @rows << Row.new "mouse_motion_#{mode_number}", "observed", "skipped"
+    end
+
     # What arrives under one tracking mode while nothing is held down.
     #
     # Under 1000 and 1002 the answer should be nothing: 1000 is defined to
@@ -281,7 +298,7 @@ module CapsCheck
     # silence says this terminal has no any-event tracking.
     #
     # The window is fixed rather than patient: what is being measured is what
-    # three seconds of pointer movement produces, so nothing arriving is a
+    # five seconds of pointer movement produces, so nothing arriving is a
     # reading and not a timeout.
     #
     # The mode is turned on while the pointer is held still, and the movement
@@ -289,14 +306,19 @@ module CapsCheck
     # on under a pointer that is already moving makes the movement's first
     # report the enable's answer, which is how every terminal came to look as
     # though it answered mode 1003.
+    #
+    # Nothing is timed until the person says they are ready, by pressing
+    # Space: reading an instruction takes as long as it takes.
     private def check_motion(step : Int32, mode_number : String, mode : TermBuf::Tty::Mode) : Nil
-      say "#{step}. Motion under mode #{mode_number}. Hold the pointer still."
+      say "#{step}. Motion under mode #{mode_number}."
+      unless ready "   Take your hand off the mouse, then press Space. (q skips this step.)"
+        skip_motion mode_number
+        return
+      end
 
-      # Long enough for the line to be read and the pointer to come to rest,
-      # and then whatever it sent on the way there is thrown away. Both have
-      # to happen before the mode goes on, or the enable's grace measures the
-      # last of the movement instead of the enable.
-      sleep SETTLE
+      # Whatever the pointer sent on its way to rest is thrown away before the
+      # mode goes on, or the enable's grace would measure the last of the
+      # movement instead of the enable.
       drain
 
       @tty.write mode.set
@@ -307,8 +329,14 @@ module CapsCheck
       drain
       say "   the enable itself was answered with #{on_enable.inspect}" if on_enable
 
-      say "   now move the pointer across the window for " \
-          "#{MOTION_WINDOW.total_seconds.to_i} seconds without pressing anything."
+      unless ready "   Press Space, then move the pointer across the window for " \
+                   "#{MOTION_WINDOW.total_seconds.to_i} seconds without pressing a button."
+        @tty.write mode.reset
+        @tty.flush
+        skip_motion mode_number
+        return
+      end
+
       reports = collect MOUSE_REPORT, MOTION_WINDOW
       @tty.write mode.reset
       @tty.flush
