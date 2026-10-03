@@ -1,0 +1,32 @@
+termbuf-input 0.6.0 (fd52b38) examples/queries.cr
+TERM=xterm-256color TERM_PROGRAM=WezTerm TERM_PROGRAM_VERSION=20240203-110809-5046fc22
+TMUX=unset WT_SESSION=unset 2026-10-02 21:27:12 -0700
+
+PASS as expected. FAIL a bug, here or in the terminal. UNSUPPORTED the terminal does not
+do this, which is fine. SKIP skipped. INFO recorded, nothing to judge.
+
+INFO        device attributes             61;6;7;22;23;24;28;32;42
+INFO        secondary device attributes   0;10;1
+UNSUPPORTED terminal name
+PASS        cursor position               column 9, row 4, where it was put
+PASS        text area size                100 × 30, as the device says
+UNSUPPORTED text area pixels
+UNSUPPORTED cell pixels
+UNSUPPORTED kitty keyboard
+UNSUPPORTED foreground colour
+UNSUPPORTED background colour
+UNSUPPORTED cursor colour
+UNSUPPORTED palette 0 colour
+UNSUPPORTED palette 1 colour
+UNSUPPORTED palette 15 colour
+INFO        bracketed paste (2004)        supported, Reset
+INFO        focus events (1004)           supported, Reset
+INFO        SGR mouse (1006)              supported, Reset
+INFO        button-event mouse (1002)     supported, Reset
+INFO        any-event mouse (1003)        supported, Reset
+UNSUPPORTED SGR-Pixels mouse (1016)       NotRecognized
+UNSUPPORTED synchronized output (2026)    NotRecognized
+UNSUPPORTED colour scheme updates (2031)  NotRecognized
+UNSUPPORTED in-band resize (2048)         NotRecognized
+
+2 pass, 14 unsupported, 7 info

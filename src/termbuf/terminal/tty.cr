@@ -106,34 +106,14 @@ module TermBuf
     # out where an identical re-enable must not.
     @applied = {} of String => String
 
-    # Crystal's bindings carry `VMIN` but not `VTIME` on every platform, so the
-    # index is filled in here when it is missing.
-    {% if flag?(:win32) %}
-      # Windows has no line discipline, and so no `VTIME`.
-    {% elsif LibC.has_constant?(:VTIME) %}
-      VTIME = LibC::VTIME
-    {% elsif flag?(:darwin) || flag?(:bsd) %}
-      VTIME = 17
-    {% else %}
-      VTIME = 5
-    {% end %}
-
-    # The console modes found on the input handle and, when it is a console
-    # too, the output handle: what Windows has where a terminal has termios.
-    record ConsoleModes, input : UInt32, output : UInt32?
-
     @input_fd : SizeDetector::Descriptor?
     @output_fd : SizeDetector::Descriptor?
-    {% if flag?(:win32) %}
-      @saved : ConsoleModes?
-    {% else %}
-      @saved : LibC::Termios?
-    {% end %}
 
     def initialize(@input : IO, @output : IO, managed : Bool? = nil)
       @input_fd = descriptor @input
       @output_fd = descriptor @output
       @managed = managed.nil? ? terminal? : managed
+      @raw_mode = Input::RawMode.new @input, @output
 
       {% if flag?(:win32) %}
         # Crystal writes to a Windows console unbuffered, so every piece of a
@@ -363,10 +343,7 @@ module TermBuf
     # ------------------------------------------------------------- modes
 
     # Puts the terminal in raw mode, keeping what it was in so `#restore_modes`
-    # can put it back. Crystal's own `raw!` would do most of this, but it
-    # restores to a *cooked* terminal rather than to whatever was there before,
-    # which is not the same thing when a program was started from something
-    # other than an ordinary shell.
+    # can put it back. See `Input::RawMode`, which does the work.
     #
     # This has to happen before the terminal is asked anything. A cooked
     # terminal echoes the replies onto the screen and holds them in the line
@@ -375,110 +352,18 @@ module TermBuf
     #
     # Idempotent: calling it again keeps the modes first found, not the raw
     # ones, so `#restore_modes` still has somewhere to go back to.
-    #
-    # On Windows the console has modes of its own in place of termios, on the
-    # input handle and the output handle both, and both are kept. See
-    # `#console_raw!`.
     def raw! : Nil
-      fd = @input_fd
       return if @raw
-      return unless @managed && fd
+      return unless @managed
 
-      {% if flag?(:win32) %}
-        console_raw! fd
-      {% else %}
-        original = uninitialized LibC::Termios
-        return unless LibC.tcgetattr(fd, pointerof(original)).zero?
-
-        @saved = original
-        raw = original
-
-        raw.c_iflag &= ~(LibC::IGNBRK | LibC::BRKINT | LibC::PARMRK | LibC::ISTRIP |
-                         LibC::INLCR | LibC::IGNCR | LibC::ICRNL | LibC::IXON)
-        raw.c_oflag &= ~LibC::OPOST
-        raw.c_lflag &= ~(LibC::ECHO | LibC::ECHONL | LibC::ICANON | LibC::ISIG | LibC::IEXTEN)
-        raw.c_cflag &= ~(LibC::CSIZE | LibC::PARENB)
-        raw.c_cflag |= LibC::CS8
-
-        # Block until at least one byte arrives, with no inter-byte timer: the
-        # reader wants to sleep rather than spin, and escape sequence timing is
-        # decided further up, not here.
-        raw.c_cc[LibC::VMIN] = 1_u8
-        raw.c_cc[VTIME] = 0_u8
-
-        LibC.tcsetattr fd, LibC::TCSANOW, pointerof(raw)
-        @raw = true
-      {% end %}
+      @raw = @raw_mode.enter
     end
-
-    {% if flag?(:win32) %}
-      # Raw mode for a Windows console.
-      #
-      # Input: no line editing, no echo, and Ctrl+C as a byte rather than an
-      # interrupt, which is what termios raw mode does too. Virtual terminal
-      # input, so keys arrive as the escape sequences a terminal sends. Resizes
-      # reported in the input. Quick edit off, because while it is on, dragging
-      # the mouse in a classic console window selects text instead of
-      # reaching the program.
-      #
-      # Output: escape sequences understood, and a line feed that does not
-      # return the cursor, so the bottom right cell can be written without
-      # scrolling the screen.
-      private def console_raw!(fd : SizeDetector::Descriptor) : Nil
-        input = LibC::HANDLE.new fd
-        return if LibC.GetConsoleMode(input, out input_mode).zero?
-
-        output_mode = nil
-        if out_fd = @output_fd
-          output_mode = console_mode LibC::HANDLE.new(out_fd)
-        end
-
-        @saved = ConsoleModes.new input_mode, output_mode
-
-        raw = input_mode
-        raw &= ~(LibC::ENABLE_PROCESSED_INPUT | LibC::ENABLE_LINE_INPUT | LibC::ENABLE_ECHO_INPUT |
-                 LibTermBufConsole::ENABLE_QUICK_EDIT_MODE)
-        raw |= LibC::ENABLE_VIRTUAL_TERMINAL_INPUT | LibTermBufConsole::ENABLE_WINDOW_INPUT |
-               LibTermBufConsole::ENABLE_EXTENDED_FLAGS
-        LibC.SetConsoleMode input, raw
-
-        if output_mode && (out_fd = @output_fd)
-          LibC.SetConsoleMode LibC::HANDLE.new(out_fd),
-            output_mode | LibC::ENABLE_VIRTUAL_TERMINAL_PROCESSING | LibTermBufConsole::DISABLE_NEWLINE_AUTO_RETURN
-        end
-
-        @raw = true
-      end
-
-      # The console mode on *handle*, or `nil` when it is not a console.
-      private def console_mode(handle : LibC::HANDLE) : UInt32?
-        LibC.GetConsoleMode(handle, out mode).zero? ? nil : mode
-      end
-    {% end %}
 
     # Puts the line discipline back the way it was found. Idempotent, and safe
     # to call when raw mode was never entered.
     def restore_modes : Nil
-      fd = @input_fd
-      saved = @saved
-      return unless fd && saved
-
-      @saved = nil
+      @raw_mode.leave
       @raw = false
-
-      {% if flag?(:win32) %}
-        # Exactly the modes found, not a cooked console: whatever started this
-        # process may have had its own reasons for the ones it set.
-        LibC.SetConsoleMode LibC::HANDLE.new(fd), saved.input
-        if (output = saved.output) && (out_fd = @output_fd)
-          LibC.SetConsoleMode LibC::HANDLE.new(out_fd), output
-        end
-      {% else %}
-        # A fresh local, because `pointerof` goes by the declared type and the
-        # ivar's includes nil however narrow the check above made it.
-        original = saved
-        LibC.tcsetattr fd, LibC::TCSANOW, pointerof(original)
-      {% end %}
     end
   end
 end

@@ -1,0 +1,31 @@
+termbuf-input 0.6.0 (fd52b38) examples/queries.cr
+TERM= TERM_PROGRAM= TERM_PROGRAM_VERSION=
+TMUX=unset WT_SESSION=set 2026-10-02 21:27:12 -0700
+
+PASS as expected. FAIL a bug, here or in the terminal. UNSUPPORTED the terminal does not
+do this, which is fine. SKIP skipped. INFO recorded, nothing to judge.
+
+INFO        device attributes             61;4;6;7;14;21;22;23;24;28;32;42;52
+INFO        secondary device attributes   0;10;1
+UNSUPPORTED terminal name
+PASS        cursor position               column 9, row 4, where it was put
+PASS        text area size                100 × 30, as the device says
+INFO        text area pixels              1000 × 600
+INFO        cell pixels                   10 × 20
+PASS        pixel sizes agree             cells × cell size is 1000 × 600, text area is 1000 × 600
+UNSUPPORTED kitty keyboard
+INFO        bracketed paste (2004)        supported, Reset
+INFO        focus events (1004)           supported, Set
+INFO        SGR mouse (1006)              supported, Set
+INFO        button-event mouse (1002)     supported, Reset
+INFO        any-event mouse (1003)        supported, Set
+UNSUPPORTED SGR-Pixels mouse (1016)       NotRecognized
+INFO        synchronized output (2026)    supported, Reset
+UNSUPPORTED colour scheme updates (2031)  NotRecognized
+UNSUPPORTED in-band resize (2048)         NotRecognized
+SKIP        background colour             #0c0c0c
+SKIP        foreground colour             #cccccc
+SKIP        cursor colour                 #ffffff
+SKIP        palette colours               0 #0c0c0c, 1 #c50f1f, 15 #f2f2f2
+
+3 pass, 5 unsupported, 4 skip, 10 info
