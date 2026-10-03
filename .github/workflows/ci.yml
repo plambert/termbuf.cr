@@ -9,10 +9,15 @@ on:
 jobs:
   check:
     runs-on: ${{ matrix.os }}
+    # Bash on every runner, Windows included, where Git for Windows provides
+    # it, so the loops and paths below are written once.
+    defaults:
+      run:
+        shell: bash
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
 
     steps:
       - uses: actions/checkout@v7
