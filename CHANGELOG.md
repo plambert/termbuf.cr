@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- `VERSION` is read on Windows too. The compiler runs a macro's command there with no shell, so the
+  single quotes around the shard's directory reached `shards` as part of the path, and every build
+  that required this shard stopped there. Windows gets the directory in double quotes, which its
+  command line honours; elsewhere nothing changes.
+
 ## [0.8.1] - 2026-09-30
 
 ### Fixed

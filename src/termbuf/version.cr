@@ -12,7 +12,15 @@ module TermBuf
     # backslashes — literal to the shell. The command is built before the
     # backtick and inserted with `id`, because interpolating a `StringLiteral`
     # into a backtick inserts its inspected form, quotes and escapes and all.
-    {% command = "shards version '" + __DIR__.gsub(%r{'}, "'\\''") + "'" %}
+    #
+    # Windows has no shell in the way: the command line goes to the program
+    # as it is, and only double quotes group a path with spaces in it. A
+    # Windows path cannot hold a double quote, so none needs escaping there.
+    {% if flag?(:win32) %}
+      {% command = "shards version \"" + __DIR__ + "\"" %}
+    {% else %}
+      {% command = "shards version '" + __DIR__.gsub(%r{'}, "'\\''") + "'" %}
+    {% end %}
 
     VERSION = {{ `#{command.id}`.strip.stringify }}
   {% end %}
