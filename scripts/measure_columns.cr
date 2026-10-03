@@ -49,16 +49,13 @@ def read_columns(input : IO, count : Int32, idle : Time::Span = TIMEOUT) : {Arra
   strays = 0
   buffer = Bytes.new 4096
 
-  while columns.size < count
-    break unless input.responds_to? :read_timeout=
+  # A deadline that a Windows console honours too; see `TermBuf::TimedRead`.
+  reader = TermBuf::TimedRead.new input
 
-    input.read_timeout = idle
-    read = begin
-      input.read buffer
-    rescue IO::TimeoutError
-      break
-    end
-    break if read.nil? || read.zero?
+  while columns.size < count
+    read = reader.read buffer, Time.instant + idle
+    break if read.nil?
+    next if read.zero?
 
     pending.write buffer[0, read]
     text = pending.to_s
@@ -153,22 +150,12 @@ def grapheme_mode(tty : TermBuf::Tty) : String
   tty.output << "\e[?2027$p"
   tty.output.flush
 
-  input = tty.input
-  return "unknown" unless input.responds_to? :read_timeout=
-
+  reader = TermBuf::TimedRead.new tty.input
   deadline = Time.instant + TIMEOUT
   buffer = Bytes.new 256
   seen = IO::Memory.new
 
-  while Time.instant < deadline
-    input.read_timeout = deadline - Time.instant
-    read = begin
-      input.read buffer
-    rescue IO::TimeoutError
-      break
-    end
-    break if read.nil? || read.zero?
-
+  while read = reader.read(buffer, deadline)
     seen.write buffer[0, read]
     break if seen.to_s.includes? "$y"
   end

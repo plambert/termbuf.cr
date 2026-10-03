@@ -109,6 +109,9 @@ module CapsCheck
     getter environment = {} of String => String
 
     def initialize(@tty : TermBuf::Tty, @interactive : Bool)
+      # Every wait here has a deadline. A Windows console ignores
+      # `IO#read_timeout`, and this reads through the console there.
+      @reader = TermBuf::TimedRead.new @tty.input
     end
 
     # Everything that can be asked of the terminal without asking the person.
@@ -320,22 +323,12 @@ module CapsCheck
     # Every match of *pattern* that arrives within *span*, without stopping at
     # the first.
     private def collect(pattern : Regex, span : Time::Span) : Array(String)
-      input = @tty.input
       found = [] of String
-      return found unless input.responds_to? :read_timeout=
-
       deadline = Time.instant + span
       seen = IO::Memory.new
       buffer = Bytes.new 256
 
-      while Time.instant < deadline
-        input.read_timeout = deadline - Time.instant
-        count = begin
-          input.read buffer
-        rescue IO::TimeoutError
-          break
-        end
-        break if count.zero?
+      while count = @reader.read(buffer, deadline)
         seen.write buffer[0, count]
       end
 
@@ -379,23 +372,11 @@ module CapsCheck
     # and answers with what matched. Everything else read on the way is
     # discarded: it is the person typing while they wait.
     private def wait_for(pattern : Regex, patience : Time::Span = PATIENCE) : String?
-      input = @tty.input
-      return unless input.responds_to? :read_timeout=
-
       deadline = Time.instant + patience
       seen = IO::Memory.new
       buffer = Bytes.new 256
 
-      while Time.instant < deadline
-        input.read_timeout = deadline - Time.instant
-
-        count = begin
-          input.read buffer
-        rescue IO::TimeoutError
-          break
-        end
-        break if count.zero?
-
+      while count = @reader.read(buffer, deadline)
         seen.write buffer[0, count]
         text = seen.to_s
 
@@ -415,21 +396,10 @@ module CapsCheck
     # measures what arrives during it rather than what was left over from the
     # step before.
     private def drain : Nil
-      input = @tty.input
-      return unless input.responds_to? :read_timeout=
-
       buffer = Bytes.new 256
 
-      loop do
-        input.read_timeout = 20.milliseconds
-
-        count = begin
-          input.read buffer
-        rescue IO::TimeoutError
-          break
-        end
-
-        break if count.zero?
+      # Until 20 milliseconds go by with nothing arriving.
+      while count = @reader.read(buffer, Time.instant + 20.milliseconds)
       end
     end
 
@@ -464,19 +434,12 @@ module CapsCheck
 
     # One keystroke, or nothing if the patience runs out.
     private def key(patience : Time::Span = PATIENCE) : Char?
-      input = @tty.input
-      return unless input.responds_to? :read_timeout=
-
-      input.read_timeout = patience
+      deadline = Time.instant + patience
       buffer = Bytes.new 1
 
-      begin
-        return if input.read(buffer).zero?
-      rescue IO::TimeoutError
-        return
+      while count = @reader.read(buffer, deadline)
+        return buffer[0].unsafe_chr if count > 0
       end
-
-      buffer[0].unsafe_chr
     end
 
     # The terminal is in raw mode, so a line feed on its own drops a row
