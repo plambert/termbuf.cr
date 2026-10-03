@@ -128,7 +128,13 @@ module TermBuf
     # of the terminal at the end. A refusal is trusted whatever is in
     # *distrusted*, since nothing forwards a mode it does not know. See
     # `EnvironmentDetector.distrusted`.
-    def probe(base : Capabilities, distrusted : Capability = Capability::None) : Result
+    #
+    # *distrusted_refusals* are the capabilities a refusal is not taken for:
+    # something between the program and the terminal answers for itself and
+    # says no to what the terminal does. See
+    # `EnvironmentDetector.distrusted_refusals`.
+    def probe(base : Capabilities, distrusted : Capability = Capability::None,
+              distrusted_refusals : Capability = Capability::None) : Result
       @output << QUERIES
       @output.flush
 
@@ -161,6 +167,7 @@ module TermBuf
         reading.query == :cursor_position
       end
 
+      denied &= ~distrusted_refusals
       Result.new Capabilities.new(flags & ~denied), input.to_slice, answered, name, cursor
     end
 

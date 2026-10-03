@@ -235,6 +235,26 @@ module TermBuf
       flags
     end
 
+    # Refusals a Windows console gives on its own account, for a terminal
+    # behind it that does what was asked.
+    #
+    # WezTerm 20240203's console answers DECRQSS for the cursor style itself,
+    # with "invalid request", and passes DECSCUSR on: on 2026-10-03 the
+    # cursor changed shape in WezTerm on Windows while the console refused the
+    # query. Windows Terminal's console passes the query on, and WT answers.
+    CONSOLE_REFUSES_FOR_ITSELF = Capability::CursorShape
+
+    # Which refusals this environment cannot take at face value. `Prober`
+    # takes no capability off for a refusal of one of them.
+    def distrusted_refusals(env : Hash(String, String)) : Capability
+      {% if flag?(:win32) %}
+        named = identified env
+        return CONSOLE_REFUSES_FOR_ITSELF if named && named.includes?("wezterm")
+      {% end %}
+
+      Capability::None
+    end
+
     # Guesses from `TERM`, `TERM_PROGRAM`, `COLORTERM`, `VTE_VERSION`, and the
     # marker variables terminals set for themselves.
     def detect(env : Hash(String, String)) : Capabilities

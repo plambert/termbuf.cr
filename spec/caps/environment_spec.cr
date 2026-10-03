@@ -567,6 +567,24 @@ Spectator.describe TermBuf::EnvironmentDetector do
     end
   end
 
+  describe ".distrusted_refusals" do
+    it "distrusts the console's cursor style refusal for WezTerm on Windows only" do
+      env = {"TERM" => "xterm-256color", "TERM_PROGRAM" => "WezTerm"}
+
+      {% if flag?(:win32) %}
+        expect(TermBuf::EnvironmentDetector.distrusted_refusals(env)).to eq Cap::CursorShape
+      {% else %}
+        expect(TermBuf::EnvironmentDetector.distrusted_refusals(env)).to eq Cap::None
+      {% end %}
+    end
+
+    it "trusts every refusal from Windows Terminal" do
+      env = {"WT_SESSION" => "68dfb106-17eb-4ab1-97df-5d38d26e9913"}
+
+      expect(TermBuf::EnvironmentDetector.distrusted_refusals(env)).to eq Cap::None
+    end
+  end
+
   describe ".distrusted" do
     # `tmux` 3.7c answers `?1004;1$y` because it implements mode 1004, and
     # forwards no focus report by default. It does forward a click, so its

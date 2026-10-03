@@ -140,7 +140,9 @@ module CapsCheck
     # Everything that can be asked of the terminal without asking the person.
     def query : Nil
       detected = TermBuf::EnvironmentDetector.detect ENV.to_h
-      probe = TermBuf::Prober.new(@tty.input, @tty.output, PROBE_TIMEOUT).probe detected
+      probe = TermBuf::Prober.new(@tty.input, @tty.output, PROBE_TIMEOUT)
+        .probe detected, TermBuf::EnvironmentDetector.distrusted(ENV.to_h),
+          TermBuf::EnvironmentDetector.distrusted_refusals(ENV.to_h)
       settled = TermBuf::CapabilityOverrides.apply(probe.capabilities, ENV.to_h).capabilities
 
       # A terminal that cannot parse a query prints it, and this is the screen
@@ -413,11 +415,14 @@ module CapsCheck
       say ""
     end
 
+    # A steady underline, because it is nobody's default: most terminals start
+    # with a block and Windows Terminal with a blinking bar, and a change to
+    # the shape a cursor already has cannot be seen.
     private def check_cursor_shape : Nil
-      @tty.write "\e[#{TermBuf::CursorShape::Bar.code} q"
+      @tty.write "\e[#{TermBuf::CursorShape::Underline.code(blink: false)} q"
       @tty.flush
 
-      answer = ask "7. Is the cursor now a blinking bar rather than a block?"
+      answer = ask "7. Is the cursor now a steady underline, not blinking?"
 
       @tty.write TermBuf::Terminal::CURSOR_SHAPE_RESET
       @tty.flush

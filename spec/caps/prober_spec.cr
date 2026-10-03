@@ -193,6 +193,17 @@ Spectator.describe TermBuf::Prober do
       expect(result.answered).to contain :decrqss_cursor_style
     end
 
+    # A Windows console refuses DECRQSS for WezTerm on its own account, and
+    # passes the shape change on.
+    it "keeps the shape when a refusal is not the terminal's to give" do
+      input = IO::Memory.new "\eP0$r\e\\\e[1;1R"
+      result = TermBuf::Prober.new(input, IO::Memory.new, 50.milliseconds)
+        .probe TermBuf::Capabilities::MODERN, distrusted_refusals: Cap::CursorShape
+
+      expect(result.capabilities.includes?(Cap::CursorShape)).to be_true
+      expect(result.answered).to contain :decrqss_cursor_style
+    end
+
     # Terminal.app and kitty answer neither, and silence is not evidence: the
     # name is still the best that can be done for them.
     it "changes nothing when the terminal says nothing" do

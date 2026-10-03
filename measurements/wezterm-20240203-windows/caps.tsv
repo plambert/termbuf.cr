@@ -1,4 +1,4 @@
-# date	2026-10-03 00:31:24
+# date	2026-10-03 01:22:28
 # term	xterm-256color
 # term_program	WezTerm
 # term_program_version	20240203-110809-5046fc22
@@ -21,9 +21,9 @@ mouse_report_on_enable	observed	yes
 mouse_sgr	observed	yes
 mouse_report_on_enable_1000	observed	no
 mouse_motion_1000	observed	yes
-mouse_report_on_enable_1002	observed	skipped
-mouse_motion_1002	observed	skipped
-mouse_report_on_enable_1003	observed	skipped
-mouse_motion_1003	observed	skipped
-titles	asked	skipped
-cursor_shape	asked	skipped
+mouse_report_on_enable_1002	observed	no
+mouse_motion_1002	observed	yes
+mouse_report_on_enable_1003	observed	no
+mouse_motion_1003	observed	yes
+titles	asked	yes
+cursor_shape	asked	yes
