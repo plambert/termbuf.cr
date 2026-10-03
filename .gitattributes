@@ -1,1 +1,6 @@
+# Every text file is checked out with LF line endings, whatever
+# core.autocrlf says. Fixtures and generated output are compared byte for
+# byte, and a Windows checkout would otherwise turn them into CRLF.
+* text=auto eol=lf
+
 measurements/**/*.png filter=lfs diff=lfs merge=lfs -text
