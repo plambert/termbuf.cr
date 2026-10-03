@@ -1315,7 +1315,8 @@ module TermBuf
       resize = Input::Stage.new :resize, ->(event : Event, emit : Proc(Event, Nil)) do
         signal = event.as?(Events::Signal)
 
-        if signal && signal.signal.winch?
+        # Windows has no `WINCH`; its console reports a resize with the input.
+        if signal && {{ flag?(:win32) ? false : "signal.signal.winch?".id }}
           # Consumed. `#window_resized` sends the `Events::Resize` that answers
           # it, once the grids are the new size.
           window_resized
@@ -1360,7 +1361,9 @@ module TermBuf
       # happen. `TERM`, `INT` and `HUP` are on that mode already.
       signals.before_exit { restore }
 
-      install_suspend_handlers signals
+      {% unless flag?(:win32) %}
+        install_suspend_handlers signals
+      {% end %}
       signals.install
     end
 
@@ -1370,19 +1373,23 @@ module TermBuf
     #
     # `Input::Signals` puts the trap back after every delivery, so neither of
     # these has to re-install the other.
-    private def install_suspend_handlers(signals : Input::Signals) : Nil
-      signals.on(Signal::TSTP) do
-        restore
-        Signal::TSTP.reset
-        Process.signal Signal::TSTP, Process.pid
-      end
+    #
+    # Windows has neither signal. Ctrl+Z there is a keystroke like any other.
+    {% unless flag?(:win32) %}
+      private def install_suspend_handlers(signals : Input::Signals) : Nil
+        signals.on(Signal::TSTP) do
+          restore
+          Signal::TSTP.reset
+          Process.signal Signal::TSTP, Process.pid
+        end
 
-      signals.on(Signal::CONT) do
-        @restored = false
-        @tty.enter @capabilities
-        issue Commands::Paint.new(true, nil)
+        signals.on(Signal::CONT) do
+          @restored = false
+          @tty.enter @capabilities
+          issue Commands::Paint.new(true, nil)
+        end
       end
-    end
+    {% end %}
 
     private def install_exit_handler : Nil
       at_exit { restore }
