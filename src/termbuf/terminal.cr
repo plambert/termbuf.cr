@@ -1,6 +1,5 @@
 require "./terminal/tty"
 require "./input"
-require "./terminal/event"
 require "./terminal/command"
 require "./terminal/view"
 require "./terminal/terminal"

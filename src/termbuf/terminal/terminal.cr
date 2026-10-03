@@ -6,7 +6,6 @@ require "../core/painter"
 require "../core/sink"
 require "../input"
 require "./command"
-require "./event"
 require "./meter"
 require "./quiet_writer"
 require "./tty"
@@ -208,6 +207,10 @@ module TermBuf
       @meter = Meter.new @tty.output
       @commands = Channel(Command).new COMMAND_CAPACITY
       @input = Input::Stream.new @tty.input, blocking: @tty.managed?
+      # The window this terminal draws on, rather than whichever of the
+      # process's descriptors the stream would find first.
+      tty = @tty
+      @input.measure = -> { tty.size }
       @pending_input = pending_input
       @initial_warnings = warnings.dup
       @handle_signals = signals
@@ -1150,10 +1153,10 @@ module TermBuf
 
     # Tells the terminal its window changed size.
     #
-    # This is what the `SIGWINCH` handler calls. An application that does not
-    # get the signal — one driving a pty whose size it sets itself, say — calls
-    # it in the signal's place, and passes the size rather than leaving it to
-    # be read off the terminal.
+    # This is what the `:resize` stage calls with the size the stream measured.
+    # An application whose terminal never says — one driving a pty whose size
+    # it sets itself, say — calls it in the stream's place, and passes the size
+    # rather than leaving it to be read off the terminal.
     #
     # Rate limited by `#resize_interval`. The leading edge is issued straight
     # away; a call inside the interval instead leaves a single fibre to sleep
@@ -1294,10 +1297,11 @@ module TermBuf
     #
     # Two stages are built during `#start`:
     #
-    # * `:resize` consumes the `Events::Signal` for `SIGWINCH` and answers it
-    #   with `Events::Resize`, since the buffer has to be resized and marked
-    #   for redraw before anyone is told, and a window change should be one
-    #   event rather than two.
+    # * `:resize` holds back the `Events::Resize` the stream sends when the
+    #   window changes, resizes the buffer and marks it for redraw, and only
+    #   then passes the resize on with the size the buffer was as its previous
+    #   one. An application sees one resize per change, and never one the
+    #   buffer has not followed yet.
     # * `:signals` passes everything through. It is a placeholder, there so
     #   that an application with a policy about signals has somewhere named to
     #   put it: replace that one entry and leave the rest of the chain alone.
@@ -1313,13 +1317,10 @@ module TermBuf
 
     private def install_stages : Nil
       resize = Input::Stage.new :resize, ->(event : Event, emit : Proc(Event, Nil)) do
-        signal = event.as?(Events::Signal)
-
-        # Windows has no `WINCH`; its console reports a resize with the input.
-        if signal && {{ flag?(:win32) ? false : "signal.signal.winch?".id }}
-          # Consumed. `#window_resized` sends the `Events::Resize` that answers
-          # it, once the grids are the new size.
-          window_resized
+        if event.is_a? Events::Resize
+          # Held back. `#window_resized` sends it on once the grids are the new
+          # size.
+          window_resized event.size
         else
           emit.call event
         end

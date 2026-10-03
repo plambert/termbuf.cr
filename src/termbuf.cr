@@ -88,8 +88,7 @@ require "./termbuf/terminal"
 # that only wants to read a keyboard can use it without a screen buffer
 # attached. `Key` is `Input::Key`, `Events::Key` is `Input::Events::Key`, and
 # so on for every name on the input side: the short spellings are aliases and
-# are not going anywhere. The one event that stayed behind is `Events::Resize`,
-# which carries a `ScreenSize` and so belongs to the terminal rather than to
-# the keyboard.
+# are not going anywhere. `ScreenSize` and `Events::Resize` are there too,
+# since a window changing size is something the terminal says like any key.
 module TermBuf
 end

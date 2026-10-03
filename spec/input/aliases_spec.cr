@@ -37,13 +37,15 @@ Spectator.describe "the input side's short spellings" do
     expect(event.as?(TermBuf::Input::Events::Key)).to eq event
   end
 
-  # The one event that did not move, because it carries a `ScreenSize`. It
-  # arrives on the same channel, which means it has to be an `Input::Event`.
-  it "keeps Resize on the same channel" do
+  # Resize moved last, with the `ScreenSize` it carries. Both spellings are
+  # the input side's types, so a resize the stream sends and one termbuf sends
+  # are the same event.
+  it "spells Resize and ScreenSize the short way" do
     size = TermBuf::ScreenSize.new 80, 24
     resize = TermBuf::Events::Resize.new size, TermBuf::ScreenSize.new(40, 12)
 
-    expect(resize).to be_a TermBuf::Input::Event
+    expect(resize).to be_a TermBuf::Input::Events::Resize
+    expect(resize.size).to be_a TermBuf::Input::ScreenSize
     expect(resize).to be_a TermBuf::Event
   end
 end

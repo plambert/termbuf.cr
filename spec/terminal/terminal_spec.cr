@@ -626,8 +626,7 @@ Spectator.describe TermBuf::Terminal do
         harness.terminal.issue TermBuf::Commands::Resize.new(TermBuf::ScreenSize.new(40, 10))
         resize = harness.event_of TermBuf::Events::Resize
 
-        expect(resize.try &.previous.columns).to eq 20
-        expect(resize.try &.previous.rows).to eq 6
+        expect(resize.try &.previous).to eq TermBuf::ScreenSize.new(20, 6)
         expect(resize.try &.size.columns).to eq 40
         expect(resize.try &.size.rows).to eq 10
       end
@@ -2018,8 +2017,7 @@ end
           resize = harness.event_of TermBuf::Events::Resize
           fail "no resize arrived" unless resize
 
-          expect(resize.previous.columns).to eq 3
-          expect(resize.previous.rows).to eq 2
+          expect(resize.previous).to eq TermBuf::ScreenSize.new(3, 2)
           expect(harness.event_of(TermBuf::Events::Signal, 100.milliseconds)).to be_nil
         end
       end
