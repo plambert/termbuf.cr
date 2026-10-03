@@ -40,6 +40,18 @@ module TermBuf
     # How long to wait for the sentinel before giving up on the batch.
     getter timeout : Time::Span
 
+    # On Windows, how long to keep reading after the sentinel once nothing
+    # more is arriving.
+    #
+    # A Windows console answers some queries itself, the cursor position
+    # report among them, and passes others on to the terminal hosting it. So
+    # the sentinel can come back before the replies it was sent after:
+    # measured against WezTerm 20240203, the console's cursor report arrived
+    # in under a millisecond and WezTerm's own XTVERSION reply 34 milliseconds
+    # later. Without this wait that reply arrives after the probe and reads as
+    # a keystroke, `Alt+P`, the `ESC P` that opens it.
+    LATE_REPLY_QUIET = 100.milliseconds
+
     def initialize(@input : IO, @output : IO, @timeout : Time::Span = DEFAULT_TIMEOUT)
       @scanner = Input::SequenceScanner.new
       @reader = TimedRead.new @input
@@ -188,6 +200,22 @@ module TermBuf
           done = true if yield kind, bytes
         end
       end
+
+      {% if flag?(:win32) %}
+        # See `LATE_REPLY_QUIET`.
+        if done
+          quiet = Time.instant + LATE_REPLY_QUIET
+
+          while Time.instant < {quiet, deadline}.min
+            count = @reader.read buffer, {quiet, deadline}.min
+            break if count.nil?
+            next if count.zero?
+
+            quiet = Time.instant + LATE_REPLY_QUIET
+            @scanner.feed(buffer[0, count]) { |kind, bytes| yield kind, bytes }
+          end
+        end
+      {% end %}
 
       @scanner.flush { |kind, bytes| yield kind, bytes }
     end
