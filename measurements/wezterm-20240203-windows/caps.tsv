@@ -1,4 +1,4 @@
-# date	2026-10-03 01:22:28
+# date	2026-10-05 15:45:04
 # term	xterm-256color
 # term_program	WezTerm
 # term_program_version	20240203-110809-5046fc22
@@ -13,16 +13,16 @@ grapheme_clusters	decrqm	no
 bracketed_paste	decrqm	yes
 focus_events	decrqm	yes
 mouse_sgr	decrqm	yes
-cursor_shape	decrqss	no
+cursor_shape	decrqss	yes
 titles	table	yes
 focus_report_on_enable	observed	no
 focus_events	observed	yes
-mouse_report_on_enable	observed	yes
+mouse_report_on_enable	observed	no
 mouse_sgr	observed	yes
 mouse_report_on_enable_1000	observed	no
-mouse_motion_1000	observed	yes
+mouse_motion_1000	observed	no
 mouse_report_on_enable_1002	observed	no
-mouse_motion_1002	observed	yes
+mouse_motion_1002	observed	no
 mouse_report_on_enable_1003	observed	no
 mouse_motion_1003	observed	yes
 titles	asked	yes
