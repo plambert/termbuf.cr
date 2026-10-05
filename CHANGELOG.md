@@ -6,6 +6,53 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+This release runs on Windows, in Windows Terminal and in WezTerm. It needs termbuf-input 0.7.
+
+### Added
+
+- Windows support. `Tty` keeps both console modes it finds and puts back exactly those; raw mode
+  comes from termbuf-input's `Input::RawMode`. The size is the console's window, not its buffer
+  and scrollback, and no cell size is answered, because under a pseudoconsole the console's font
+  is not the terminal's. Output to a console is buffered, so a frame reaches the terminal in a few
+  writes instead of one per piece. Suspend is not installed on Windows, which has no `TSTP`.
+- Detection for Windows terminals. Windows Terminal sets neither `TERM` nor `TERM_PROGRAM`, so it
+  got no capabilities at all; `WT_SESSION` now marks it, as `WINDOWS_TERMINAL`: `MODERN` plus the
+  clipboard write. A console window with no `TERM` and no marker gets `WINDOWS_CONSOLE`, a
+  conservative preset from Microsoft's documentation that has not been measured.
+- `TimedRead`, a read with a deadline. A Windows console ignores `IO#read_timeout`, so a probe
+  whose reply never came waited for a keystroke. The prober, the width probe, `caps_check` and
+  `measure_columns` read through it.
+- `EnvironmentDetector.distrusted_refusals`, the refusals an environment cannot take at face
+  value. Under WezTerm on Windows the console refuses the cursor style query itself, while the
+  cursor changes shape in WezTerm, so `CursorShape` is kept.
+- Measurements from Windows Terminal 1.24 and WezTerm 20240203 on Windows: `caps.tsv`,
+  `mouse-mode.txt`, and termbuf-input's query and checklist reports.
+
+### Changed
+
+- `Events::Resize`, `ScreenSize` and `SizeDetector` are aliases of termbuf-input's types.
+  `Events::Resize#previous` is now `ScreenSize?`, though the terminal always fills it. The
+  `:resize` stage holds back the stream's `Resize`, resizes the buffer, and then sends one with the
+  buffer's previous size, so an application still sees one resize per change, after the buffer
+  matches. No `Events::Signal` for `WINCH` arrives any more.
+- On Windows the prober reads on after the sentinel until nothing has come for 100ms. A Windows
+  console answers some queries itself and passes others on, so the terminal's replies can come
+  after the sentinel; WezTerm's XTVERSION reply used to arrive after the probe and read as Alt+P.
+- On Windows, WezTerm loses kitty graphics, since its console drops the graphics query. A reply to
+  the query still puts it back.
+- The restore at exit is skipped when the terminal has gone away (termbuf-input's
+  `Departure::Disconnected`). On Windows that is a closed console, and writing to it could use up
+  the seconds the application's own exit hooks have.
+- `caps_check` waits for Space before each mouse motion reading, decides on keys from decoded
+  input rather than raw bytes, counts X10 reports, and asks for a steady underline cursor.
+
+### Fixed
+
+- `VERSION` is read on Windows too. The compiler runs a macro's command there with no shell, so the
+  single quotes around the shard's directory reached `shards` as part of the path, and every build
+  that required this shard stopped there. Windows gets the directory in double quotes, which its
+  command line honours; elsewhere nothing changes.
+
 ## [0.8.1] - 2026-09-30
 
 ### Fixed

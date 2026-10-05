@@ -106,24 +106,26 @@ module TermBuf
     # out where an identical re-enable must not.
     @applied = {} of String => String
 
-    # Crystal's bindings carry `VMIN` but not `VTIME` on every platform, so the
-    # index is filled in here when it is missing.
-    {% if LibC.has_constant?(:VTIME) %}
-      VTIME = LibC::VTIME
-    {% elsif flag?(:darwin) || flag?(:bsd) %}
-      VTIME = 17
-    {% else %}
-      VTIME = 5
-    {% end %}
-
-    @input_fd : Int32?
-    @output_fd : Int32?
-    @saved : LibC::Termios?
+    @input_fd : SizeDetector::Descriptor?
+    @output_fd : SizeDetector::Descriptor?
 
     def initialize(@input : IO, @output : IO, managed : Bool? = nil)
       @input_fd = descriptor @input
       @output_fd = descriptor @output
       @managed = managed.nil? ? terminal? : managed
+      @raw_mode = Input::RawMode.new @input, @output
+
+      {% if flag?(:win32) %}
+        # Crystal writes to a Windows console unbuffered, so every piece of a
+        # frame would be a call through the console to the terminal: slow, and
+        # a terminal can draw a frame half written. Everything here flushes
+        # when it has finished writing, as it must for a pipe anyway.
+        output = @output
+        if @managed && output.is_a?(IO::FileDescriptor)
+          output.sync = false
+          output.flush_on_newline = false
+        end
+      {% end %}
     end
 
     # The process's own terminal.
@@ -131,7 +133,7 @@ module TermBuf
       new STDIN, STDOUT
     end
 
-    private def descriptor(io : IO) : Int32?
+    private def descriptor(io : IO) : SizeDetector::Descriptor?
       io.is_a?(IO::FileDescriptor) ? io.fd : nil
     end
 
@@ -341,10 +343,7 @@ module TermBuf
     # ------------------------------------------------------------- modes
 
     # Puts the terminal in raw mode, keeping what it was in so `#restore_modes`
-    # can put it back. Crystal's own `raw!` would do most of this, but it
-    # restores to a *cooked* terminal rather than to whatever was there before,
-    # which is not the same thing when a program was started from something
-    # other than an ordinary shell.
+    # can put it back. See `Input::RawMode`, which does the work.
     #
     # This has to happen before the terminal is asked anything. A cooked
     # terminal echoes the replies onto the screen and holds them in the line
@@ -354,47 +353,17 @@ module TermBuf
     # Idempotent: calling it again keeps the modes first found, not the raw
     # ones, so `#restore_modes` still has somewhere to go back to.
     def raw! : Nil
-      fd = @input_fd
       return if @raw
-      return unless @managed && fd
+      return unless @managed
 
-      original = uninitialized LibC::Termios
-      return unless LibC.tcgetattr(fd, pointerof(original)).zero?
-
-      @saved = original
-      raw = original
-
-      raw.c_iflag &= ~(LibC::IGNBRK | LibC::BRKINT | LibC::PARMRK | LibC::ISTRIP |
-                       LibC::INLCR | LibC::IGNCR | LibC::ICRNL | LibC::IXON)
-      raw.c_oflag &= ~LibC::OPOST
-      raw.c_lflag &= ~(LibC::ECHO | LibC::ECHONL | LibC::ICANON | LibC::ISIG | LibC::IEXTEN)
-      raw.c_cflag &= ~(LibC::CSIZE | LibC::PARENB)
-      raw.c_cflag |= LibC::CS8
-
-      # Block until at least one byte arrives, with no inter-byte timer: the
-      # reader wants to sleep rather than spin, and escape sequence timing is
-      # decided further up, not here.
-      raw.c_cc[LibC::VMIN] = 1_u8
-      raw.c_cc[VTIME] = 0_u8
-
-      LibC.tcsetattr fd, LibC::TCSANOW, pointerof(raw)
-      @raw = true
+      @raw = @raw_mode.enter
     end
 
     # Puts the line discipline back the way it was found. Idempotent, and safe
     # to call when raw mode was never entered.
     def restore_modes : Nil
-      fd = @input_fd
-      saved = @saved
-      return unless fd && saved
-
-      @saved = nil
+      @raw_mode.leave
       @raw = false
-
-      # A fresh local, because `pointerof` goes by the declared type and the
-      # ivar's includes nil however narrow the check above made it.
-      original = saved
-      LibC.tcsetattr fd, LibC::TCSANOW, pointerof(original)
     end
   end
 end

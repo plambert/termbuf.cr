@@ -10,9 +10,9 @@ module TermBuf
   # is what let it move: a program that only wants to read a keyboard can
   # depend on `termbuf-input` alone.
   #
-  # `TermBuf::Events::Resize` is the one event that stayed behind, because it
-  # carries a `ScreenSize`. It is in `terminal/event.cr` and includes
-  # `Input::Event` so that it arrives on the same channel as everything else.
+  # `ScreenSize`, `SizeDetector` and `Events::Resize` are there too: a window
+  # that changed size is something the terminal says, and the stream measures
+  # it to say so.
   module Input
   end
 
@@ -35,7 +35,7 @@ module TermBuf
 
   # Stability: stable — changes only in a major release.
   #
-  # The input side's events, in the namespace `Events::Resize` joins.
+  # The input side's events.
   #
   # `TermBuf::Events` is the whole of what arrives on the channel, which is
   # why termbuf's own terminal side names them this way rather than reaching
@@ -62,5 +62,6 @@ module TermBuf
     alias Warning = Input::Events::Warning
     alias Failure = Input::Events::Failure
     alias Closed = Input::Events::Closed
+    alias Resize = Input::Events::Resize
   end
 end

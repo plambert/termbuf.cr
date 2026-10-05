@@ -41,9 +41,10 @@ module CapsCheck
 
   # How long the pointer is watched under each tracking mode. This one is not
   # patience: it is the length of the window the reading is about, so it ends
-  # whether or not anything arrived, and it is short because there are three
-  # of them in a row.
-  MOTION_WINDOW = 3.seconds
+  # whether or not anything arrived. It starts when the person presses Space,
+  # and includes the moment it takes to move a hand from the keyboard to the
+  # mouse.
+  MOTION_WINDOW = 5.seconds
 
   # One reading: what was asked about, how it was asked, and what came back.
   record Row, capability : String, method : String, result : String
@@ -75,15 +76,15 @@ module CapsCheck
   # A press: an SGR report ending in `M` whose button field has no motion bit.
   MOUSE_PRESS = /\e\[<(\d+);\d+;\d+M/
 
+  # An X10 mouse report: `CSI M` and three raw bytes. Nothing here asks for
+  # this encoding. One arriving means mouse tracking is on that this script
+  # did not turn on, which a Windows console does when it wants the mouse for
+  # itself, and a motion reading taken then is not about the mode it names.
+  X10_REPORT = /\e\[M.../
+
   # A release: an SGR report ending in `m`. The button field names which
   # button came up, and the click step waits for one before it ends.
   MOUSE_RELEASE = /\e\[<\d+;\d+;\d+m/
-
-  # How long the person is given to read "hold the pointer still" and stop
-  # moving before a tracking mode is turned on. Without it the enable's own
-  # answer is whatever the pointer was doing a moment earlier, which is a
-  # reading of the previous step rather than of the enable.
-  SETTLE = 1.second
 
   # How many reports a pointer moving for the window must produce before the
   # terminal is credited with reporting motion. One report is what a terminal
@@ -109,12 +110,39 @@ module CapsCheck
     getter environment = {} of String => String
 
     def initialize(@tty : TermBuf::Tty, @interactive : Bool)
+      # Every wait here has a deadline. A Windows console ignores
+      # `IO#read_timeout`, and this reads through the console there.
+      @reader = TermBuf::TimedRead.new @tty.input
+
+      # What the person typed, decoded. The terminal's own reports arrive on
+      # the same input, and their bytes are not keys: an X10 mouse report
+      # carries its column as a raw byte, and column 81 is a `q`. Every
+      # decision about a key is made on what this decodes, never on bytes.
+      @decoder = TermBuf::Input::Decoder.new
+      @keys = Deque(TermBuf::Input::Key).new
+    end
+
+    # Decodes *bytes*, keeping the keys in them.
+    private def decode_keys(bytes : Bytes) : Nil
+      @decoder.feed(bytes) do |event|
+        @keys << event.key if event.is_a?(TermBuf::Input::Events::Key)
+      end
+    end
+
+    # Whether a key that means "skip this" was typed: q, or Ctrl+C. Forgets
+    # every key it looked at.
+    private def skip_typed? : Bool
+      skip = @keys.any? { |key| key.is?('q') || key.is?('Q') || (key.ctrl? && key.char == 'c') }
+      @keys.clear
+      skip
     end
 
     # Everything that can be asked of the terminal without asking the person.
     def query : Nil
       detected = TermBuf::EnvironmentDetector.detect ENV.to_h
-      probe = TermBuf::Prober.new(@tty.input, @tty.output, PROBE_TIMEOUT).probe detected
+      probe = TermBuf::Prober.new(@tty.input, @tty.output, PROBE_TIMEOUT)
+        .probe detected, TermBuf::EnvironmentDetector.distrusted(ENV.to_h),
+          TermBuf::EnvironmentDetector.distrusted_refusals(ENV.to_h)
       settled = TermBuf::CapabilityOverrides.apply(probe.capabilities, ENV.to_h).capabilities
 
       # A terminal that cannot parse a query prints it, and this is the screen
@@ -182,7 +210,8 @@ module CapsCheck
       end
 
       say "Seven readings. The first two wait for the terminal, up to " \
-          "#{PATIENCE.total_seconds.to_i} s each; the last two take y or n. q skips any one."
+          "#{PATIENCE.total_seconds.to_i} s each; the three motion readings start when " \
+          "you press Space; the last two take y or n. q skips any one."
       say ""
 
       check_focus
@@ -268,6 +297,27 @@ module CapsCheck
       end
     end
 
+    # Waits for Space after showing *prompt*. Answers `false` for q, Ctrl+C,
+    # or no answer within `PATIENCE`. Anything else, a stray mouse report
+    # included, is ignored.
+    private def ready(prompt : String) : Bool
+      say prompt
+
+      loop do
+        case key
+        when ' '                    then return true
+        when 'q', 'Q', '\u{3}', nil then return false
+        end
+      end
+    end
+
+    private def skip_motion(mode_number : String) : Nil
+      say "   skipped"
+      say ""
+      @rows << Row.new "mouse_report_on_enable_#{mode_number}", "observed", "skipped"
+      @rows << Row.new "mouse_motion_#{mode_number}", "observed", "skipped"
+    end
+
     # What arrives under one tracking mode while nothing is held down.
     #
     # Under 1000 and 1002 the answer should be nothing: 1000 is defined to
@@ -278,7 +328,7 @@ module CapsCheck
     # silence says this terminal has no any-event tracking.
     #
     # The window is fixed rather than patient: what is being measured is what
-    # three seconds of pointer movement produces, so nothing arriving is a
+    # five seconds of pointer movement produces, so nothing arriving is a
     # reading and not a timeout.
     #
     # The mode is turned on while the pointer is held still, and the movement
@@ -286,14 +336,19 @@ module CapsCheck
     # on under a pointer that is already moving makes the movement's first
     # report the enable's answer, which is how every terminal came to look as
     # though it answered mode 1003.
+    #
+    # Nothing is timed until the person says they are ready, by pressing
+    # Space: reading an instruction takes as long as it takes.
     private def check_motion(step : Int32, mode_number : String, mode : TermBuf::Tty::Mode) : Nil
-      say "#{step}. Motion under mode #{mode_number}. Hold the pointer still."
+      say "#{step}. Motion under mode #{mode_number}."
+      unless ready "   Take your hand off the mouse, then press Space. (q skips this step.)"
+        skip_motion mode_number
+        return
+      end
 
-      # Long enough for the line to be read and the pointer to come to rest,
-      # and then whatever it sent on the way there is thrown away. Both have
-      # to happen before the mode goes on, or the enable's grace measures the
-      # last of the movement instead of the enable.
-      sleep SETTLE
+      # Whatever the pointer sent on its way to rest is thrown away before the
+      # mode goes on, or the enable's grace would measure the last of the
+      # movement instead of the enable.
       drain
 
       @tty.write mode.set
@@ -304,43 +359,41 @@ module CapsCheck
       drain
       say "   the enable itself was answered with #{on_enable.inspect}" if on_enable
 
-      say "   now move the pointer across the window for " \
-          "#{MOTION_WINDOW.total_seconds.to_i} seconds without pressing anything."
-      reports = collect MOUSE_REPORT, MOTION_WINDOW
+      unless ready "   Press Space, then move the pointer across the window for " \
+                   "#{MOTION_WINDOW.total_seconds.to_i} seconds without pressing a button."
+        @tty.write mode.reset
+        @tty.flush
+        skip_motion mode_number
+        return
+      end
+
+      reports, x10 = collect MOUSE_REPORT, X10_REPORT, MOTION_WINDOW
       @tty.write mode.reset
       @tty.flush
 
       seen = reports.size >= MOTION_REPORTS
       say reports.empty? ? "   nothing arrived" : "   #{reports.size} reports, the first #{reports.first.inspect}"
+      say "   and #{x10.size} in the X10 encoding, which nothing here asked for" unless x10.empty?
       say ""
       @rows << Row.new "mouse_report_on_enable_#{mode_number}", "observed", on_enable ? "yes" : "no"
       @rows << Row.new "mouse_motion_#{mode_number}", "observed", seen ? "yes" : "no"
     end
 
-    # Every match of *pattern* that arrives within *span*, without stopping at
-    # the first.
-    private def collect(pattern : Regex, span : Time::Span) : Array(String)
-      input = @tty.input
-      found = [] of String
-      return found unless input.responds_to? :read_timeout=
-
+    # Every match of *pattern*, and of *other*, that arrives within *span*,
+    # without stopping at the first.
+    private def collect(pattern : Regex, other : Regex, span : Time::Span) : {Array(String), Array(String)}
       deadline = Time.instant + span
       seen = IO::Memory.new
       buffer = Bytes.new 256
 
-      while Time.instant < deadline
-        input.read_timeout = deadline - Time.instant
-        count = begin
-          input.read buffer
-        rescue IO::TimeoutError
-          break
-        end
-        break if count.zero?
+      while count = @reader.read(buffer, deadline)
         seen.write buffer[0, count]
       end
 
-      seen.to_s.scan(pattern) { |match| found << match[0] }
-      found
+      # Scrubbed, because an X10 report past column or row 95 carries bytes
+      # that are not UTF-8, and a regular expression raises on those.
+      text = seen.to_s.scrub
+      {text.scan(pattern).map(&.[0]), text.scan(other).map(&.[0])}
     end
 
     # OSC 2 answers nothing, so the only instrument for it is a person looking
@@ -362,11 +415,14 @@ module CapsCheck
       say ""
     end
 
+    # A steady underline, because it is nobody's default: most terminals start
+    # with a block and Windows Terminal with a blinking bar, and a change to
+    # the shape a cursor already has cannot be seen.
     private def check_cursor_shape : Nil
-      @tty.write "\e[#{TermBuf::CursorShape::Bar.code} q"
+      @tty.write "\e[#{TermBuf::CursorShape::Underline.code(blink: false)} q"
       @tty.flush
 
-      answer = ask "7. Is the cursor now a blinking bar rather than a block?"
+      answer = ask "7. Is the cursor now a steady underline, not blinking?"
 
       @tty.write TermBuf::Terminal::CURSOR_SHAPE_RESET
       @tty.flush
@@ -379,25 +435,13 @@ module CapsCheck
     # and answers with what matched. Everything else read on the way is
     # discarded: it is the person typing while they wait.
     private def wait_for(pattern : Regex, patience : Time::Span = PATIENCE) : String?
-      input = @tty.input
-      return unless input.responds_to? :read_timeout=
-
       deadline = Time.instant + patience
       seen = IO::Memory.new
       buffer = Bytes.new 256
 
-      while Time.instant < deadline
-        input.read_timeout = deadline - Time.instant
-
-        count = begin
-          input.read buffer
-        rescue IO::TimeoutError
-          break
-        end
-        break if count.zero?
-
+      while count = @reader.read(buffer, deadline)
         seen.write buffer[0, count]
-        text = seen.to_s
+        text = seen.to_s.scrub
 
         if match = text.match pattern
           return match[0]
@@ -405,7 +449,8 @@ module CapsCheck
 
         # A way out for a terminal that will never answer, and for a person
         # who has decided it will not.
-        break if text.includes?('q') || text.includes?('\u{3}')
+        decode_keys buffer[0, count]
+        break if skip_typed?
       end
 
       nil
@@ -415,22 +460,15 @@ module CapsCheck
     # measures what arrives during it rather than what was left over from the
     # step before.
     private def drain : Nil
-      input = @tty.input
-      return unless input.responds_to? :read_timeout=
-
       buffer = Bytes.new 256
 
-      loop do
-        input.read_timeout = 20.milliseconds
-
-        count = begin
-          input.read buffer
-        rescue IO::TimeoutError
-          break
-        end
-
-        break if count.zero?
+      # Until 20 milliseconds go by with nothing arriving.
+      while count = @reader.read(buffer, Time.instant + 20.milliseconds)
       end
+
+      # And whatever was half decoded or not yet taken goes with it.
+      @decoder.flush { }
+      @keys.clear
     end
 
     # Puts *question* on the screen and waits for one letter.
@@ -462,21 +500,24 @@ module CapsCheck
       answer
     end
 
-    # One keystroke, or nothing if the patience runs out.
+    # One typed character, decoded, or nothing if the patience runs out.
+    # Ctrl+C comes back as `\u{3}`. Named keys and the terminal's reports are
+    # passed over.
     private def key(patience : Time::Span = PATIENCE) : Char?
-      input = @tty.input
-      return unless input.responds_to? :read_timeout=
+      deadline = Time.instant + patience
+      buffer = Bytes.new 256
 
-      input.read_timeout = patience
-      buffer = Bytes.new 1
+      loop do
+        while key = @keys.shift?
+          return '\u{3}' if key.ctrl? && key.char == 'c'
+          return key.char if key.character? && (key.modifiers & ~TermBuf::Input::Modifiers::Shift).none?
+        end
 
-      begin
-        return if input.read(buffer).zero?
-      rescue IO::TimeoutError
-        return
+        count = @reader.read(buffer, deadline)
+        return unless count
+
+        decode_keys buffer[0, count]
       end
-
-      buffer[0].unsafe_chr
     end
 
     # The terminal is in raw mode, so a line feed on its own drops a row

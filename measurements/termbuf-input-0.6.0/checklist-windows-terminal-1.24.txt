@@ -1,0 +1,37 @@
+termbuf-input 0.6.0 (57df0a9) examples/checklist.cr
+TERM= TERM_PROGRAM= TERM_PROGRAM_VERSION=
+TMUX=unset WT_SESSION=set 2026-10-03 00:12:42 -0700
+
+PASS as expected. FAIL a bug, here or in the terminal. UNSUPPORTED the terminal does not
+do this, which is fine. SKIP skipped. INFO recorded, nothing to judge.
+
+PASS        letter                      a "a"
+PASS        shifted letter              A "A"
+PASS        control letter              Ctrl+A "\u0001"
+PASS        alt letter                  Alt+a "\ea"
+PASS        arrow                       Up "\e[A"
+PASS        shifted arrow               Shift+Right "\e[1;2C"
+PASS        home                        Home "\e[H"
+PASS        page up                     PageUp "\e[5~"
+PASS        F1                          F1 "\eOP"
+PASS        F5                          F5 "\e[15~"
+PASS        back tab                    Shift+Tab "\e[Z"
+PASS        backspace                   Backspace "\u007F"
+PASS        delete                      Delete "\e[3~"
+PASS        enter                       Enter "\r"
+PASS        escape                      Escape "\e"
+PASS        bracketed paste             449 characters, complete
+PASS        focus                       lost, then gained
+PASS        click                       press and release at column 19, row 11
+PASS        drag                        33 motion reports, released at column 39
+PASS        right click                 at column 31, row 14
+PASS        wheel                       WheelDown
+INFO        no motion without a button  0 motion reports with no button held under mode 1002
+PASS        hover                       motion at column 43, row 15
+UNSUPPORTED kitty-escape                the kitty keyboard protocol is not supported
+UNSUPPORTED kitty-ctrl+i                the kitty keyboard protocol is not supported
+UNSUPPORTED kitty-shift+enter           the kitty keyboard protocol is not supported
+UNSUPPORTED modifyOtherKeys             the terminal sent a plain '.': . "."
+PASS        resize                      127 × 68
+
+23 pass, 4 unsupported, 1 info

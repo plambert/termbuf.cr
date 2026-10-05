@@ -75,6 +75,29 @@ module TermBuf
     # foot, a current terminal with no protocols borrowed from kitty.
     FOOT = Capabilities::MODERN.flags | CLIPBOARD_WRITE
 
+    # Windows Terminal, which sets neither `TERM` nor `TERM_PROGRAM`, only
+    # `WT_SESSION`.
+    #
+    # Measured against 1.24 on 2026-10-02, through its pseudoconsole, which
+    # passes queries on to it: DECRQM says yes to synchronized output (2026),
+    # focus (1004), the SGR mouse (1006) and bracketed paste (2004), DECRQSS
+    # answers for the cursor shape, and the device attributes include 52,
+    # the clipboard. The attributes are from Microsoft's documentation until
+    # `scripts/caps_check.cr` has looked at them. No kitty protocol: the
+    # graphics query and `CSI ? u` go unanswered.
+    WINDOWS_TERMINAL = Capabilities::MODERN.flags | CLIPBOARD_WRITE
+
+    # A Windows console window with no terminal of its own in front of it: no
+    # `TERM`, no marker. Windows 10 and later understand escape sequences there
+    # once virtual terminal processing is on, which Crystal turns on at start.
+    #
+    # Not measured. The colours, the alternate screen, the mouse, paste and
+    # the cursor shape are in Microsoft's documentation for the console; the
+    # rest of `XTERM` is attributes it ignores rather than prints.
+    WINDOWS_CONSOLE = Capabilities::XTERM.flags | Capability::TrueColor |
+                      Capability::BracketedPaste | Capability::FocusEvents |
+                      Capability::MouseSgr | Capability::CursorShape | Capability::Titles
+
     # What Terminal.app does and never admits to.
     #
     # It answers no DECRQM, no DECRQSS and no XTGETTCAP, so nothing about these
@@ -139,6 +162,7 @@ module TermBuf
       {"KONSOLE_VERSION", "konsole", Capabilities::XTERM.flags | Capability::TrueColor |
                                      Capability::Osc8Links},
       {"ITERM_SESSION_ID", "iterm", Capabilities::MODERN.flags},
+      {"WT_SESSION", "windows-terminal", WINDOWS_TERMINAL},
     ]
 
     # A multiplexer sits between the application and the terminal and does not
@@ -211,6 +235,26 @@ module TermBuf
       flags
     end
 
+    # Refusals a Windows console gives on its own account, for a terminal
+    # behind it that does what was asked.
+    #
+    # WezTerm 20240203's console answers DECRQSS for the cursor style itself,
+    # with "invalid request", and passes DECSCUSR on: on 2026-10-03 the
+    # cursor changed shape in WezTerm on Windows while the console refused the
+    # query. Windows Terminal's console passes the query on, and WT answers.
+    CONSOLE_REFUSES_FOR_ITSELF = Capability::CursorShape
+
+    # Which refusals this environment cannot take at face value. `Prober`
+    # takes no capability off for a refusal of one of them.
+    def distrusted_refusals(env : Hash(String, String)) : Capability
+      {% if flag?(:win32) %}
+        named = identified env
+        return CONSOLE_REFUSES_FOR_ITSELF if named && named.includes?("wezterm")
+      {% end %}
+
+      Capability::None
+    end
+
     # Guesses from `TERM`, `TERM_PROGRAM`, `COLORTERM`, `VTE_VERSION`, and the
     # marker variables terminals set for themselves.
     def detect(env : Hash(String, String)) : Capabilities
@@ -224,6 +268,10 @@ module TermBuf
       flags |= from_markers env
       flags |= from_colorterm env
       flags |= from_vte env
+
+      {% if flag?(:win32) %}
+        flags = WINDOWS_CONSOLE if flags.none? && !env.has_key?("TERM")
+      {% end %}
 
       flags &= ~denied(env)
       flags &= ~THROUGH_MULTIPLEXER if multiplexed? env
@@ -249,6 +297,16 @@ module TermBuf
       {"apple_terminal", Capability::Strike},
     ]
 
+    # What a terminal loses on Windows, where it hosts the program through a
+    # pseudoconsole that does not pass everything on.
+    #
+    # WezTerm 20240203's console dropped the kitty graphics query on
+    # 2026-10-03: no reply, where WezTerm answers it elsewhere. A WezTerm whose
+    # console passes it on answers the probe, and that puts it back.
+    WINDOWS_DENIALS = [
+      {"wezterm", Capability::KittyGraphics | Capability::KittyGraphicsTempFile},
+    ]
+
     # :ditto:
     def denials(name : String?) : Capability
       return Capability::None unless name
@@ -259,6 +317,12 @@ module TermBuf
       DENIALS.each do |(candidate, denied)|
         flags |= denied if lowered.includes? candidate
       end
+
+      {% if flag?(:win32) %}
+        WINDOWS_DENIALS.each do |(candidate, denied)|
+          flags |= denied if lowered.includes? candidate
+        end
+      {% end %}
 
       flags
     end

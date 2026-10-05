@@ -1,0 +1,29 @@
+# date	2026-10-05 15:45:04
+# term	xterm-256color
+# term_program	WezTerm
+# term_program_version	20240203-110809-5046fc22
+# xtversion	WezTerm 20240203-110809-5046fc22
+# termbuf_caps	
+# columns	131
+# rows	40
+# answered	primary_attributes,secondary_attributes,synchronized_output,grapheme_clusters,focus_events,mouse_sgr,bracketed_paste,decrqss_cursor_style,cursor_position,xtversion
+capability	method	result
+synchronized_output	decrqm	no
+grapheme_clusters	decrqm	no
+bracketed_paste	decrqm	yes
+focus_events	decrqm	yes
+mouse_sgr	decrqm	yes
+cursor_shape	decrqss	yes
+titles	table	yes
+focus_report_on_enable	observed	no
+focus_events	observed	yes
+mouse_report_on_enable	observed	no
+mouse_sgr	observed	yes
+mouse_report_on_enable_1000	observed	no
+mouse_motion_1000	observed	no
+mouse_report_on_enable_1002	observed	no
+mouse_motion_1002	observed	no
+mouse_report_on_enable_1003	observed	no
+mouse_motion_1003	observed	yes
+titles	asked	yes
+cursor_shape	asked	yes

@@ -2,6 +2,15 @@ require "../spec_helper"
 
 private alias Cap = TermBuf::Capability
 
+# What says WezTerm was recognised. Kitty graphics everywhere but Windows,
+# where its pseudoconsole drops the query; there, the clipboard write, which
+# none of the generic presets carry.
+{% if flag?(:win32) %}
+  private WEZTERM_SIGN = TermBuf::Capability::Osc52Clipboard
+{% else %}
+  private WEZTERM_SIGN = TermBuf::Capability::KittyGraphics
+{% end %}
+
 # Replies as the named terminals send them, in the order they arrive. The
 # cursor position report is last in every case because it is last in the query
 # batch, and it is what tells the prober everyone has finished answering.
@@ -75,7 +84,42 @@ private def probe(replies : String, base = TermBuf::Capabilities::NONE,
   {result, output.to_s}
 end
 
+# Hands over one chunk per read, as a device does when replies come from two
+# places at two times, and nothing once they are spent.
+private class Chunked < IO
+  def initialize(@chunks : Array(String))
+  end
+
+  def read(slice : Bytes) : Int32
+    chunk = @chunks.shift?
+    return 0 unless chunk
+
+    chunk.to_slice.copy_to slice
+    chunk.bytesize
+  end
+
+  def write(slice : Bytes) : Nil
+  end
+end
+
 Spectator.describe TermBuf::Prober do
+  # A Windows console answers the cursor position report itself, at once,
+  # and passes XTVERSION on to the terminal, whose reply comes later. Measured
+  # against WezTerm 20240203.
+  describe "a reply that arrives after the sentinel" do
+    it "is read on Windows, and left as input elsewhere" do
+      input = Chunked.new ["\e[1;1R", "\eP>|WezTerm 20240203\e\\"]
+      result = TermBuf::Prober.new(input, IO::Memory.new, 50.milliseconds).probe TermBuf::Capabilities::NONE
+
+      {% if flag?(:win32) %}
+        expect(result.name).to eq "WezTerm 20240203"
+        expect(result.input).to be_empty
+      {% else %}
+        expect(result.name).to be_nil
+      {% end %}
+    end
+  end
+
   describe "the query batch" do
     it "ends with a cursor position report, which every terminal answers" do
       _, queries = probe KITTY
@@ -146,6 +190,17 @@ Spectator.describe TermBuf::Prober do
       result, _ = probe "\eP0$r\e\\\e[1;1R", TermBuf::Capabilities::MODERN
 
       expect(result.capabilities.includes?(Cap::CursorShape)).to be_false
+      expect(result.answered).to contain :decrqss_cursor_style
+    end
+
+    # A Windows console refuses DECRQSS for WezTerm on its own account, and
+    # passes the shape change on.
+    it "keeps the shape when a refusal is not the terminal's to give" do
+      input = IO::Memory.new "\eP0$r\e\\\e[1;1R"
+      result = TermBuf::Prober.new(input, IO::Memory.new, 50.milliseconds)
+        .probe TermBuf::Capabilities::MODERN, distrusted_refusals: Cap::CursorShape
+
+      expect(result.capabilities.includes?(Cap::CursorShape)).to be_true
       expect(result.answered).to contain :decrqss_cursor_style
     end
 
@@ -411,7 +466,7 @@ Spectator.describe TermBuf::Prober do
       # Reported by XTVERSION alone, with nothing else in the environment.
       result, _ = probe "\eP>|WezTerm 20240203\e\\\e[1;1R"
 
-      expect(result.capabilities.includes?(Cap::KittyGraphics)).to be_true
+      expect(result.capabilities.includes?(WEZTERM_SIGN)).to be_true
       expect(result.capabilities.includes?(Cap::TrueColor)).to be_true
     end
 

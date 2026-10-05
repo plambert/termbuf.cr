@@ -2,14 +2,29 @@ require "../spec_helper"
 
 private alias Cap = TermBuf::Capability
 
+# What says WezTerm was recognised. Kitty graphics everywhere but Windows,
+# where its pseudoconsole drops the query; there, the clipboard write, which
+# none of the generic presets carry.
+{% if flag?(:win32) %}
+  private WEZTERM_SIGN = TermBuf::Capability::Osc52Clipboard
+{% else %}
+  private WEZTERM_SIGN = TermBuf::Capability::KittyGraphics
+{% end %}
+
 private def detect(env = {} of String => String) : TermBuf::Capabilities
   TermBuf::EnvironmentDetector.detect env
 end
 
 Spectator.describe TermBuf::EnvironmentDetector do
   describe "with nothing to go on" do
+    # On Windows an environment with no `TERM` and no marker is a console
+    # window with nothing in front of it, which has a preset of its own.
     it "assumes the terminal can do nothing" do
-      expect(detect.flags).to eq Cap::None
+      {% if flag?(:win32) %}
+        expect(detect.flags).to eq TermBuf::EnvironmentDetector::WINDOWS_CONSOLE
+      {% else %}
+        expect(detect.flags).to eq Cap::None
+      {% end %}
     end
 
     it "assumes the same for a terminal nobody recognises" do
@@ -49,7 +64,7 @@ Spectator.describe TermBuf::EnvironmentDetector do
 
     it "recognises other current terminals" do
       expect(detect({"TERM" => "alacritty"}).includes?(Cap::TrueColor)).to be_true
-      expect(detect({"TERM" => "wezterm"}).includes?(Cap::KittyGraphics)).to be_true
+      expect(detect({"TERM" => "wezterm"}).includes?(WEZTERM_SIGN)).to be_true
       expect(detect({"TERM" => "foot"}).includes?(Cap::TrueColor)).to be_true
     end
 
@@ -259,7 +274,7 @@ Spectator.describe TermBuf::EnvironmentDetector do
     end
 
     it "matches without regard to case" do
-      expect(detect({"TERM_PROGRAM" => "WEZTERM"}).includes?(Cap::KittyGraphics)).to be_true
+      expect(detect({"TERM_PROGRAM" => "WEZTERM"}).includes?(WEZTERM_SIGN)).to be_true
     end
   end
 
@@ -293,6 +308,35 @@ Spectator.describe TermBuf::EnvironmentDetector do
     it "ignores a marker set to nothing" do
       expect(detect({"TERM" => "xterm", "KITTY_WINDOW_ID" => ""}).includes?(Cap::KittyGraphics))
         .to be_false
+    end
+
+    it "recognises Windows Terminal by its session id, and only by that" do
+      caps = detect({"WT_SESSION" => "68dfb106-17eb-4ab1-97df-5d38d26e9913"})
+
+      expect(caps.includes?(Cap::TrueColor)).to be_true
+      expect(caps.includes?(Cap::AltScreen)).to be_true
+      expect(caps.includes?(Cap::Osc52Clipboard)).to be_true
+      expect(caps.includes?(Cap::KittyGraphics)).to be_false
+    end
+
+    # WezTerm started from a Windows Terminal tab inherits `WT_SESSION`, and
+    # names itself in `TERM_PROGRAM`, which wins.
+    it "takes WezTerm's own name over an inherited WT_SESSION" do
+      caps = detect({"TERM" => "xterm-256color", "TERM_PROGRAM" => "WezTerm",
+                     "WT_SESSION" => "68dfb106-17eb-4ab1-97df-5d38d26e9913"})
+
+      expect(caps.flags).to eq detect({"TERM" => "xterm-256color", "TERM_PROGRAM" => "WezTerm"}).flags
+    end
+
+    # WezTerm 20240203's pseudoconsole dropped the kitty graphics query.
+    it "gives WezTerm kitty graphics everywhere but Windows" do
+      caps = detect({"TERM" => "xterm-256color", "TERM_PROGRAM" => "WezTerm"})
+
+      {% if flag?(:win32) %}
+        expect(caps.includes?(Cap::KittyGraphics)).to be_false
+      {% else %}
+        expect(caps.includes?(Cap::KittyGraphics)).to be_true
+      {% end %}
     end
 
     it "reads a VTE version" do
@@ -395,7 +439,7 @@ Spectator.describe TermBuf::EnvironmentDetector do
                      "TERM_PROGRAM" => "something-unheard-of",
                      "WEZTERM_PANE" => "0"})
 
-      expect(caps.includes?(Cap::KittyGraphics)).to be_true
+      expect(caps.includes?(WEZTERM_SIGN)).to be_true
     end
 
     it "matches a marker to the terminal that names itself, whatever the case" do
@@ -403,7 +447,7 @@ Spectator.describe TermBuf::EnvironmentDetector do
                      "TERM_PROGRAM" => "WezTerm",
                      "WEZTERM_PANE" => "0"})
 
-      expect(caps.includes?(Cap::KittyGraphics)).to be_true
+      expect(caps.includes?(WEZTERM_SIGN)).to be_true
     end
 
     it "drops a foreign marker under any named terminal, not only Terminal.app" do
@@ -520,6 +564,24 @@ Spectator.describe TermBuf::EnvironmentDetector do
       caps = TermBuf::CapabilityOverrides.apply(base, "+mouse_sgr").capabilities
 
       expect(caps.includes?(Cap::MouseSgr)).to be_true
+    end
+  end
+
+  describe ".distrusted_refusals" do
+    it "distrusts the console's cursor style refusal for WezTerm on Windows only" do
+      env = {"TERM" => "xterm-256color", "TERM_PROGRAM" => "WezTerm"}
+
+      {% if flag?(:win32) %}
+        expect(TermBuf::EnvironmentDetector.distrusted_refusals(env)).to eq Cap::CursorShape
+      {% else %}
+        expect(TermBuf::EnvironmentDetector.distrusted_refusals(env)).to eq Cap::None
+      {% end %}
+    end
+
+    it "trusts every refusal from Windows Terminal" do
+      env = {"WT_SESSION" => "68dfb106-17eb-4ab1-97df-5d38d26e9913"}
+
+      expect(TermBuf::EnvironmentDetector.distrusted_refusals(env)).to eq Cap::None
     end
   end
 

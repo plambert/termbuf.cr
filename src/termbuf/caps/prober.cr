@@ -3,6 +3,7 @@ require "base64"
 require "../image_store"
 require "./capability"
 require "./environment"
+require "./timed_read"
 require "../input"
 
 module TermBuf
@@ -39,8 +40,21 @@ module TermBuf
     # How long to wait for the sentinel before giving up on the batch.
     getter timeout : Time::Span
 
+    # On Windows, how long to keep reading after the sentinel once nothing
+    # more is arriving.
+    #
+    # A Windows console answers some queries itself, the cursor position
+    # report among them, and passes others on to the terminal hosting it. So
+    # the sentinel can come back before the replies it was sent after:
+    # measured against WezTerm 20240203, the console's cursor report arrived
+    # in under a millisecond and WezTerm's own XTVERSION reply 34 milliseconds
+    # later. Without this wait that reply arrives after the probe and reads as
+    # a keystroke, `Alt+P`, the `ESC P` that opens it.
+    LATE_REPLY_QUIET = 100.milliseconds
+
     def initialize(@input : IO, @output : IO, @timeout : Time::Span = DEFAULT_TIMEOUT)
       @scanner = Input::SequenceScanner.new
+      @reader = TimedRead.new @input
     end
 
     # A one pixel RGB image, asked about rather than displayed.
@@ -114,7 +128,13 @@ module TermBuf
     # of the terminal at the end. A refusal is trusted whatever is in
     # *distrusted*, since nothing forwards a mode it does not know. See
     # `EnvironmentDetector.distrusted`.
-    def probe(base : Capabilities, distrusted : Capability = Capability::None) : Result
+    #
+    # *distrusted_refusals* are the capabilities a refusal is not taken for:
+    # something between the program and the terminal answers for itself and
+    # says no to what the terminal does. See
+    # `EnvironmentDetector.distrusted_refusals`.
+    def probe(base : Capabilities, distrusted : Capability = Capability::None,
+              distrusted_refusals : Capability = Capability::None) : Result
       @output << QUERIES
       @output.flush
 
@@ -147,6 +167,7 @@ module TermBuf
         reading.query == :cursor_position
       end
 
+      denied &= ~distrusted_refusals
       Result.new Capabilities.new(flags & ~denied), input.to_slice, answered, name, cursor
     end
 
@@ -178,7 +199,7 @@ module TermBuf
       done = false
 
       until done || Time.instant >= deadline
-        count = read_some buffer, deadline
+        count = @reader.read buffer, deadline
         break if count.nil?
         next if count.zero?
 
@@ -187,31 +208,23 @@ module TermBuf
         end
       end
 
+      {% if flag?(:win32) %}
+        # See `LATE_REPLY_QUIET`.
+        if done
+          quiet = Time.instant + LATE_REPLY_QUIET
+
+          while Time.instant < {quiet, deadline}.min
+            count = @reader.read buffer, {quiet, deadline}.min
+            break if count.nil?
+            next if count.zero?
+
+            quiet = Time.instant + LATE_REPLY_QUIET
+            @scanner.feed(buffer[0, count]) { |kind, bytes| yield kind, bytes }
+          end
+        end
+      {% end %}
+
       @scanner.flush { |kind, bytes| yield kind, bytes }
-    end
-
-    # Returns the bytes read, zero if nothing was ready, or `nil` when there is
-    # no point asking again.
-    private def read_some(buffer : Bytes, deadline : Time::Instant) : Int32?
-      apply_read_timeout deadline
-
-      count = @input.read buffer
-      count.zero? ? nil : count
-    rescue IO::TimeoutError
-      nil
-    rescue IO::Error
-      nil
-    end
-
-    # A real terminal blocks until something arrives, so the read needs a
-    # deadline of its own; an in-memory stream returns straight away and needs
-    # none. Assigning to a local is what lets the compiler narrow the type.
-    private def apply_read_timeout(deadline : Time::Instant) : Nil
-      input = @input
-      return unless input.responds_to? :read_timeout=
-
-      remaining = deadline - Time.instant
-      input.read_timeout = remaining > Time::Span.zero ? remaining : 1.millisecond
     end
 
     # `DCS Ps $ r ... ST`, the DECRPSS reply, where a leading 1 means the

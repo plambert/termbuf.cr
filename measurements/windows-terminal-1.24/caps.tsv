@@ -1,0 +1,29 @@
+# date	2026-10-03 01:23:57
+# term	
+# term_program	
+# term_program_version	
+# xtversion	
+# termbuf_caps	
+# columns	127
+# rows	68
+# answered	primary_attributes,secondary_attributes,synchronized_output,grapheme_clusters,focus_events,mouse_sgr,bracketed_paste,decrqss_cursor_style,cursor_position
+capability	method	result
+synchronized_output	decrqm	yes
+grapheme_clusters	decrqm	yes
+bracketed_paste	decrqm	yes
+focus_events	decrqm	yes
+mouse_sgr	decrqm	yes
+cursor_shape	decrqss	yes
+titles	table	yes
+focus_report_on_enable	observed	no
+focus_events	observed	yes
+mouse_report_on_enable	observed	no
+mouse_sgr	observed	yes
+mouse_report_on_enable_1000	observed	no
+mouse_motion_1000	observed	no
+mouse_report_on_enable_1002	observed	no
+mouse_motion_1002	observed	no
+mouse_report_on_enable_1003	observed	no
+mouse_motion_1003	observed	yes
+titles	asked	yes
+cursor_shape	asked	yes

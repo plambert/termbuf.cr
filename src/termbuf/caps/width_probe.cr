@@ -1,5 +1,6 @@
 require "../unicode/grapheme"
 require "../input"
+require "./timed_read"
 
 module TermBuf
   # Stability: internal
@@ -114,6 +115,7 @@ module TermBuf
 
     def initialize(@input : IO, @output : IO, @timeout : Time::Span = DEFAULT_TIMEOUT)
       @scanner = Input::SequenceScanner.new
+      @reader = TimedRead.new @input
     end
 
     CURSOR_POSITION = /\A\e\[(\d+);(\d+)R\z/
@@ -150,8 +152,9 @@ module TermBuf
       buffer = Bytes.new 4096
 
       until columns.size >= SAMPLES.size || Time.instant >= deadline
-        count = read buffer, deadline
+        count = @reader.read buffer, deadline
         break if count.nil?
+        next if count.zero?
 
         @scanner.feed buffer[0, count] do |kind, bytes|
           reply = kind.sequence? ? String.new(bytes).match(CURSOR_POSITION) : nil
@@ -160,23 +163,6 @@ module TermBuf
       end
 
       {columns, keystrokes.to_slice}
-    end
-
-    private def read(buffer : Bytes, deadline : Time::Instant) : Int32?
-      apply_timeout deadline
-
-      count = @input.read buffer
-      count.zero? ? nil : count
-    rescue IO::Error
-      nil
-    end
-
-    private def apply_timeout(deadline : Time::Instant) : Nil
-      input = @input
-      return unless input.responds_to? :read_timeout=
-
-      remaining = deadline - Time.instant
-      input.read_timeout = remaining > Time::Span.zero ? remaining : 1.millisecond
     end
 
     # Sets each rule from the sample that discriminates it, and leaves alone

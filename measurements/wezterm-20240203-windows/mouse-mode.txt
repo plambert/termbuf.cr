@@ -1,0 +1,10 @@
+== mouse input as raw mode leaves it
+input mode 0x3b8
+before the program asks: 1003 reset, 1006 reset
+with no mouse mode of the program's own: 290 SGR reports, 0 X10 reports
+with 1003 and 1006 turned on by the program: 373 SGR reports, 0 X10 reports
+== mouse input cleared
+input mode 0x3a8
+before the program asks: 1003 reset, 1006 reset
+with no mouse mode of the program's own: 0 SGR reports, 0 X10 reports
+with 1003 and 1006 turned on by the program: 307 SGR reports, 0 X10 reports

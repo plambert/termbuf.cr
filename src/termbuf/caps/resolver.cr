@@ -59,7 +59,8 @@ module TermBuf
         # also says whether there is a multiplexer in the way, and so which of
         # the terminal's answers are the multiplexer's own.
         probe = Prober.new(input, output, timeout)
-          .probe detected, EnvironmentDetector.distrusted(env)
+          .probe detected, EnvironmentDetector.distrusted(env),
+            EnvironmentDetector.distrusted_refusals(env)
         detected = probe.capabilities
         keystrokes = probe.input
         name = probe.name
