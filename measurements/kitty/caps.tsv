@@ -1,12 +1,14 @@
-# date	2026-10-20 11:40:19
+# date	2026-10-20 14:25:25
 # term	xterm-kitty
 # term_program	
 # term_program_version	
 # xtversion	kitty(0.49.0)
 # termbuf_caps	
-# columns	171
-# rows	57
+# columns	141
+# rows	40
 # answered	primary_attributes,secondary_attributes,xtversion,xtgettcap,xtgettcap,synchronized_output,grapheme_clusters,focus_events,mouse_sgr,bracketed_paste,mouse_pixels,kitty_keyboard,decrqss_cursor_style,kitty_graphics,cell_pixels,cursor_position
+# text_area_pixels	3243,1760
+# rerun	origin
 capability	method	result
 mouse_pixels	decrqm	yes
 synchronized_output	decrqm	yes
@@ -27,6 +29,7 @@ mouse_motion_1002	observed	no
 mouse_report_on_enable_1003	observed	no
 mouse_motion_1003	observed	yes
 mouse_pixels_report	observed	yes
-mouse_pixel_origin	observed	4,8
+mouse_pixel_origin	observed	-87,-126
+mouse_pixel_extent	observed	3293,1813
 titles	asked	yes
 cursor_shape	asked	yes
