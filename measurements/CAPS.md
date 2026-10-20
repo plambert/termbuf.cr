@@ -15,6 +15,9 @@ problem.
 | `MouseSgr` | DECRQM for mode 1006 | whether a click is reported |
 | `CursorShape` | DECRQSS for the DECSCUSR setting | whether the cursor changes shape |
 | `Titles` | nothing at all | whether the window's title changes |
+| `mouse_pixels` | DECRQM for mode 1016 | whether a press arrives in pixels |
+| `mouse_pixels_report` | nothing | whether a press under 1016 carries a pixel |
+| `mouse_pixel_origin` | nothing | the smallest raw x,y under 1016 in the top-left corner |
 
 A mode report says the terminal knows what the mode is. It does not say the terminal does
 anything when the mode is on, and DECRQSS is an experiment: Terminal.app and kitty answer it with
@@ -37,7 +40,7 @@ Then, **in each terminal**, one command:
 ```
 
 It needs a real terminal at both ends and someone in front of it; it refuses to run through a
-pipe. `--queries-only` skips the seven readings and records them as `skipped`, which is what a
+pipe. `--queries-only` skips the nine readings and records them as `skipped`, which is what a
 scripted run should use.
 
 ## What it does
@@ -49,7 +52,9 @@ scripted run should use.
    write, ending with the cursor position report every terminal answers.
 3. Prints one row per capability: the capability, the method that settled it (`decrqm`, `decrqss`,
    `table`, or `override` when `TERMBUF_CAPS` had the last word), and the answer.
-4. Walks seven readings, restoring everything it turned on as it goes:
+   After those it sends its own DECRQM for mode 1016 and adds a `mouse_pixels` row, `unanswered`
+   when nothing comes back.
+4. Walks nine readings, restoring everything it turned on as it goes:
    + **focus** — turns mode 1004 on and waits up to 45 seconds for `CSI O` followed by `CSI I`.
      Click another window and click this one back. Recorded as `observed`, yes or no, from
      whether both arrived rather than from what anyone thought they saw. Many terminals answer
@@ -75,15 +80,32 @@ scripted run should use.
      Enabling a mode under a pointer that is already moving makes the movement's first report the
      enable's answer, which is what the still pointer is for: the on-enable row measures the
      enable rather than the tail of the step before.
+   + **`mouse_pixels_report`** — turns mode 1016 on and waits for one press near the bottom-right
+     of the window. Recorded `yes` when the press decodes with a pixel and a coordinate is past
+     the window's columns or rows, `cells` when it arrived but fits a cell report, and `no` when
+     no press arrived. `no_cell_size` when the tty gives no cell size, which also skips the next
+     row.
+   + **`mouse_pixel_origin`** — see [the pixel origin](#the-pixel-origin).
    + **title** — pushes the title with `CSI 22 ; 0 t`, sets it with OSC 2, and asks whether the
      window or tab now says so. Pops it with `CSI 23 ; 0 t` afterwards, which is itself worth
      watching: a terminal that takes OSC 2 and has no title stack leaves the new title behind.
    + **cursor shape** — asks for a blinking bar with DECSCUSR and asks whether the cursor
      changed, then sends `CSI 0 SP q`.
 
-The last two take y, n, or q to skip; the first five are watched rather than asked. Nothing is
+The last two take y, n, or q to skip; the first seven are watched rather than asked. Nothing is
 left on: the modes are reset, the title is popped, the cursor shape is given back, and the line
 discipline is put back the way it was found.
+
+### The pixel origin
+
+`mouse_pixel_origin` turns on mode 1003 with 1016 and asks for the pointer to be moved into the
+top-left corner of the window and held still there for the last second of five. It records the
+smallest raw `x,y` among the reports, read from the report text before any subtraction. A `1,1`
+says the terminal numbers pixels from one, as cells are, and the decoder's subtraction is right.
+A `0,0` says it numbers from zero. Anything larger means the pointer did not reach the corner,
+or the terminal offsets the text area, and the run is worth repeating. `none` means no report
+arrived. Mode 1003 is used because nothing is held down, and motion is the only report that
+arrives.
 
 ### The three tracking modes
 

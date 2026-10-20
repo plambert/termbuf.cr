@@ -10,10 +10,10 @@
 # Neither is the same as having watched the thing happen: a terminal can know
 # what mode 1004 is and never send a focus report, and there is no query at all
 # for the window title. So this asks what can be asked and then asks the person
-# at the keyboard about the rest — one command per terminal, seven readings,
+# at the keyboard about the rest — one command per terminal, nine readings,
 # and a row of TSV for each answer.
 #
-# Three of those seven are not about a capability at all. They ask what the
+# Three of those are not about a capability at all. They ask what the
 # terminal reports under each of the three mouse tracking modes while nothing
 # is held down, because 1000 and 1002 are defined to report nothing there and
 # not every terminal obeys.
@@ -91,6 +91,18 @@ module CapsCheck
   # sends on its own when the mode is turned on; a moving pointer sends dozens.
   MOTION_REPORTS = 3
 
+  # How long the pointer is held still in the corner for the origin reading.
+  # It is the last stretch of `MOTION_WINDOW`, so the person has the rest of
+  # the window to get there.
+  SETTLE = 1.second
+
+  # A DECRQM reply for mode 1016. The digit is the state: 1 set, 2 reset,
+  # 3 permanently set, 4 permanently reset, 0 not recognised.
+  PIXEL_MODE_REPORT = /\e\[\?1016;(\d)\$y/
+
+  # The two coordinates of an SGR mouse report, as the terminal wrote them.
+  MOUSE_COORDS = /\e\[<\d+;(\d+);(\d+)[Mm]/
+
   # The three mouse tracking modes, and what to call the row each one leaves
   # behind. 1000 reports the press and the release, 1002 adds motion while a
   # button is held, 1003 reports every movement; the reading is what arrives
@@ -150,6 +162,7 @@ module CapsCheck
       @tty.scrub_line
 
       record_environment probe
+      query_pixels
 
       CHECKS.each do |(capability, query, method)|
         answered = query && probe.answered.includes? query
@@ -166,6 +179,25 @@ module CapsCheck
 
         @rows << Row.new capability.to_s.underscore, source, final ? "yes" : "no"
       end
+    end
+
+    # Mode 1016 has no capability to settle yet, so it is asked for here
+    # directly. A terminal that does not answer leaves `unanswered`, which is
+    # not the same reading as `no`.
+    private def query_pixels : Nil
+      @tty.write TermBuf::Input::Query.mode(1016).request
+      @tty.flush
+
+      reply = wait_for PIXEL_MODE_REPORT, PROBE_TIMEOUT
+      @tty.scrub_line
+
+      result = if reply && (state = reply.match(PIXEL_MODE_REPORT).try(&.[1].to_i))
+                 state.in?(1, 2, 3) ? "yes" : "no"
+               else
+                 "unanswered"
+               end
+
+      @rows << Row.new "mouse_pixels", "decrqm", result
     end
 
     private def record_environment(probe : TermBuf::Prober::Result) : Nil
@@ -202,15 +234,16 @@ module CapsCheck
       unless @interactive
         %w[focus_report_on_enable focus_events mouse_report_on_enable mouse_sgr
           mouse_report_on_enable_1000 mouse_motion_1000 mouse_report_on_enable_1002 mouse_motion_1002
-          mouse_report_on_enable_1003 mouse_motion_1003 titles cursor_shape].each do |name|
+          mouse_report_on_enable_1003 mouse_motion_1003 mouse_pixels_report mouse_pixel_origin
+          titles cursor_shape].each do |name|
           @rows << Row.new name, "observed", "skipped"
         end
 
         return
       end
 
-      say "Seven readings. The first two wait for the terminal, up to " \
-          "#{PATIENCE.total_seconds.to_i} s each; the three motion readings start when " \
+      say "Nine readings. The first two wait for the terminal, up to " \
+          "#{PATIENCE.total_seconds.to_i} s each; the motion and pixel readings start when " \
           "you press Space; the last two take y or n. q skips any one."
       say ""
 
@@ -219,6 +252,7 @@ module CapsCheck
       TRACKING.each_with_index do |(mode_number, mode), index|
         check_motion index + 3, mode_number, mode
       end
+      check_pixels 6
       check_title
       check_cursor_shape
     end
@@ -396,6 +430,145 @@ module CapsCheck
       {text.scan(pattern).map(&.[0]), text.scan(other).map(&.[0])}
     end
 
+    # The cell size to divide pixel reports by, from the tty's own answer.
+    private def pixel_cell : TermBuf::Input::Events::CellPixels?
+      return unless size = @tty.cell_size
+
+      TermBuf::Input::Events::CellPixels.new size[0], size[1]
+    end
+
+    private def skip_pixels : Nil
+      say "   skipped"
+      say ""
+      @rows << Row.new "mouse_pixels_report", "observed", "skipped"
+      @rows << Row.new "mouse_pixel_origin", "observed", "skipped"
+    end
+
+    # Two readings under mode 1016: whether a press arrives as a pixel
+    # report, and which number the terminal gives the top-left pixel.
+    #
+    # A terminal that ignores 1016 sends cells, or the X10 encoding, and the
+    # bytes of a cell report look like those of a pixel report. The click is
+    # asked for away from the top-left so that a coordinate past the window's
+    # columns or rows says it was pixels. A press inside that range reads as
+    # `cells`.
+    #
+    # Both readings need the cell size to decode against. Without one the
+    # first row is `no_cell_size` and the second is `skipped`.
+    private def check_pixels(step : Int32) : Nil
+      say "#{step}. Pixel mouse reports (mode 1016)."
+
+      cell = pixel_cell
+      unless cell
+        say "   the tty gives no cell size"
+        say ""
+        @rows << Row.new "mouse_pixels_report", "observed", "no_cell_size"
+        @rows << Row.new "mouse_pixel_origin", "observed", "skipped"
+        return
+      end
+
+      unless check_pixel_report cell
+        say "   skipped"
+        say ""
+        @rows << Row.new "mouse_pixels_report", "observed", "skipped"
+        @rows << Row.new "mouse_pixel_origin", "observed", "skipped"
+        return
+      end
+
+      check_pixel_origin
+    end
+
+    # Whether a press arrives under 1016 with a pixel. Answers `false` when
+    # the person skips, with no row recorded.
+    private def check_pixel_report(cell : TermBuf::Input::Events::CellPixels) : Bool
+      mode = TermBuf::Input::Mode::MOUSE_SGR_PIXELS
+
+      return false unless ready "   Take your hand off the mouse, then press Space. (q skips this step.)"
+      drain
+
+      @tty.write mode.set
+      @tty.flush
+      wait_for MOUSE_REPORT, ENABLE_GRACE
+      drain
+
+      say "   Click once near the bottom-right of this window. " \
+          "(up to #{PATIENCE.total_seconds.to_i} s)"
+      seen = wait_for_press
+      released = seen ? wait_for(MOUSE_RELEASE) : nil
+      @tty.write mode.reset
+      @tty.flush
+
+      size = @tty.size
+      event = seen.try { |text| TermBuf::Input::Mouse.decode TermBuf::Input::Sequence.parse(text.to_slice), cell }
+      coords = seen.try(&.match(MOUSE_COORDS)).try { |match| {match[1].to_i, match[2].to_i} }
+      beyond = coords && (coords[0] > size.columns || coords[1] > size.rows)
+
+      result = if event.try(&.pixel) && beyond
+                 "yes"
+               elsif event
+                 "cells"
+               else
+                 "no"
+               end
+
+      say seen ? "   saw #{seen.inspect}" : "   no press arrived"
+      say "   no release arrived; the next reading may see it" if seen && !released
+      say "   the coordinates fit a cell report" if result == "cells"
+      say ""
+      @rows << Row.new "mouse_pixels_report", "observed", result
+      true
+    end
+
+    # The smallest raw coordinates seen while the pointer is in the top-left
+    # corner under 1016, which say whether pixels are numbered from 0 or 1.
+    # They are read from the report text, before anything is subtracted. Any
+    # event tracking is used because nothing is held down.
+    private def check_pixel_origin : Nil
+      mode = TermBuf::Input::Mode::MOUSE_SGR_ANY_PIXELS
+
+      unless ready "   Take your hand off the mouse, then press Space. (q skips this step.)"
+        say "   skipped"
+        say ""
+        @rows << Row.new "mouse_pixel_origin", "observed", "skipped"
+        return
+      end
+
+      drain
+      @tty.write mode.set
+      @tty.flush
+      wait_for MOUSE_REPORT, ENABLE_GRACE
+      drain
+
+      unless ready "   Press Space, then move the pointer into the top-left corner of the window and hold " \
+                   "it still there for the last #{SETTLE.total_seconds.to_i} s of #{MOTION_WINDOW.total_seconds.to_i} s."
+        @tty.write mode.reset
+        @tty.flush
+        say "   skipped"
+        say ""
+        @rows << Row.new "mouse_pixel_origin", "observed", "skipped"
+        return
+      end
+
+      reports, _ = collect MOUSE_REPORT, X10_REPORT, MOTION_WINDOW
+      @tty.write mode.reset
+      @tty.flush
+
+      points = reports.compact_map do |text|
+        text.match(MOUSE_COORDS).try { |match| {match[1].to_i, match[2].to_i} }
+      end
+
+      if points.empty?
+        say "   nothing arrived"
+        result = "none"
+      else
+        result = "#{points.min_of(&.[0])},#{points.min_of(&.[1])}"
+        say "   #{points.size} reports, smallest x,y #{result}"
+      end
+
+      say ""
+      @rows << Row.new "mouse_pixel_origin", "observed", result
+    end
+
     # OSC 2 answers nothing, so the only instrument for it is a person looking
     # at the window's title bar. The title is pushed onto the terminal's own
     # stack first and popped afterwards, which is what the driver does and is
@@ -406,7 +579,7 @@ module CapsCheck
       @tty.write "\e]2;#{TITLE}\e\\"
       @tty.flush
 
-      answer = ask "6. Does the window or tab now say #{TITLE.inspect}?"
+      answer = ask "8. Does the window or tab now say #{TITLE.inspect}?"
 
       @tty.write TermBuf::Terminal::TITLE_STACK.reset
       @tty.flush
@@ -422,7 +595,7 @@ module CapsCheck
       @tty.write "\e[#{TermBuf::CursorShape::Underline.code(blink: false)} q"
       @tty.flush
 
-      answer = ask "7. Is the cursor now a steady underline, not blinking?"
+      answer = ask "9. Is the cursor now a steady underline, not blinking?"
 
       @tty.write TermBuf::Terminal::CURSOR_SHAPE_RESET
       @tty.flush
@@ -463,7 +636,7 @@ module CapsCheck
       buffer = Bytes.new 256
 
       # Until 20 milliseconds go by with nothing arriving.
-      while count = @reader.read(buffer, Time.instant + 20.milliseconds)
+      while @reader.read(buffer, Time.instant + 20.milliseconds)
       end
 
       # And whatever was half decoded or not yet taken goes with it.

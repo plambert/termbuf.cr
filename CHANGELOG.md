@@ -6,6 +6,11 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- `caps_check` rows `mouse_pixels`, `mouse_pixels_report` and `mouse_pixel_origin`, and pixel
+  tracking modes on the validate example's mouse page, which shows `pixel` beside the cell.
+
 ## [0.9.0] - 2026-10-05
 
 This release runs on Windows, in Windows Terminal and in WezTerm. It needs termbuf-input 0.7.
