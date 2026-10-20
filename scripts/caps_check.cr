@@ -4,6 +4,12 @@
 #
 #     crystal build scripts/caps_check.cr -o /tmp/caps_check
 #     /tmp/caps_check --out measurements/ghostty-1.3.2
+#     /tmp/caps_check --out measurements/ghostty-1.3.2 --only origin,pixels
+#
+# `--only` names the readings to take. With `--out` naming a directory that
+# already holds a `caps.tsv`, the rows those readings produce replace their
+# counterparts in it and every other row is kept, so one step can be run again
+# without the other eight.
 #
 # `Capability::FocusEvents`, `MouseSgr`, `Titles` and `CursorShape` are set
 # from a table of terminal names and, for the first two, from a mode report.
@@ -47,7 +53,14 @@ module CapsCheck
   MOTION_WINDOW = 5.seconds
 
   # One reading: what was asked about, how it was asked, and what came back.
-  record Row, capability : String, method : String, result : String
+  record Row, capability : String, method : String, result : String do
+    # What a later run of the same reading replaces. A query row is named by
+    # its capability alone, since the method it carries is part of the answer
+    # (`decrqm` one day, `override` the next); a reading is named by both.
+    def key : String
+      method.in?("observed", "asked") ? "#{capability}/#{method}" : capability
+    end
+  end
 
   # The capabilities this reports on, the probe query that would settle each,
   # and what to call that method in the output. A `nil` query is a capability
@@ -91,11 +104,6 @@ module CapsCheck
   # sends on its own when the mode is turned on; a moving pointer sends dozens.
   MOTION_REPORTS = 3
 
-  # How long the pointer is held still in the corner for the origin reading.
-  # It is the last stretch of `MOTION_WINDOW`, so the person has the rest of
-  # the window to get there.
-  SETTLE = 1.second
-
   # A DECRQM reply for mode 1016. The digit is the state: 1 set, 2 reset,
   # 3 permanently set, 4 permanently reset, 0 not recognised.
   PIXEL_MODE_REPORT = /\e\[\?1016;(\d)\$y/
@@ -103,15 +111,39 @@ module CapsCheck
   # The two coordinates of an SGR mouse report, as the terminal wrote them.
   MOUSE_COORDS = /\e\[<\d+;(\d+);(\d+)[Mm]/
 
-  # The three mouse tracking modes, and what to call the row each one leaves
-  # behind. 1000 reports the press and the release, 1002 adds motion while a
-  # button is held, 1003 reports every movement; the reading is what arrives
-  # under each while nothing at all is held down.
-  TRACKING = [
-    {"1000", TermBuf::Tty::MOUSE_SGR_CLICKS},
-    {"1002", TermBuf::Tty::MOUSE_SGR},
-    {"1003", TermBuf::Tty::MOUSE_SGR_ANY},
+  # The reply to `CSI 14 t`: the text area's height, then its width, in the
+  # terminal's own pixels.
+  TEXT_AREA_REPORT = /\e\[4;(\d+);(\d+)t/
+
+  # The readings a person can be asked for, by the name `--only` takes, with
+  # the rows each one leaves behind and the method those rows carry. The
+  # order is the order they run in, which leaves the terminal least disturbed
+  # if somebody walks away half way through.
+  STEPS = [
+    {"focus", "observed", ["focus_report_on_enable", "focus_events"]},
+    {"mouse", "observed", ["mouse_report_on_enable", "mouse_sgr"]},
+    {"motion-1000", "observed", ["mouse_report_on_enable_1000", "mouse_motion_1000"]},
+    {"motion-1002", "observed", ["mouse_report_on_enable_1002", "mouse_motion_1002"]},
+    {"motion-1003", "observed", ["mouse_report_on_enable_1003", "mouse_motion_1003"]},
+    {"pixels", "observed", ["mouse_pixels_report"]},
+    {"origin", "observed", ["mouse_pixel_origin", "mouse_pixel_extent"]},
+    {"title", "asked", ["titles"]},
+    {"cursor", "asked", ["cursor_shape"]},
   ]
+
+  # Names `--only` also takes, each standing for several steps.
+  STEP_GROUPS = {
+    "all"    => STEPS.map(&.[0]),
+    "motion" => %w[motion-1000 motion-1002 motion-1003],
+  }
+
+  # The rows the query phase writes, in order, before any reading.
+  QUERY_ROWS = %w[mouse_pixels synchronized_output grapheme_clusters bracketed_paste
+    focus_events mouse_sgr cursor_shape titles]
+
+  # Every row key a full run writes, in the order it writes them. A merged
+  # file is put back in this order whatever order its rows were read in.
+  ORDER = QUERY_ROWS + STEPS.flat_map { |(_, method, names)| names.map { |name| "#{name}/#{method}" } }
 
   # What the title is set to while the question is on screen. Distinctive
   # enough that a person can say whether it is the one they are looking at.
@@ -121,7 +153,10 @@ module CapsCheck
     getter rows = [] of Row
     getter environment = {} of String => String
 
-    def initialize(@tty : TermBuf::Tty, @interactive : Bool)
+    # The number the reading on screen is given, counted as they run.
+    @step = 0
+
+    def initialize(@tty : TermBuf::Tty, @steps : Array(String))
       # Every wait here has a deadline. A Windows console ignores
       # `IO#read_timeout`, and this reads through the console there.
       @reader = TermBuf::TimedRead.new @tty.input
@@ -163,6 +198,7 @@ module CapsCheck
 
       record_environment probe
       query_pixels
+      query_text_area
 
       CHECKS.each do |(capability, query, method)|
         answered = query && probe.answered.includes? query
@@ -200,6 +236,19 @@ module CapsCheck
       @rows << Row.new "mouse_pixels", "decrqm", result
     end
 
+    # The text area in pixels, from `CSI 14 t`, which is what the far edge of
+    # a drag under 1016 is read against. Left empty when nothing comes back.
+    private def query_text_area : Nil
+      @tty.write TermBuf::Input::Query::TEXT_AREA_PIXELS.request
+      @tty.flush
+
+      reply = wait_for TEXT_AREA_REPORT, PROBE_TIMEOUT
+      @tty.scrub_line
+
+      size = reply.try(&.match(TEXT_AREA_REPORT)).try { |match| "#{match[2]},#{match[1]}" }
+      @environment["text_area_pixels"] = size || ""
+    end
+
     private def record_environment(probe : TermBuf::Prober::Result) : Nil
       size = @tty.size
 
@@ -228,33 +277,36 @@ module CapsCheck
       end
     end
 
-    # The readings no query settles, in the order that leaves the terminal
-    # least disturbed if somebody walks away half way through.
+    # The readings no query settles, those named in `@steps`, in the order
+    # `STEPS` gives them.
     def checklist : Nil
-      unless @interactive
-        %w[focus_report_on_enable focus_events mouse_report_on_enable mouse_sgr
-          mouse_report_on_enable_1000 mouse_motion_1000 mouse_report_on_enable_1002 mouse_motion_1002
-          mouse_report_on_enable_1003 mouse_motion_1003 mouse_pixels_report mouse_pixel_origin
-          titles cursor_shape].each do |name|
-          @rows << Row.new name, "observed", "skipped"
-        end
+      return if @steps.empty?
 
-        return
-      end
-
-      say "Nine readings. The first two wait for the terminal, up to " \
-          "#{PATIENCE.total_seconds.to_i} s each; the motion and pixel readings start when " \
-          "you press Space; the last two take y or n. q skips any one."
+      say "#{@steps.size} #{@steps.size == 1 ? "reading" : "readings"}. Focus and the click wait " \
+          "for the terminal, up to #{PATIENCE.total_seconds.to_i} s each; the motion and pixel " \
+          "readings start when you press Space; the title and the cursor take y or n. q skips any one."
       say ""
 
-      check_focus
-      check_mouse
-      TRACKING.each_with_index do |(mode_number, mode), index|
-        check_motion index + 3, mode_number, mode
+      readings = {
+        "focus"       => ->check_focus,
+        "mouse"       => ->check_mouse,
+        "motion-1000" => -> { check_motion "1000", TermBuf::Tty::MOUSE_SGR_CLICKS },
+        "motion-1002" => -> { check_motion "1002", TermBuf::Tty::MOUSE_SGR },
+        "motion-1003" => -> { check_motion "1003", TermBuf::Tty::MOUSE_SGR_ANY },
+        "pixels"      => ->check_pixel_report,
+        "origin"      => ->check_pixel_origin,
+        "title"       => ->check_title,
+        "cursor"      => ->check_cursor_shape,
+      }
+
+      STEPS.each do |(name, _, _)|
+        readings[name].call if @steps.includes? name
       end
-      check_pixels 6
-      check_title
-      check_cursor_shape
+    end
+
+    # The number for the next reading's heading.
+    private def next_step : Int32
+      @step += 1
     end
 
     # A terminal that reports focus sends `CSI I` when the window comes
@@ -266,7 +318,7 @@ module CapsCheck
     # on its own row and then drained, and the reading proper wants a focus
     # out followed by a focus in, which only a switch away and back produces.
     private def check_focus : Nil
-      say "1. Focus reporting. Click another window, then click this one back. " \
+      say "#{next_step}. Focus reporting. Click another window, then click this one back. " \
           "(up to #{PATIENCE.total_seconds.to_i} s; q skips)"
       @tty.write TermBuf::Tty::FOCUS_EVENTS.set
       @tty.flush
@@ -297,7 +349,7 @@ module CapsCheck
     # so a release left behind here arrives during the step that follows and
     # is read there as that mode's answer to its own enable.
     private def check_mouse : Nil
-      say "2. Mouse reporting. Click once anywhere in this window. " \
+      say "#{next_step}. Mouse reporting. Click once anywhere in this window. " \
           "(up to #{PATIENCE.total_seconds.to_i} s; q skips)"
       @tty.write TermBuf::Tty::MOUSE_SGR.set
       @tty.flush
@@ -373,8 +425,8 @@ module CapsCheck
     #
     # Nothing is timed until the person says they are ready, by pressing
     # Space: reading an instruction takes as long as it takes.
-    private def check_motion(step : Int32, mode_number : String, mode : TermBuf::Tty::Mode) : Nil
-      say "#{step}. Motion under mode #{mode_number}."
+    private def check_motion(mode_number : String, mode : TermBuf::Tty::Mode) : Nil
+      say "#{next_step}. Motion under mode #{mode_number}."
       unless ready "   Take your hand off the mouse, then press Space. (q skips this step.)"
         skip_motion mode_number
         return
@@ -430,6 +482,21 @@ module CapsCheck
       {text.scan(pattern).map(&.[0]), text.scan(other).map(&.[0])}
     end
 
+    # Every match of *pattern* that arrives before *stop* matches or *patience*
+    # runs out. The drags end at the release, which is *stop*.
+    private def collect_until(pattern : Regex, stop : Regex, patience : Time::Span) : Array(String)
+      deadline = Time.instant + patience
+      seen = IO::Memory.new
+      buffer = Bytes.new 256
+
+      while count = @reader.read(buffer, deadline)
+        seen.write buffer[0, count]
+        break if seen.to_s.scrub.matches? stop
+      end
+
+      seen.to_s.scrub.scan(pattern).map(&.[0])
+    end
+
     # The cell size to divide pixel reports by, from the tty's own answer.
     private def pixel_cell : TermBuf::Input::Events::CellPixels?
       return unless size = @tty.cell_size
@@ -437,55 +504,34 @@ module CapsCheck
       TermBuf::Input::Events::CellPixels.new size[0], size[1]
     end
 
-    private def skip_pixels : Nil
-      say "   skipped"
-      say ""
-      @rows << Row.new "mouse_pixels_report", "observed", "skipped"
-      @rows << Row.new "mouse_pixel_origin", "observed", "skipped"
-    end
-
-    # Two readings under mode 1016: whether a press arrives as a pixel
-    # report, and which number the terminal gives the top-left pixel.
+    # Whether a press arrives under 1016 as a pixel report.
     #
     # A terminal that ignores 1016 sends cells, or the X10 encoding, and the
     # bytes of a cell report look like those of a pixel report. The click is
     # asked for away from the top-left so that a coordinate past the window's
     # columns or rows says it was pixels. A press inside that range reads as
-    # `cells`.
-    #
-    # Both readings need the cell size to decode against. Without one the
-    # first row is `no_cell_size` and the second is `skipped`.
-    private def check_pixels(step : Int32) : Nil
-      say "#{step}. Pixel mouse reports (mode 1016)."
+    # `cells`. The reading needs the cell size to decode against; without one
+    # the row is `no_cell_size`.
+    private def check_pixel_report : Nil
+      say "#{next_step}. Pixel mouse reports (mode 1016)."
 
-      cell = pixel_cell
-      unless cell
+      unless cell = pixel_cell
         say "   the tty gives no cell size"
         say ""
         @rows << Row.new "mouse_pixels_report", "observed", "no_cell_size"
-        @rows << Row.new "mouse_pixel_origin", "observed", "skipped"
         return
       end
 
-      unless check_pixel_report cell
+      mode = TermBuf::Input::Mode::MOUSE_SGR_PIXELS
+
+      unless ready "   Take your hand off the mouse, then press Space. (q skips this step.)"
         say "   skipped"
         say ""
         @rows << Row.new "mouse_pixels_report", "observed", "skipped"
-        @rows << Row.new "mouse_pixel_origin", "observed", "skipped"
         return
       end
 
-      check_pixel_origin
-    end
-
-    # Whether a press arrives under 1016 with a pixel. Answers `false` when
-    # the person skips, with no row recorded.
-    private def check_pixel_report(cell : TermBuf::Input::Events::CellPixels) : Bool
-      mode = TermBuf::Input::Mode::MOUSE_SGR_PIXELS
-
-      return false unless ready "   Take your hand off the mouse, then press Space. (q skips this step.)"
       drain
-
       @tty.write mode.set
       @tty.flush
       wait_for MOUSE_REPORT, ENABLE_GRACE
@@ -498,75 +544,100 @@ module CapsCheck
       @tty.write mode.reset
       @tty.flush
 
-      size = @tty.size
-      event = seen.try { |text| TermBuf::Input::Mouse.decode TermBuf::Input::Sequence.parse(text.to_slice), cell }
-      coords = seen.try(&.match(MOUSE_COORDS)).try { |match| {match[1].to_i, match[2].to_i} }
-      beyond = coords && (coords[0] > size.columns || coords[1] > size.rows)
-
-      result = if event.try(&.pixel) && beyond
-                 "yes"
-               elsif event
-                 "cells"
-               else
-                 "no"
-               end
+      result = seen ? pixel_result(seen, cell) : "no"
 
       say seen ? "   saw #{seen.inspect}" : "   no press arrived"
       say "   no release arrived; the next reading may see it" if seen && !released
       say "   the coordinates fit a cell report" if result == "cells"
       say ""
       @rows << Row.new "mouse_pixels_report", "observed", result
-      true
     end
 
-    # The smallest raw coordinates seen while the pointer is in the top-left
-    # corner under 1016, which say whether pixels are numbered from 0 or 1.
-    # They are read from the report text, before anything is subtracted. Any
-    # event tracking is used because nothing is held down.
-    private def check_pixel_origin : Nil
-      mode = TermBuf::Input::Mode::MOUSE_SGR_ANY_PIXELS
+    # `yes` for a press that decodes with a pixel and lies past the window's
+    # cells, `cells` for one that decodes but fits a cell report, `no` for
+    # one that does not decode at all.
+    private def pixel_result(seen : String, cell : TermBuf::Input::Events::CellPixels) : String
+      size = @tty.size
+      event = TermBuf::Input::Mouse.decode TermBuf::Input::Sequence.parse(seen.to_slice), cell
+      coords = seen.match(MOUSE_COORDS).try { |match| {match[1].to_i, match[2].to_i} }
+      beyond = coords && (coords[0] > size.columns || coords[1] > size.rows)
 
-      unless ready "   Take your hand off the mouse, then press Space. (q skips this step.)"
+      return "yes" if event.try(&.pixel) && beyond
+      event ? "cells" : "no"
+    end
+
+    # Which numbers the terminal gives the edges of its text area under 1016,
+    # read from two drags out of the window rather than from aiming at a
+    # corner, which round four found nobody can do.
+    #
+    # With a button held, a terminal keeps reporting after the pointer leaves
+    # it and clamps the coordinates to its edge. So the smallest x,y of a drag
+    # out past the top-left corner is the origin itself, `0,0` or `1,1`, and
+    # the largest of a drag out past the bottom-right is the far edge, to be
+    # read against `text_area_pixels` in the header: the size itself for a
+    # terminal numbering from one, one less for one numbering from zero. A
+    # terminal that stops reporting at the edge, or does not clamp, shows that
+    # in the numbers. Both are raw, before anything is subtracted.
+    private def check_pixel_origin : Nil
+      say "#{next_step}. Pixel origin (mode 1016), from two drags out of the window."
+      area = @environment["text_area_pixels"]?
+      say "   the text area is #{area.presence || "unknown"} pixels by CSI 14 t"
+
+      points = drag_out "top-left"
+      unless points
         say "   skipped"
         say ""
         @rows << Row.new "mouse_pixel_origin", "observed", "skipped"
+        @rows << Row.new "mouse_pixel_extent", "observed", "skipped"
         return
       end
 
+      origin = extreme(points, &.min)
+      say "   #{points.size} reports, smallest x,y #{origin}"
+      @rows << Row.new "mouse_pixel_origin", "observed", origin
+
+      points = drag_out "bottom-right"
+      extent = points ? extreme(points, &.max) : "skipped"
+      say points ? "   #{points.size} reports, largest x,y #{extent}" : "   skipped"
+      say ""
+      @rows << Row.new "mouse_pixel_extent", "observed", extent
+    end
+
+    # One drag under 1002 with 1016: every report's coordinates from the press
+    # to the release, or `nil` when the person skips.
+    private def drag_out(corner : String) : Array({Int32, Int32})?
+      mode = TermBuf::Input::Mode::MOUSE_SGR_PIXELS
+
+      return unless ready "   Take your hand off the mouse, then press Space. (q skips this step.)"
       drain
+
       @tty.write mode.set
       @tty.flush
       wait_for MOUSE_REPORT, ENABLE_GRACE
       drain
 
-      unless ready "   Press Space, then move the pointer into the top-left corner of the window and hold " \
-                   "it still there for the last #{SETTLE.total_seconds.to_i} s of #{MOTION_WINDOW.total_seconds.to_i} s."
+      unless ready "   Press Space, then hold the left button down anywhere in this window, drag the " \
+                   "pointer out past the #{corner} corner of the window, and release it out there. " \
+                   "(up to #{PATIENCE.total_seconds.to_i} s)"
         @tty.write mode.reset
         @tty.flush
-        say "   skipped"
-        say ""
-        @rows << Row.new "mouse_pixel_origin", "observed", "skipped"
         return
       end
 
-      reports, _ = collect MOUSE_REPORT, X10_REPORT, MOTION_WINDOW
+      reports = collect_until MOUSE_REPORT, MOUSE_RELEASE, PATIENCE
       @tty.write mode.reset
       @tty.flush
 
-      points = reports.compact_map do |text|
+      reports.compact_map do |text|
         text.match(MOUSE_COORDS).try { |match| {match[1].to_i, match[2].to_i} }
       end
+    end
 
-      if points.empty?
-        say "   nothing arrived"
-        result = "none"
-      else
-        result = "#{points.min_of(&.[0])},#{points.min_of(&.[1])}"
-        say "   #{points.size} reports, smallest x,y #{result}"
-      end
+    # `x,y` with each coordinate picked from *points* by the block, or `none`.
+    private def extreme(points : Array({Int32, Int32}), & : Array(Int32) -> Int32) : String
+      return "none" if points.empty?
 
-      say ""
-      @rows << Row.new "mouse_pixel_origin", "observed", result
+      "#{yield points.map(&.[0])},#{yield points.map(&.[1])}"
     end
 
     # OSC 2 answers nothing, so the only instrument for it is a person looking
@@ -579,7 +650,7 @@ module CapsCheck
       @tty.write "\e]2;#{TITLE}\e\\"
       @tty.flush
 
-      answer = ask "8. Does the window or tab now say #{TITLE.inspect}?"
+      answer = ask "#{next_step}. Does the window or tab now say #{TITLE.inspect}?"
 
       @tty.write TermBuf::Terminal::TITLE_STACK.reset
       @tty.flush
@@ -595,7 +666,7 @@ module CapsCheck
       @tty.write "\e[#{TermBuf::CursorShape::Underline.code(blink: false)} q"
       @tty.flush
 
-      answer = ask "9. Is the cursor now a steady underline, not blinking?"
+      answer = ask "#{next_step}. Is the cursor now a steady underline, not blinking?"
 
       @tty.write TermBuf::Terminal::CURSOR_SHAPE_RESET
       @tty.flush
@@ -704,24 +775,74 @@ module CapsCheck
   # The readings as TSV: the environment as comments, then a row per
   # capability. Comments rather than a second file, because one command per
   # terminal should leave one artefact behind.
-  def render(runner : Runner) : String
+  def render(environment : Hash(String, String), rows : Array(Row)) : String
     String.build do |io|
-      runner.environment.each { |key, value| io << "# " << key << '\t' << value << '\n' }
+      environment.each { |key, value| io << "# " << key << '\t' << value << '\n' }
       io << "capability\tmethod\tresult\n"
 
-      runner.rows.each do |row|
+      rows.each do |row|
         io << row.capability << '\t' << row.method << '\t' << row.result << '\n'
       end
     end
   end
 
-  def run(directory : String?, interactive : Bool) : Nil
+  # What an earlier run left at *path*, read back the way `render` wrote it.
+  def read(path : String) : {Hash(String, String), Array(Row)}
+    environment = {} of String => String
+    rows = [] of Row
+
+    File.each_line(path) do |line|
+      if line.starts_with? "# "
+        key, _, value = line[2..].partition '\t'
+        environment[key] = value
+      elsif line.starts_with?("capability\t") || line.blank?
+        next
+      else
+        fields = line.split '\t'
+        rows << Row.new fields[0], fields[1], fields[2] if fields.size == 3
+      end
+    end
+
+    {environment, rows}
+  end
+
+  # *fresh* rows in place of the *kept* rows they re-read, the rest of *kept*
+  # as it was, and the whole put back in the order a full run writes.
+  def merge(kept : Array(Row), fresh : Array(Row)) : Array(Row)
+    taken = fresh.map(&.key).to_set
+    rows = kept.reject { |row| taken.includes? row.key } + fresh
+
+    rows.each_with_index.to_a
+      .sort_by { |(row, index)| {ORDER.index(row.key) || ORDER.size, index} }
+      .map(&.[0])
+  end
+
+  # A `skipped` row for every reading not in *steps*, so a file written
+  # without one still has the row.
+  def skipped(steps : Array(String)) : Array(Row)
+    STEPS.reject { |(name, _, _)| steps.includes? name }
+      .flat_map { |(_, method, names)| names.map { |name| Row.new name, method, "skipped" } }
+  end
+
+  # The step names *value* asks for, groups expanded, in `STEPS` order.
+  def steps_named(value : String) : Array(String)
+    names = value.split(',').map(&.strip).reject(&.empty?)
+    names = names.flat_map { |name| STEP_GROUPS[name]? || [name] }
+
+    unknown = names.reject { |name| STEPS.any? { |(known, _, _)| known == name } }
+    abort "unknown step #{unknown.join ", "}; the steps are #{STEPS.map(&.[0]).join ", "}; " \
+          "#{STEP_GROUPS.keys.join " and "} each stand for several" unless unknown.empty?
+
+    STEPS.map(&.[0]).select { |name| names.includes? name }
+  end
+
+  def run(directory : String?, steps : Array(String), partial : Bool) : Nil
     unless STDIN.tty? && STDOUT.tty?
       abort "caps_check needs a terminal at both ends: run it in one, not through a pipe"
     end
 
     tty = TermBuf::Tty.standard
-    runner = Runner.new tty, interactive
+    runner = Runner.new tty, steps
 
     begin
       # Raw before anything is asked. A cooked terminal echoes the replies onto
@@ -733,30 +854,51 @@ module CapsCheck
       tty.restore_modes
     end
 
-    report = render runner
+    path = directory.try { |name| File.join name, "caps.tsv" }
+    environment = runner.environment
+    rows = runner.rows
+
+    if partial && path && File.exists?(path)
+      _, kept = read path
+      rows = merge kept, rows
+      environment["rerun"] = steps.empty? ? "queries" : steps.join(',')
+    else
+      rows = merge skipped(steps), rows
+    end
+
+    report = render environment, rows
     print report
 
-    return unless directory
+    return unless directory && path
 
     Dir.mkdir_p directory
-    path = File.join directory, "caps.tsv"
     File.write path, report
     puts "written to #{path}"
   end
 end
 
 directory = nil.as(String?)
-interactive = true
+steps = CapsCheck::STEP_GROUPS["all"]
+partial = false
 
 OptionParser.parse do |parser|
-  parser.banner = "usage: caps_check [--out DIRECTORY] [--queries-only]"
+  parser.banner = "usage: caps_check [--out DIRECTORY] [--only STEPS] [--queries-only]"
 
   parser.on "--out DIRECTORY", "also write caps.tsv there, usually measurements/<name>" do |value|
     directory = value
   end
 
+  parser.on "--only STEPS", "take only these readings, comma separated: " \
+                            "#{CapsCheck::STEPS.map(&.[0]).join ", "}; motion stands for the three " \
+                            "motion steps. With --out naming an existing caps.tsv, the rest of its " \
+                            "rows are kept" do |value|
+    steps = CapsCheck.steps_named value
+    partial = true
+  end
+
   parser.on "--queries-only", "ask the terminal but not the person" do
-    interactive = false
+    steps = [] of String
+    partial = true
   end
 
   parser.on "-h", "--help", "this message" do
@@ -771,4 +913,4 @@ OptionParser.parse do |parser|
   end
 end
 
-CapsCheck.run directory, interactive
+CapsCheck.run directory, steps, partial

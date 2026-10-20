@@ -14,6 +14,11 @@ All notable changes to this project are documented here. The format follows
 - iTerm2's DECRQM refusal of mode 1016 is distrusted: 3.7.6 answers no and reports pixels
   regardless, so the probe no longer takes `MousePixels` off for it.
 
+- `caps_check` takes `--only STEPS` and, with `--out` naming an existing `caps.tsv`, replaces
+  only the rows those steps produce. The pixel origin reading is two drags out of the window,
+  which a terminal clamps to its edge, in place of aiming at a corner nobody can hit; it leaves
+  `mouse_pixel_origin` and `mouse_pixel_extent`, read against a `text_area_pixels` header line.
+
 ### Fixed
 
 - The Thai and Lao vowel sign AM (U+0E33, U+0EB3) take a cell whatever the `spacing_marks` rule

@@ -43,6 +43,17 @@ It needs a real terminal at both ends and someone in front of it; it refuses to 
 pipe. `--queries-only` skips the nine readings and records them as `skipped`, which is what a
 scripted run should use.
 
+One reading can be taken again without the other eight. `--only` names the steps to run, comma
+separated: `focus`, `mouse`, `motion-1000`, `motion-1002`, `motion-1003`, `pixels`, `origin`,
+`title`, `cursor`; `motion` stands for the three motion steps. With `--out` naming a directory
+that already holds a `caps.tsv`, the rows the named steps produce replace their counterparts in
+the file, every other row is kept as it was, the queries and the environment are taken afresh,
+and a `# rerun` line names the steps. The file is written in the order a full run writes it.
+
+```bash
+/tmp/caps_check --out measurements/<name> --only origin,pixels
+```
+
 ## What it does
 
 1. Records `TERM`, `TERM_PROGRAM`, `TERM_PROGRAM_VERSION`, the name the terminal gives itself in
@@ -85,7 +96,7 @@ scripted run should use.
      the window's columns or rows, `cells` when it arrived but fits a cell report, and `no` when
      no press arrived. `no_cell_size` when the tty gives no cell size, which also skips the next
      row.
-   + **`mouse_pixel_origin`** — see [the pixel origin](#the-pixel-origin).
+   + **`mouse_pixel_origin`**, **`mouse_pixel_extent`** — see [the pixel origin](#the-pixel-origin).
    + **title** — pushes the title with `CSI 22 ; 0 t`, sets it with OSC 2, and asks whether the
      window or tab now says so. Pops it with `CSI 23 ; 0 t` afterwards, which is itself worth
      watching: a terminal that takes OSC 2 and has no title stack leaves the new title behind.
@@ -98,23 +109,20 @@ discipline is put back the way it was found.
 
 ### The pixel origin
 
-`mouse_pixel_origin` turns on mode 1003 with 1016 and asks for the pointer to be moved into the
-top-left corner of the window and held still there for the last second of five. It records the
-smallest raw `x,y` among the reports, read from the report text before any subtraction. A `1,1`
-says the terminal numbers pixels from one, as cells are, and the decoder's subtraction is right.
-A `0,0` says it numbers from zero. Anything larger means the pointer did not reach the corner,
-or the terminal offsets the text area, and the run is worth repeating. `none` means no report
-arrived. Mode 1003 is used because nothing is held down, and motion is the only report that
-arrives.
+Two drags out of the window under mode 1002 with 1016, because round four found that nobody can
+aim at the corner pixel: no terminal marks it, and the smallest reading a held-still pointer gave
+was wherever the pointer happened to stop. With a button held, a terminal keeps reporting after
+the pointer leaves it and clamps the coordinates to its edge, and the edge needs no aim.
 
-Round four found the corner too hard to hit: no terminal marks the corner pixel, and every reading
-came back above `1,1`. A reading that does not depend on aim is a drag out of the window. With a
-button held, a terminal keeps reporting motion after the pointer leaves it and clamps the
-coordinates to its edge, so dragging out past the top-left corner should bottom out at the origin
-itself, `0,0` or `1,1`, and dragging out past the bottom-right should top out at the text area's
-size from `CSI 14 t`, or one less. The two readings have to agree with each other for the
-terminal's numbering to be called settled. This is the next change to the instrument and has not
-been run.
+`mouse_pixel_origin` is the smallest raw `x,y` among the reports of a drag out past the top-left
+corner, press to release, read from the report text before any subtraction. `0,0` says the
+terminal numbers pixels from zero; `1,1` says from one, as cells are, and the decoder's
+subtraction is right. `mouse_pixel_extent` is the largest among the reports of a drag out past the
+bottom-right, to be read against `text_area_pixels` in the header, the terminal's own answer to
+`CSI 14 t`: the size itself for a terminal numbering from one, one less for one numbering from
+zero. The two have to agree for the numbering to be called settled. Anything else, a terminal
+that stops reporting at the edge or does not clamp, shows up as numbers that are neither. `none`
+means no report arrived.
 
 ### The three tracking modes
 
@@ -141,6 +149,7 @@ leaves one file behind.
 # term    xterm-ghostty
 # term_program     ghostty
 ...
+# text_area_pixels 2752,1600
 capability      method  result
 focus_events    decrqm  yes
 mouse_sgr       decrqm  yes
