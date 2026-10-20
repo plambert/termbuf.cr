@@ -17,6 +17,10 @@ Settled by the design discussion, recorded so they are not reopened:
 * Percent is `n` of 100 of the space left on the axis after gaps and the fixed and fit siblings,
   not of the whole content box as in Clay (decided 2026-09-05, so a fixed rule between two 50%
   panes fits); weighted grow covers shares.
+* Pixel mouse (decided 2026-10-20): `Events::Mouse#x`/`#y` stay cells; a nilable `pixel` field
+  beside them carries the pixel position and the cell size when mode 1016 is on. Nil means the
+  report came in cells. The terminal picks 1016 over 1006 on its own when it can; the application
+  reads `Terminal#mouse_pixels?` to learn how precise the pointer can be.
 
 Open, each with a recommendation:
 
@@ -701,6 +705,95 @@ Hard dependencies only; order within a group is appetite. Assumes C1–C7 and C8
   Label containing a 3-wide cluster (the property alphabet should carry one so layout at least
   does not raise); A1 and B6 for Split-pane dragging, Scrollbar thumb drag, Button click, and
   hit-test routing; B3 for everything timed. A4 is needed by nothing here.
+
+## Track D: pixel mouse (after 0.5.0)
+
+DEC private mode 1016 is the SGR encoding with the two coordinates in pixels instead of cells,
+measured from the text area's top-left. It replaces 1006; the terminal sends pixels only, so cells
+have to be derived by dividing by the cell size. The division needs that size, which termbuf gets
+from `TIOCGWINSZ` through `Tty#cell_size` (always nil on Windows) and can also ask for with
+`CSI 16 t` (`Input::Query::CELL_PIXELS`, decoded but never sent today).
+
+Consumer contract, which is the whole point:
+
+* `Events::Mouse#x` and `#y` are cells, as now. No existing code changes.
+* `Events::Mouse#pixel : Pixel?` is nil for a cell report. `Pixel` is a record of `x`, `y` in
+  pixels from the text area origin (zero-based after decoding) and `cell : CellPixels`, with
+  `#offset_x`, `#offset_y` (pixels into the cell, `0...cell.width`) and `#fraction_x`,
+  `#fraction_y` (`0.0...1.0`).
+* `Terminal#mouse_pixels?` says whether enabling a mouse mode on this terminal will deliver pixel
+  reports: `Capability::MousePixels` present and a cell size known. An application asks this before
+  deciding whether a widget can be finer than a cell.
+* `terminal.enable Tty::MOUSE_SGR` and `MOUSE_SGR_ANY` keep their names and upgrade to 1016 on their
+  own when `#mouse_pixels?`. `MOUSE_SGR_CLICKS` stays on 1006; it exists to measure mode 1000.
+
+Decoding needs two things the stateless `Mouse.decode` does not have: whether reports are in pixels
+right now, and the divisor. Both live on the stream as one nilable property, `Stream#mouse_cell :
+CellPixels?`. Non-nil means pixel reports, and is the divisor. termbuf sets it before writing the
+1016 enable and clears it after the reset is flushed, so a report that straddles the switch is
+decoded the old way rather than the wrong way. A resize re-reads the cell size and updates the
+property, since a font change arrives as a resize.
+
+Event volume: under 1003 with 1016 the terminal reports every pixel of travel. The decoder
+coalesces motion by default, emitting a `Motion` only when the cell changes or the previous motion
+has been taken from the channel; presses, releases and wheel notches are never coalesced.
+`Stream#motion_every_pixel = true` turns coalescing off for the consumers who want all of it.
+
+Pixel origin: assume 1016 numbers pixels from one, as 1006 numbers cells, and subtract one. D5
+measures it; if a terminal numbers from zero the decoder clamps rather than rejecting a zero.
+
+### D1. Input: `Pixel`, `mouse_cell`, pixel modes, coalescing (M, termbuf-input)
+
+* `Events::Mouse` gains `pixel : Pixel? = nil` as a trailing default so every existing constructor
+  call compiles. `Events::Pixel` record as above, next to `CellPixels` in `event.cr`.
+* `Mode::MOUSE_SGR_PIXELS` (`?1002h ?1016h`, reset `?1016l ?1002l`, `Query.mode(1016)`) and
+  `MOUSE_SGR_ANY_PIXELS` (1003), both named `mouse-sgr`. `Mode#pixels : Mode?` maps the two cell
+  modes to their siblings by a case on the constants (a struct cannot hold its own type).
+* `Stream#mouse_cell : CellPixels?` property. The `CSI <` pattern registered in `Stream#initialize`
+  passes it to `Mouse.decode(sequence, cell)`. With a cell, `x = (px - 1) // cell.width`, same for
+  y, and `pixel` is filled; without, today's path.
+* Motion coalescing in the stream's mouse path as described, with `motion_every_pixel`.
+* Specs: a pixel report decodes to the right cell and offset at the cell's first and last pixel;
+  a cell report with `mouse_cell` nil is unchanged; coalescing drops within-cell motion and keeps
+  presses; `Mode#pixels` round-trips. README mouse section and CHANGELOG. Tag 0.8.0 after merge.
+
+### D2. termbuf: capability, upgrade, cell size, `mouse_pixels?` (M, after D1)
+
+* Append `Capability::MousePixels`; `MODE_CAPABILITIES[1016]` and `MODE_QUERIES`; the distrust
+  rule under multiplexers that covers 1004 covers 1016 too. Not in `MODERN` until D5 has seen it.
+* The prober sends `CSI 16 t` in its batch and keeps a `CellPixels` answer on `Caps::Result`.
+  `Tty#cell_size` stays the ioctl; `Terminal#cell_size` returns the ioctl answer or the probed one,
+  and `ImageStore#cell_size=` and the resize path use that instead of `@tty.cell_size` directly.
+* `Terminal#mouse_pixels? : Bool` as defined above.
+* `Terminal#enable(mode)`: when `mode.pixels` exists and `mouse_pixels?`, set `@input.mouse_cell`,
+  then enable the sibling. `#disable` and `Tty#leave` clear `mouse_cell` after the reset is written.
+  `window_resized` refreshes `mouse_cell` when it is non-nil.
+* README: the Mouse section explains the contract in a short table. CHANGELOG. Bump the
+  termbuf-input pin to `~> 0.8`. Tag 0.10.0 after merge.
+
+### D3. caps_check and validate (S, after D1, console-bound)
+
+* `scripts/caps_check.cr`: DECRQM row for 1016 (`mouse_pixels`); an observed row
+  `mouse_pixel_origin` from the smallest coordinate seen while the person holds the pointer in the
+  top-left corner under 1016; an observed row `mouse_pixels_report` saying whether a press under
+  1016 arrived with a `pixel`. Skipped with the rest when the terminal has no mouse.
+* `examples/validate.cr` mouse page: show `pixel` beside the cell when present, with the offset and
+  the cell size, and the expected-behaviour text for both the pixel and the cell-only case.
+* `measurements/CAPS.md` gains the three rows. Round four is Paul's, across the seven terminals
+  plus WezTerm on Windows.
+
+### D4. Widgets (S, after D2)
+
+Nothing in the router changes; `Positioned` is cells. Bump the termbuf pin to `~> 0.10`, run the
+suite, and add one line to the README's mouse paragraph saying `event.pixel` is there for widgets
+that want it. Tag 0.11.0.
+
+### D5. Measure and prune (console-bound)
+
+Run D3's checklist on ghostty, kitty, iTerm2, Terminal.app, tmux, screen, and WezTerm on Windows.
+Add `MousePixels` to `MODERN` only for the terminals seen answering, as A8 did for the other four.
+
+Sequence: D1 → (D2 ∥ D3) → D4 → D5.
 
 ## Section 7: separate shards
 
