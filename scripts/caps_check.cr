@@ -84,10 +84,13 @@ module CapsCheck
   ENABLE_GRACE = 300.milliseconds
 
   # An SGR mouse report: `CSI < button ; column ; row` and a final M or m.
-  MOUSE_REPORT = /\e\[<\d+;\d+;\d+[Mm]/
+  # The coordinates may be negative: ghostty reports pixels past the top or
+  # left of the window as what they are rather than clamping, and a release
+  # out there carries them too.
+  MOUSE_REPORT = /\e\[<\d+;-?\d+;-?\d+[Mm]/
 
   # A press: an SGR report ending in `M` whose button field has no motion bit.
-  MOUSE_PRESS = /\e\[<(\d+);\d+;\d+M/
+  MOUSE_PRESS = /\e\[<(\d+);-?\d+;-?\d+M/
 
   # An X10 mouse report: `CSI M` and three raw bytes. Nothing here asks for
   # this encoding. One arriving means mouse tracking is on that this script
@@ -97,7 +100,12 @@ module CapsCheck
 
   # A release: an SGR report ending in `m`. The button field names which
   # button came up, and the click step waits for one before it ends.
-  MOUSE_RELEASE = /\e\[<\d+;\d+;\d+m/
+  MOUSE_RELEASE = /\e\[<\d+;-?\d+;-?\d+m/
+
+  # How long a drag's reports may stop for before the drag is taken to be
+  # over. The release ends it sooner when one arrives; this is for a terminal
+  # that reports no release out of the window.
+  DRAG_LULL = 2.seconds
 
   # How many reports a pointer moving for the window must produce before the
   # terminal is credited with reporting motion. One report is what a terminal
@@ -109,7 +117,7 @@ module CapsCheck
   PIXEL_MODE_REPORT = /\e\[\?1016;(\d)\$y/
 
   # The two coordinates of an SGR mouse report, as the terminal wrote them.
-  MOUSE_COORDS = /\e\[<\d+;(\d+);(\d+)[Mm]/
+  MOUSE_COORDS = /\e\[<\d+;(-?\d+);(-?\d+)[Mm]/
 
   # The reply to `CSI 14 t`: the text area's height, then its width, in the
   # terminal's own pixels.
@@ -148,6 +156,46 @@ module CapsCheck
   # What the title is set to while the question is on screen. Distinctive
   # enough that a person can say whether it is the one they are looking at.
   TITLE = "termbuf caps check"
+
+  # A bar on the current line counting a wait down, so that a stated number
+  # of seconds can be watched going. Every timed read in the runner returns
+  # at least once a tick to redraw it, and `finish` wipes the line for what
+  # is said next.
+  class Countdown
+    TICK  = 100.milliseconds
+    WIDTH = 30
+
+    getter deadline : Time::Instant
+
+    def initialize(@tty : TermBuf::Tty, @span : Time::Span)
+      @deadline = Time.instant + @span
+      draw
+    end
+
+    # When the next read should give up to redraw: the next tick, or the
+    # deadline if that is sooner.
+    def next_tick : Time::Instant
+      {@deadline, Time.instant + TICK}.min
+    end
+
+    def over? : Bool
+      Time.instant >= @deadline
+    end
+
+    def draw : Nil
+      left = {@deadline - Time.instant, Time::Span.zero}.max
+      filled = (WIDTH * (left / @span)).round.to_i
+      seconds = left.total_seconds.ceil.to_i
+
+      @tty.write "\r   [#{"#" * filled}#{"." * (WIDTH - filled)}] #{seconds.to_s.rjust(2)} s"
+      @tty.flush
+    end
+
+    def finish : Nil
+      @tty.write "\r\e[K"
+      @tty.flush
+    end
+  end
 
   class Runner
     getter rows = [] of Row
@@ -327,8 +375,10 @@ module CapsCheck
       drain
       say "   the enable itself was answered with #{on_enable.inspect}" if on_enable
 
-      out = wait_for FOCUS_OUT
-      back = out ? wait_for(FOCUS_IN) : nil
+      countdown = Countdown.new @tty, PATIENCE
+      out = wait_for FOCUS_OUT, countdown: countdown
+      back = out ? wait_for(FOCUS_IN, countdown: countdown) : nil
+      countdown.finish
       @tty.write TermBuf::Tty::FOCUS_EVENTS.reset
       @tty.flush
 
@@ -358,8 +408,10 @@ module CapsCheck
       drain
       say "   the enable itself was answered with #{on_enable.inspect}" if on_enable
 
-      seen = wait_for_press
-      released = seen ? wait_for(MOUSE_RELEASE) : nil
+      countdown = Countdown.new @tty, PATIENCE
+      seen = wait_for_press countdown
+      released = seen ? wait_for(MOUSE_RELEASE, countdown: countdown) : nil
+      countdown.finish
       @tty.write TermBuf::Tty::MOUSE_SGR.reset
       @tty.flush
 
@@ -373,26 +425,34 @@ module CapsCheck
 
     # Waits for a report that is a press rather than motion: the button field
     # with bit 32 clear.
-    private def wait_for_press : String?
-      deadline = Time.instant + PATIENCE
-      while Time.instant < deadline
-        seen = wait_for MOUSE_PRESS, deadline - Time.instant
+    private def wait_for_press(countdown : Countdown) : String?
+      until countdown.over?
+        seen = wait_for MOUSE_PRESS, countdown: countdown
         return unless seen
         button = seen.match(MOUSE_PRESS).try(&.[1].to_i) || 0
         return seen if button & 32 == 0
       end
     end
 
-    # Waits for Space after showing *prompt*. Answers `false` for q, Ctrl+C,
-    # or no answer within `PATIENCE`. Anything else, a stray mouse report
+    # Waits for Space after showing *prompt*, and says on the same line what
+    # came: `ok` for Space, `skipped` for q or Ctrl+C, `no answer` within
+    # `PATIENCE`. Anything else, a stray mouse report
     # included, is ignored.
     private def ready(prompt : String) : Bool
-      say prompt
+      @tty.write "#{prompt} "
+      @tty.flush
 
       loop do
         case key
-        when ' '                    then return true
-        when 'q', 'Q', '\u{3}', nil then return false
+        when ' '
+          say "ok"
+          return true
+        when 'q', 'Q', '\u{3}'
+          say "skipped"
+          return false
+        when nil
+          say "no answer"
+          return false
         end
       end
     end
@@ -453,7 +513,7 @@ module CapsCheck
         return
       end
 
-      reports, x10 = collect MOUSE_REPORT, X10_REPORT, MOTION_WINDOW
+      reports, x10 = collect MOUSE_REPORT, X10_REPORT, Countdown.new(@tty, MOTION_WINDOW)
       @tty.write mode.reset
       @tty.flush
 
@@ -465,16 +525,20 @@ module CapsCheck
       @rows << Row.new "mouse_motion_#{mode_number}", "observed", seen ? "yes" : "no"
     end
 
-    # Every match of *pattern*, and of *other*, that arrives within *span*,
-    # without stopping at the first.
-    private def collect(pattern : Regex, other : Regex, span : Time::Span) : {Array(String), Array(String)}
-      deadline = Time.instant + span
+    # Every match of *pattern*, and of *other*, that arrives before the
+    # *countdown* ends, without stopping at the first.
+    private def collect(pattern : Regex, other : Regex, countdown : Countdown) : {Array(String), Array(String)}
       seen = IO::Memory.new
       buffer = Bytes.new 256
 
-      while count = @reader.read(buffer, deadline)
-        seen.write buffer[0, count]
+      until countdown.over?
+        if count = @reader.read(buffer, countdown.next_tick)
+          seen.write buffer[0, count]
+        else
+          countdown.draw
+        end
       end
+      countdown.finish
 
       # Scrubbed, because an X10 report past column or row 95 carries bytes
       # that are not UTF-8, and a regular expression raises on those.
@@ -482,17 +546,27 @@ module CapsCheck
       {text.scan(pattern).map(&.[0]), text.scan(other).map(&.[0])}
     end
 
-    # Every match of *pattern* that arrives before *stop* matches or *patience*
-    # runs out. The drags end at the release, which is *stop*.
-    private def collect_until(pattern : Regex, stop : Regex, patience : Time::Span) : Array(String)
-      deadline = Time.instant + patience
+    # Every match of *pattern* that arrives before *stop* matches, before the
+    # *countdown* ends, or before the input stays quiet for *lull* once a
+    # match has come. The drags end at the release, which is *stop*; the lull
+    # catches a terminal that reports none out of the window.
+    private def collect_until(pattern : Regex, stop : Regex, countdown : Countdown,
+                              lull : Time::Span = DRAG_LULL) : Array(String)
+      quiet_by = countdown.deadline
       seen = IO::Memory.new
       buffer = Bytes.new 256
 
-      while count = @reader.read(buffer, deadline)
-        seen.write buffer[0, count]
-        break if seen.to_s.scrub.matches? stop
+      until countdown.over? || Time.instant >= quiet_by
+        if count = @reader.read(buffer, {countdown.next_tick, quiet_by}.min)
+          seen.write buffer[0, count]
+          text = seen.to_s.scrub
+          break if text.matches? stop
+          quiet_by = Time.instant + lull if text.matches? pattern
+        else
+          countdown.draw
+        end
       end
+      countdown.finish
 
       seen.to_s.scrub.scan(pattern).map(&.[0])
     end
@@ -539,8 +613,10 @@ module CapsCheck
 
       say "   Click once near the bottom-right of this window. " \
           "(up to #{PATIENCE.total_seconds.to_i} s)"
-      seen = wait_for_press
-      released = seen ? wait_for(MOUSE_RELEASE) : nil
+      countdown = Countdown.new @tty, PATIENCE
+      seen = wait_for_press countdown
+      released = seen ? wait_for(MOUSE_RELEASE, countdown: countdown) : nil
+      countdown.finish
       @tty.write mode.reset
       @tty.flush
 
@@ -577,7 +653,9 @@ module CapsCheck
     # read against `text_area_pixels` in the header: the size itself for a
     # terminal numbering from one, one less for one numbering from zero. A
     # terminal that stops reporting at the edge, or does not clamp, shows that
-    # in the numbers. Both are raw, before anything is subtracted.
+    # in the numbers: ghostty clamps nothing and goes negative past the
+    # top-left, so its smallest reading is wherever the pointer stopped. Both
+    # are raw, before anything is subtracted.
     private def check_pixel_origin : Nil
       say "#{next_step}. Pixel origin (mode 1016), from two drags out of the window."
       area = @environment["text_area_pixels"]?
@@ -624,7 +702,7 @@ module CapsCheck
         return
       end
 
-      reports = collect_until MOUSE_REPORT, MOUSE_RELEASE, PATIENCE
+      reports = collect_until MOUSE_REPORT, MOUSE_RELEASE, Countdown.new(@tty, PATIENCE)
       @tty.write mode.reset
       @tty.flush
 
@@ -677,13 +755,20 @@ module CapsCheck
 
     # Reads until something matching *pattern* arrives or *patience* runs out,
     # and answers with what matched. Everything else read on the way is
-    # discarded: it is the person typing while they wait.
-    private def wait_for(pattern : Regex, patience : Time::Span = PATIENCE) : String?
-      deadline = Time.instant + patience
+    # discarded: it is the person typing while they wait. With a *countdown*
+    # the wait ends at its deadline instead, and the bar is redrawn meanwhile.
+    private def wait_for(pattern : Regex, patience : Time::Span = PATIENCE, countdown : Countdown? = nil) : String?
+      deadline = countdown ? countdown.deadline : Time.instant + patience
       seen = IO::Memory.new
       buffer = Bytes.new 256
 
-      while count = @reader.read(buffer, deadline)
+      while Time.instant < deadline
+        count = @reader.read(buffer, countdown ? countdown.next_tick : deadline)
+        unless count
+          countdown.try &.draw
+          next
+        end
+
         seen.write buffer[0, count]
         text = seen.to_s.scrub
 

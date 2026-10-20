@@ -18,6 +18,10 @@ All notable changes to this project are documented here. The format follows
   only the rows those steps produce. The pixel origin reading is two drags out of the window,
   which a terminal clamps to its edge, in place of aiming at a corner nobody can hit; it leaves
   `mouse_pixel_origin` and `mouse_pixel_extent`, read against a `text_area_pixels` header line.
+  Mouse reports with negative coordinates are read, since ghostty sends them past the top-left
+  and the drag there never ended on its release; a drag also ends after two seconds without a
+  report. Every wait that states a number of seconds shows a bar counting them down, and a
+  prompt for Space says `ok` when it comes.
 
 ### Fixed
 

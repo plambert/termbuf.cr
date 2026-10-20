@@ -17,7 +17,8 @@ problem.
 | `Titles` | nothing at all | whether the window's title changes |
 | `mouse_pixels` | DECRQM for mode 1016 | whether a press arrives in pixels |
 | `mouse_pixels_report` | nothing | whether a press under 1016 carries a pixel |
-| `mouse_pixel_origin` | nothing | the smallest raw x,y under 1016 in the top-left corner |
+| `mouse_pixel_origin` | nothing | the smallest raw x,y of a drag out past the top-left corner |
+| `mouse_pixel_extent` | nothing | the largest raw x,y of a drag out past the bottom-right corner |
 
 A mode report says the terminal knows what the mode is. It does not say the terminal does
 anything when the mode is on, and DECRQSS is an experiment: Terminal.app and kitty answer it with
@@ -123,6 +124,12 @@ bottom-right, to be read against `text_area_pixels` in the header, the terminal'
 zero. The two have to agree for the numbering to be called settled. Anything else, a terminal
 that stops reporting at the edge or does not clamp, shows up as numbers that are neither. `none`
 means no report arrived.
+
+Not every terminal clamps. Ghostty reports the pointer where it is, negative past the top or left
+and past the text area on the far side, so its two readings are wherever the drags ended and say
+only that it does not clamp. Its numbering has to come from somewhere else; see round four. A
+drag ends at the release, or two seconds after the last report when the terminal sends no
+release out of the window.
 
 ### The three tracking modes
 
