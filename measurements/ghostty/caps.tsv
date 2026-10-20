@@ -1,4 +1,4 @@
-# date	2026-10-20 11:27:35
+# date	2026-10-20 14:30:56
 # term	xterm-ghostty
 # term_program	ghostty
 # term_program_version	1.3.2-main-+73534c468
@@ -7,6 +7,8 @@
 # columns	172
 # rows	50
 # answered	primary_attributes,secondary_attributes,xtversion,xtgettcap,xtgettcap,synchronized_output,grapheme_clusters,focus_events,mouse_sgr,bracketed_paste,mouse_pixels,kitty_keyboard,decrqss_cursor_style,kitty_graphics,cell_pixels,cursor_position
+# text_area_pixels	3440,1900
+# rerun	origin
 capability	method	result
 mouse_pixels	decrqm	yes
 synchronized_output	decrqm	yes
@@ -27,6 +29,7 @@ mouse_motion_1002	observed	no
 mouse_report_on_enable_1003	observed	no
 mouse_motion_1003	observed	yes
 mouse_pixels_report	observed	yes
-mouse_pixel_origin	observed	4,3
+mouse_pixel_origin	observed	-8,-79
+mouse_pixel_extent	observed	3448,1983
 titles	asked	yes
 cursor_shape	asked	yes

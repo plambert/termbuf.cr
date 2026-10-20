@@ -739,11 +739,13 @@ coalesces motion by default, emitting a `Motion` only when the cell changes or t
 has been taken from the channel; presses, releases and wheel notches are never coalesced.
 `Stream#motion_every_pixel = true` turns coalescing off for the consumers who want all of it.
 
-Pixel origin: assume 1016 numbers pixels from one, as 1006 numbers cells, and subtract one. D5
-looked on 2026-10-20 and did not settle it: no terminal reported a zero, but the corner cannot be
-aimed at, and the smallest readings were where the pointer stopped. The subtraction stands and the
-decoder clamps rather than rejecting a zero; a drag out of the window, which a terminal clamps to
-its edge, is the reading that would settle it. See `measurements/CAPS.md`.
+Pixel origin: the decoder assumes 1016 numbers pixels from one, as 1006 numbers cells, and
+subtracts one. That is xterm's numbering and nobody else's: D5 read the sources on 2026-10-20 and
+ghostty, kitty and iTerm2 all number from zero, so the decoder is a pixel short on each, which
+misplaces the first pixel column of every cell. Neither the corner reading nor a drag out of the
+window measured it, since none of the three clamps. ghostty and kitty also report negative
+coordinates past the top-left, release included, which the decoder drops. Both are open in
+termbuf-input. See `measurements/CAPS.md`.
 
 ### D1. Input: `Pixel`, `mouse_cell`, pixel modes, coalescing (M, termbuf-input)
 
@@ -799,7 +801,9 @@ Add `MousePixels` to `MODERN` only for the terminals seen answering, as A8 did f
 Done 2026-10-20 on ghostty 1.3.2, kitty 0.49.0, iTerm2 3.7.6 and Terminal.app 488; the
 multiplexers and WezTerm were not run. `MODERN` carries `MousePixels`; iTerm2's DECRQM refusal of
 1016 is distrusted by name, since it delivers pixels anyway; Terminal.app ignores the mode and stays
-off the preset. The record is in `measurements/CAPS.md`.
+off the preset. The pixel origin was read from the three terminals' sources, zero on each
+against xterm's one, after neither the corner nor a drag out of the window could measure it. The
+record is in `measurements/CAPS.md`.
 
 Sequence: D1 → (D2 ∥ D3) → D4 → D5.
 

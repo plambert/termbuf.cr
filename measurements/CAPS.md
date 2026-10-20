@@ -125,11 +125,11 @@ zero. The two have to agree for the numbering to be called settled. Anything els
 that stops reporting at the edge or does not clamp, shows up as numbers that are neither. `none`
 means no report arrived.
 
-Not every terminal clamps. Ghostty reports the pointer where it is, negative past the top or left
-and past the text area on the far side, so its two readings are wherever the drags ended and say
-only that it does not clamp. Its numbering has to come from somewhere else; see round four. A
-drag ends at the release, or two seconds after the last report when the terminal sends no
-release out of the window.
+No terminal measured clamps. ghostty and kitty report the pointer where it is, negative past the
+top or left and past the text area on the far side, and iTerm2 stops reporting at the edge, so on
+all three the two readings are wherever the drags ended and say only that. Their numbering came
+from their sources instead; see round four. A drag ends at the release, or two seconds after the
+last report when the terminal sends no release out of the window.
 
 ### The three tracking modes
 
@@ -338,14 +338,42 @@ the row reads `no`, and `CSI 16 t` is unanswered. The ioctl does give a cell siz
 credited `MousePixels` would have had the decoder divide cell coordinates by a cell size; it is not
 credited, and `APPLE_TERMINAL_WATCHED` is unchanged.
 
-**The origin is not settled.** No run reported a zero, but the reading is the smallest position
-the pointer passed through, and nothing on screen says where the corner pixel is. ghostty and kitty
-bottomed out at `4,3` and `4,8`, which is where the pointer stopped rather than where the numbering
-starts, and both report device pixels, doubled on a Retina display. iTerm2 reached `1,3` and never
-`0`, which is one pixel of aim away from the other answer. The decoder keeps subtracting one and
-clamping at zero; a terminal that numbers from zero is a cell off on the first pixel column of
-each cell and nowhere else. A reading that does not depend on aim is under
-[The pixel origin](#the-pixel-origin).
+**The corner readings settle nothing.** The `mouse_pixel_origin` column above is the smallest
+position the pointer passed through while held in the corner, and nothing on screen says where
+the corner pixel is. ghostty and kitty bottomed out at `4,3` and `4,8`, iTerm2 at `1,3`, and all
+three report device pixels, doubled on a Retina display. The origin step was rewritten the same
+day as the two drags under [The pixel origin](#the-pixel-origin) and rerun on its own between
+14:25 and 14:31 with `--only origin`:
+
+| terminal | `text_area_pixels` | `mouse_pixel_origin` | `mouse_pixel_extent` | reports out of the window |
+|---|---|---|---|---|
+| `ghostty` | 3440,1900 | -8,-79 | 3448,1983 | yes, unclamped |
+| `kitty` | 3243,1760 | -87,-126 | 3293,1813 | yes, unclamped |
+| `iterm2` | 1050,697 | 6,1 | 1040,622 | no |
+
+**No terminal clamps, so the drags do not read the origin either.** ghostty and kitty report the
+pointer wherever it is, negative past the top or left and past the text area on the far side, and
+their minimum and maximum are where the pointer stopped. iTerm2 reports nothing once the pointer
+leaves the text area, release included, so its two readings are the last positions inside. What
+the drags did settle is that a release can arrive with negative coordinates, or not at all, and
+the instrument now reads the first and ends a drag two seconds after the second.
+
+**The origin comes from the sources instead, and it is zero on all three.** Each terminal's
+pixel report is formed from the pointer's position less the text area's top-left, rounded, with
+nothing added:
+
+| terminal | first pixel of the text area | where |
+|---|---|---|
+| xterm | 1 | `EmitMousePosition` in `button.c` prints `value + 1` for the pixel mode as for cells |
+| ghostty | 0 | `posToPixels` in `input/mouse_encode.zig`, "not clamped and may be negative" |
+| kitty 0.49.0 | 0 | `global_x = mouse_x - left` in `mouse.c`, `left` the text area's edge |
+| iTerm2 | 0 | `mouseHandlerReportablePointForPointInView:` in `PTYTextView.m`, `point - liveRect.origin` clamped to `0..size-1` |
+
+xterm, which defined mode 1016, numbers pixels from one as it numbers cells, and nobody followed
+it. The decoder in termbuf-input follows xterm and subtracts one, so on every terminal measured it
+is a pixel short, which puts the first pixel column of each cell into the cell before it and is
+otherwise invisible. It also drops a report whose coordinate is negative, so a release past the
+top-left under ghostty or kitty never reaches the application. Both are termbuf-input's to change.
 
 ### Rounds
 
