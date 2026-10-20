@@ -73,7 +73,7 @@ Already done, do not re-plan: synchronized output (`?2026`) is probed and wraps 
     automatic upgrade of `MOUSE_SGR` and `MOUSE_SGR_ANY`.
   + [x] D3 `caps_check` rows and the validate mouse page.
   + [x] D4 widgets pin bump and README line.
-  + [ ] D5 round four of measurements; `MODERN` pruned to what was seen.
+  + [x] D5 round four of measurements; `MODERN` pruned to what was seen.
 
 ## 4. termbuf 1.0
 

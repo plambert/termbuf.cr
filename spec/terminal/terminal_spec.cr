@@ -1105,7 +1105,9 @@ Spectator.describe TermBuf::Terminal do
     end
 
     it "has none without the capability" do
-      with_harness capabilities: TermBuf::Capabilities::MODERN, cell_pixels: CELL do |harness|
+      cells_only = TermBuf::Capabilities.new(TermBuf::Capabilities::MODERN.flags & ~TermBuf::Capability::MousePixels)
+
+      with_harness capabilities: cells_only, cell_pixels: CELL do |harness|
         expect(harness.terminal.mouse_pixels?).to be_false
       end
     end

@@ -578,6 +578,14 @@ Spectator.describe TermBuf::EnvironmentDetector do
       {% end %}
     end
 
+    it "distrusts iTerm2's refusal of mode 1016, which it delivers regardless" do
+      by_program = {"TERM" => "xterm-256color", "TERM_PROGRAM" => "iTerm.app"}
+      by_marker = {"TERM" => "xterm-256color", "ITERM_SESSION_ID" => "w0t0p0:1"}
+
+      expect(TermBuf::EnvironmentDetector.distrusted_refusals(by_program)).to eq Cap::MousePixels
+      expect(TermBuf::EnvironmentDetector.distrusted_refusals(by_marker)).to eq Cap::MousePixels
+    end
+
     it "trusts every refusal from Windows Terminal" do
       env = {"WT_SESSION" => "68dfb106-17eb-4ab1-97df-5d38d26e9913"}
 

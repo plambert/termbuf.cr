@@ -265,6 +265,16 @@ Spectator.describe TermBuf::Prober do
       expect(result.answered).to contain :decrqss_cursor_style
     end
 
+    # iTerm2 3.7.6 refuses DECRQM for 1016 and reports pixels under it.
+    it "keeps pixel reports when the refusal of mode 1016 is distrusted" do
+      input = IO::Memory.new "\e[?1016;0$y\e[1;1R"
+      result = TermBuf::Prober.new(input, IO::Memory.new, 50.milliseconds)
+        .probe TermBuf::Capabilities::MODERN, distrusted_refusals: Cap::MousePixels
+
+      expect(result.capabilities.includes?(Cap::MousePixels)).to be_true
+      expect(result.answered).to contain :mouse_pixels
+    end
+
     # Terminal.app and kitty answer neither, and silence is not evidence: the
     # name is still the best that can be done for them.
     it "changes nothing when the terminal says nothing" do

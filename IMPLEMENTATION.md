@@ -740,7 +740,9 @@ has been taken from the channel; presses, releases and wheel notches are never c
 `Stream#motion_every_pixel = true` turns coalescing off for the consumers who want all of it.
 
 Pixel origin: assume 1016 numbers pixels from one, as 1006 numbers cells, and subtract one. D5
-measures it; if a terminal numbers from zero the decoder clamps rather than rejecting a zero.
+measured it on 2026-10-20: no terminal reported a zero, iTerm2 reached x=1, and ghostty and kitty
+bottomed out at the padding before their text area. The subtraction stands; the decoder still
+clamps rather than rejecting a zero.
 
 ### D1. Input: `Pixel`, `mouse_cell`, pixel modes, coalescing (M, termbuf-input)
 
@@ -792,6 +794,11 @@ that want it. Tag 0.11.0.
 
 Run D3's checklist on ghostty, kitty, iTerm2, Terminal.app, tmux, screen, and WezTerm on Windows.
 Add `MousePixels` to `MODERN` only for the terminals seen answering, as A8 did for the other four.
+
+Done 2026-10-20 on ghostty 1.3.2, kitty 0.49.0, iTerm2 3.7.6 and Terminal.app 488; the
+multiplexers and WezTerm were not run. `MODERN` carries `MousePixels`; iTerm2's DECRQM refusal of
+1016 is distrusted by name, since it delivers pixels anyway; Terminal.app ignores the mode and stays
+off the preset. The record is in `measurements/CAPS.md`.
 
 Sequence: D1 → (D2 ∥ D3) → D4 → D5.
 

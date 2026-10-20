@@ -112,8 +112,12 @@ module TermBuf
     # pixels. `Terminal#enable` upgrades the cell mouse modes to it when the
     # cell size is known as well. See `Terminal#mouse_pixels?`.
     #
-    # Detected but not in any preset: `Prober` asks for it with DECRQM, and
-    # which terminals deliver pixel reports has not been measured yet.
+    # `Prober` asks for it with DECRQM, and it is in `Capabilities::MODERN`:
+    # on 2026-10-20 ghostty 1.3.2, kitty 0.49.0 and iTerm2 3.7.6 each
+    # delivered a press under 1016 in pixels, and Terminal.app 488 ignored
+    # the mode. iTerm2 refuses the DECRQM and delivers regardless, which is
+    # what `EnvironmentDetector.distrusted_refusals` is for. See
+    # `measurements/CAPS.md`.
     MousePixels
   end
 
@@ -213,11 +217,16 @@ module TermBuf
     # renamed, the cursor's shape changed — so all four stay. What the same
     # readings did change is where a multiplexer or Terminal.app is concerned;
     # see `measurements/CAPS.md` and `EnvironmentDetector`.
+    #
+    # `MousePixels` joined on 2026-10-20 the same way, watched delivering on
+    # ghostty, kitty and iTerm2. Terminal.app, which ignores the mode, is not
+    # in this preset.
     MODERN = new XTERM.flags | Capability::TrueColor | Capability::ExtendedUnderline |
                  Capability::UnderlineColor | Capability::Overline |
                  Capability::SynchronizedOutput |
                  Capability::BracketedPaste | Capability::FocusEvents |
-                 Capability::MouseSgr | Capability::Osc8Links | Capability::Titles |
+                 Capability::MouseSgr | Capability::MousePixels |
+                 Capability::Osc8Links | Capability::Titles |
                  Capability::CursorShape
   end
 end

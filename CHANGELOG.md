@@ -6,6 +6,14 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+
+- `Capabilities::MODERN` carries `MousePixels`. Round four of the capability checks, on 2026-10-20,
+  watched ghostty 1.3.2, kitty 0.49.0 and iTerm2 3.7.6 deliver a press under mode 1016 in pixels;
+  Terminal.app 488 ignores the mode and is not in the preset.
+- iTerm2's DECRQM refusal of mode 1016 is distrusted: 3.7.6 answers no and reports pixels
+  regardless, so the probe no longer takes `MousePixels` off for it.
+
 ### Fixed
 
 - The Thai and Lao vowel sign AM (U+0E33, U+0EB3) take a cell whatever the `spacing_marks` rule

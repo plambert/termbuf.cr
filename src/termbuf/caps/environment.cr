@@ -251,12 +251,21 @@ module TermBuf
     # query. Windows Terminal's console passes the query on, and WT answers.
     CONSOLE_REFUSES_FOR_ITSELF = Capability::CursorShape
 
+    # iTerm2 answers DECRQM for mode 1016 with a refusal and reports pixels
+    # under it all the same: on 2026-10-20 against 3.7.6, a press under 1016
+    # arrived with coordinates past the window's cells. The table credits the
+    # mode, and the refusal is not allowed to take it off.
+    ITERM_REFUSES_WHAT_IT_HAS = Capability::MousePixels
+
     # Which refusals this environment cannot take at face value. `Prober`
     # takes no capability off for a refusal of one of them.
     def distrusted_refusals(env : Hash(String, String)) : Capability
+      named = identified env
+      return Capability::None unless named
+
+      return ITERM_REFUSES_WHAT_IT_HAS if named.starts_with? "iterm"
       {% if flag?(:win32) %}
-        named = identified env
-        return CONSOLE_REFUSES_FOR_ITSELF if named && named.includes?("wezterm")
+        return CONSOLE_REFUSES_FOR_ITSELF if named.includes? "wezterm"
       {% end %}
 
       Capability::None
