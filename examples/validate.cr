@@ -434,11 +434,14 @@ module Validate
         Style::DEFAULT.reverse
     end
 
+    # The counters are padded to fixed widths so the key notes after them stay
+    # put from one frame to the next.
     private def status : String
       String.build do |io|
-        io << @terminal.size << "   frame " << @frame
-        io << "   last paint " << @terminal.last_paint_bytes << " B"
-        io << "   total " << (@terminal.total_paint_bytes / 1024).round(1) << " kB"
+        io << @terminal.size.to_s.rjust(7)
+        io << "   frame " << @frame.to_s.rjust(6)
+        io << "   last paint " << @terminal.last_paint_bytes.to_s.rjust(6) << " B"
+        io << "   total " << (@terminal.total_paint_bytes / 1024).format(decimal_places: 1).rjust(8) << " kB"
         io << "   " << keys_note
       end
     end
