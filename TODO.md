@@ -67,12 +67,12 @@ Already done, do not re-plan: synchronized output (`?2026`) is probed and wraps 
 * [x] termbuf enables and disables the reporting modes through the mode registry.
 * [x] Hit test from screen cell to buffer position.
 * [ ] Pixel mouse, mode 1016 (IMPLEMENTATION.md track D).
-  + [ ] D1 input: `Events::Mouse#pixel`, `Stream#mouse_cell`, pixel mode siblings, motion
+  + [x] D1 input: `Events::Mouse#pixel`, `Stream#mouse_cell`, pixel mode siblings, motion
     coalescing.
-  + [ ] D2 termbuf: `Capability::MousePixels`, `CSI 16 t` in the probe, `Terminal#mouse_pixels?`,
+  + [x] D2 termbuf: `Capability::MousePixels`, `CSI 16 t` in the probe, `Terminal#mouse_pixels?`,
     automatic upgrade of `MOUSE_SGR` and `MOUSE_SGR_ANY`.
-  + [ ] D3 `caps_check` rows and the validate mouse page.
-  + [ ] D4 widgets pin bump and README line.
+  + [x] D3 `caps_check` rows and the validate mouse page.
+  + [x] D4 widgets pin bump and README line.
   + [ ] D5 round four of measurements; `MODERN` pruned to what was seen.
 
 ## 4. termbuf 1.0
