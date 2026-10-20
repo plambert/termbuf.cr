@@ -434,13 +434,15 @@ their own where the terminal has it, and the cells stay what they were:
 | Part | What it does |
 | --- | --- |
 | `Events::Mouse#x`, `#y` | Always buffer cells, from zero, under either mode |
-| `Events::Mouse#pixel` | `nil` for a report in cells; an `Events::Pixel` with the offset into the cell otherwise |
+| `Events::Mouse#pixel` | `nil` for a report in cells; an `Events::Pixel` with the offset into the cell otherwise. Negative past the top or left of the window with a button held, on a terminal that does not clamp |
+| The origin | Pixels are read from zero. `Terminal.open` sets the stream's `pixel_origin` to one for xterm, which numbers them from one; nothing else does |
 | `Terminal#mouse_pixels?` | Whether enabling a mouse mode here delivers pixels: `Capability::MousePixels` and a known `Terminal#cell_size` |
 | The upgrade | `enable MOUSE_SGR` or `MOUSE_SGR_ANY` writes mode 1016 in place of 1006 when `#mouse_pixels?`; `MOUSE_SGR_CLICKS` stays on cells |
 | Motion | A pixel motion within the cell of the last one delivered is dropped while events are waiting; `terminal.input.motion_every_pixel = true` keeps every one |
 
-Measured delivering pixels on ghostty 1.3.2, kitty 0.49.0 and iTerm2 3.7.6; Terminal.app 488
-ignores the mode and stays on cells. See `measurements/CAPS.md`.
+Measured delivering pixels on ghostty 1.3.2, kitty 0.49.0 and iTerm2 3.7.6, each numbering from
+zero by its source; Terminal.app 488 ignores the mode and stays on cells. See
+`measurements/CAPS.md`.
 
 `Terminal#cell_size` is the ioctl's answer, or the terminal's reply to `CSI 16 t` during the probe
 where the ioctl has none. The input stream gets that size before the 1016 bytes go out and loses it

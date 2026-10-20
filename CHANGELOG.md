@@ -13,6 +13,11 @@ All notable changes to this project are documented here. The format follows
   Terminal.app 488 ignores the mode and is not in the preset.
 - iTerm2's DECRQM refusal of mode 1016 is distrusted: 3.7.6 answers no and reports pixels
   regardless, so the probe no longer takes `MousePixels` off for it.
+- Pixel mouse reports are read from zero, which is how ghostty, kitty and iTerm2 number them by
+  their sources. `Terminal.open` sets the input stream's `pixel_origin` to one for xterm, the one
+  terminal that numbers from one, by XTVERSION or by `XTERM_VERSION` when nothing names another
+  terminal. A report past the top or left of the window, negative on ghostty and kitty, now
+  arrives rather than being dropped, the release included. Needs termbuf-input after 0.8.0.
 
 - `caps_check` takes `--only STEPS` and, with `--out` naming an existing `caps.tsv`, replaces
   only the rows those steps produce. The pixel origin reading is two drags out of the window,

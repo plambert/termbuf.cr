@@ -199,7 +199,8 @@ module TermBuf
                    @detect_composed_drift : Bool = true,
                    clear_overhang : Bool = true,
                    signals : Bool? = nil,
-                   @cell_pixels : Events::CellPixels? = nil)
+                   @cell_pixels : Events::CellPixels? = nil,
+                   pixel_origin : Int32 = 0)
       @size = size || @tty.size
       @buffer = Buffer.new @size.columns, @size.rows
       @screen = Region.new Rect.full(@size.columns, @size.rows)
@@ -212,6 +213,7 @@ module TermBuf
       # process's descriptors the stream would find first.
       tty = @tty
       @input.measure = -> { tty.size }
+      @input.pixel_origin = pixel_origin
       @pending_input = pending_input
       @initial_warnings = warnings.dup
       @handle_signals = signals
@@ -263,7 +265,8 @@ module TermBuf
         probe_widths: probe && tty.managed?,
         quirks: resolved.quirks,
         detect_composed_drift: detect_composed_drift,
-        cell_pixels: resolved.cell_pixels
+        cell_pixels: resolved.cell_pixels,
+        pixel_origin: resolved.pixel_origin
       terminal.start
       terminal
     end

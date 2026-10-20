@@ -43,7 +43,10 @@ module TermBuf
       # What this terminal is known to get wrong. See `Quirk`.
       quirks : Quirk,
       # How big one cell is in pixels, when the terminal was asked and said.
-      cell_pixels : Input::Events::CellPixels? = nil
+      cell_pixels : Input::Events::CellPixels? = nil,
+      # What the terminal numbers the first pixel of a mouse report. See
+      # `EnvironmentDetector.pixel_origin`.
+      pixel_origin : Int32 = 0
 
     # Runs the four stages. Probes only when both *input* and *output* are
     # given.
@@ -75,7 +78,8 @@ module TermBuf
       quirks = QuirkOverrides.apply EnvironmentDetector.quirks(env), env
 
       Result.new overridden.capabilities, keystrokes,
-        overridden.warnings + quirks.warnings, name, probed, quirks.quirks, cell
+        overridden.warnings + quirks.warnings, name, probed, quirks.quirks, cell,
+        EnvironmentDetector.pixel_origin(env, name)
     end
   end
 end

@@ -567,6 +567,21 @@ Spectator.describe TermBuf::EnvironmentDetector do
     end
   end
 
+  describe ".pixel_origin" do
+    it "is one for xterm, by what it called itself or by its own variable" do
+      expect(TermBuf::EnvironmentDetector.pixel_origin({"TERM" => "xterm"}, "XTerm(389)")).to eq 1
+      expect(TermBuf::EnvironmentDetector.pixel_origin({"TERM" => "xterm", "XTERM_VERSION" => "XTerm(389)"})).to eq 1
+    end
+
+    it "is zero for everything else, and for a window that only inherited xterm's variable" do
+      expect(TermBuf::EnvironmentDetector.pixel_origin({"TERM" => "xterm"})).to eq 0
+      expect(TermBuf::EnvironmentDetector.pixel_origin({"TERM" => "xterm-ghostty"}, "ghostty 1.3.2")).to eq 0
+      expect(TermBuf::EnvironmentDetector.pixel_origin({"XTERM_VERSION" => "XTerm(389)", "TERM_PROGRAM" => "ghostty"})).to eq 0
+      expect(TermBuf::EnvironmentDetector.pixel_origin({"XTERM_VERSION" => "XTerm(389)", "KITTY_WINDOW_ID" => "1"})).to eq 0
+      expect(TermBuf::EnvironmentDetector.pixel_origin({"XTERM_VERSION" => "XTerm(389)"}, "kitty(0.49.0)")).to eq 0
+    end
+  end
+
   describe ".distrusted_refusals" do
     it "distrusts the console's cursor style refusal for WezTerm on Windows only" do
       env = {"TERM" => "xterm-256color", "TERM_PROGRAM" => "WezTerm"}

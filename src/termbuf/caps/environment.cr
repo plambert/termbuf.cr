@@ -257,6 +257,25 @@ module TermBuf
     # mode, and the refusal is not allowed to take it off.
     ITERM_REFUSES_WHAT_IT_HAS = Capability::MousePixels
 
+    # The number the terminal gives the first pixel of its text area under
+    # DEC mode 1016, for `Input::Stream#pixel_origin`: one for xterm, zero
+    # for everything else.
+    #
+    # xterm defined the mode and numbers pixels as it numbers cells, from
+    # one. ghostty, kitty and iTerm2 number them from zero, read from their
+    # sources on 2026-10-20 after no measurement could; see
+    # `measurements/CAPS.md`. WezTerm has not been read. *name* is what the
+    # terminal called itself to XTVERSION, which beats the environment when
+    # it is there; otherwise a terminal that names itself in the environment
+    # is not xterm, and xterm's own `XTERM_VERSION` counts only when nothing
+    # else does, since a window opened from xterm inherits it.
+    def pixel_origin(env : Hash(String, String), name : String? = nil) : Int32
+      return name.downcase.starts_with?("xterm") ? 1 : 0 if name
+      return 0 if identified env
+
+      present?(env, "XTERM_VERSION") ? 1 : 0
+    end
+
     # Which refusals this environment cannot take at face value. `Prober`
     # takes no capability off for a refusal of one of them.
     def distrusted_refusals(env : Hash(String, String)) : Capability

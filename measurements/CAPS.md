@@ -370,10 +370,12 @@ nothing added:
 | iTerm2 | 0 | `mouseHandlerReportablePointForPointInView:` in `PTYTextView.m`, `point - liveRect.origin` clamped to `0..size-1` |
 
 xterm, which defined mode 1016, numbers pixels from one as it numbers cells, and nobody followed
-it. The decoder in termbuf-input follows xterm and subtracts one, so on every terminal measured it
-is a pixel short, which puts the first pixel column of each cell into the cell before it and is
-otherwise invisible. It also drops a report whose coordinate is negative, so a release past the
-top-left under ghostty or kitty never reaches the application. Both are termbuf-input's to change.
+it. The decoder in termbuf-input used to follow xterm and subtract one, which on every terminal
+measured put the first pixel column of each cell into the cell before it, and it dropped a report
+whose coordinate was negative, so a release past the top-left under ghostty or kitty never reached
+the application. It now reads from zero, keeps negatives, and takes off `Stream#pixel_origin`,
+which `Terminal.open` sets to one for xterm alone, named by XTVERSION or by `XTERM_VERSION` when
+nothing else names the terminal. WezTerm is unread and gets zero until someone looks.
 
 ### Rounds
 

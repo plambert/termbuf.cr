@@ -39,7 +39,8 @@ private class Harness
                  pending : Bytes = Bytes.empty,
                  quirks : TermBuf::Quirk = TermBuf::Quirk::None,
                  detect_composed_drift : Bool = true,
-                 cell_pixels : TermBuf::Events::CellPixels? = nil)
+                 cell_pixels : TermBuf::Events::CellPixels? = nil,
+                 pixel_origin : Int32 = 0)
     reader, @keyboard = IO.pipe
     @output = IO::Memory.new
     tty = TermBuf::Tty.new reader, @output, managed: false
@@ -47,7 +48,7 @@ private class Harness
     @terminal = TermBuf::Terminal.new tty, capabilities: capabilities,
       size: TermBuf::ScreenSize.new(columns, rows), pending_input: pending,
       quirks: quirks, detect_composed_drift: detect_composed_drift,
-      cell_pixels: cell_pixels
+      cell_pixels: cell_pixels, pixel_origin: pixel_origin
     @terminal.start
   end
 
@@ -1137,6 +1138,12 @@ Spectator.describe TermBuf::Terminal do
       end
     end
 
+    it "hands the stream the pixel origin it was opened with" do
+      with_harness capabilities: PIXEL_MOUSE, cell_pixels: CELL, pixel_origin: 1 do |harness|
+        expect(harness.terminal.input.pixel_origin).to eq 1
+      end
+    end
+
     it "upgrades any-event tracking to pixels" do
       with_harness capabilities: PIXEL_MOUSE, cell_pixels: CELL do |harness|
         harness.drain
@@ -1175,7 +1182,7 @@ Spectator.describe TermBuf::Terminal do
       with_harness capabilities: PIXEL_MOUSE, cell_pixels: CELL do |harness|
         harness.terminal.enable TermBuf::Tty::MOUSE_SGR
         harness.terminal.paint!
-        harness.type "\e[<0;35;41M"
+        harness.type "\e[<0;34;40M"
 
         event = harness.event_of TermBuf::Events::Mouse
         fail "no mouse event arrived" unless event

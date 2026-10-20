@@ -562,6 +562,13 @@ Spectator.describe TermBuf::CapabilityResolver do
     expect(result.capabilities.includes?(Cap::KittyGraphics)).to be_true
     expect(result.probed).to be_true
     expect(result.name).to eq "kitty(0.32.2)"
+    expect(result.pixel_origin).to eq 0
+  end
+
+  it "numbers pixels from one only for xterm" do
+    result = TermBuf::CapabilityResolver.resolve({"TERM" => "xterm", "XTERM_VERSION" => "XTerm(389)"})
+
+    expect(result.pixel_origin).to eq 1
   end
 
   it "lets the override have the last word over the probe" do

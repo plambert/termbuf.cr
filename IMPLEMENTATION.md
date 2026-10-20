@@ -739,13 +739,13 @@ coalesces motion by default, emitting a `Motion` only when the cell changes or t
 has been taken from the channel; presses, releases and wheel notches are never coalesced.
 `Stream#motion_every_pixel = true` turns coalescing off for the consumers who want all of it.
 
-Pixel origin: the decoder assumes 1016 numbers pixels from one, as 1006 numbers cells, and
-subtracts one. That is xterm's numbering and nobody else's: D5 read the sources on 2026-10-20 and
-ghostty, kitty and iTerm2 all number from zero, so the decoder is a pixel short on each, which
-misplaces the first pixel column of every cell. Neither the corner reading nor a drag out of the
-window measured it, since none of the three clamps. ghostty and kitty also report negative
-coordinates past the top-left, release included, which the decoder drops. Both are open in
-termbuf-input. See `measurements/CAPS.md`.
+Pixel origin: the decoder reads pixels from zero and takes `Stream#pixel_origin` off first,
+which `Terminal.open` sets from `EnvironmentDetector.pixel_origin`: one for xterm, which defined
+1016 and numbers pixels as it numbers cells, zero for everything else. D5 read the sources on
+2026-10-20 and ghostty, kitty and iTerm2 all number from zero; neither the corner reading nor a
+drag out of the window could measure it, since none of the three clamps. Negative coordinates,
+which ghostty and kitty report past the top-left with a button held, are kept as a negative cell.
+WezTerm is unread. See `measurements/CAPS.md`.
 
 ### D1. Input: `Pixel`, `mouse_cell`, pixel modes, coalescing (M, termbuf-input)
 
