@@ -106,6 +106,15 @@ Spectator.describe TermBuf::Unicode do
       expect(Uni.string_width("\u{0E01}\u{0E33}")).to eq 2 # thai ko kai, sara am
     end
 
+    it "charges a cell for the Thai and Lao vowel sign AM whatever a spacing mark gets" do
+      # Letters, not marks, though UAX #29 clusters them as marks. kitty 0.49.0
+      # widened the cell they combine into, and the rest already had.
+      none = TermBuf::Unicode::WidthPolicy::DEFAULT.copy_with(spacing_marks: false)
+      expect(Uni.string_width("\u{0E01}\u{0E33}", none)).to eq 2 # thai
+      expect(Uni.string_width("\u{0E81}\u{0EB3}", none)).to eq 2 # lao
+      expect(Uni.string_width("\u{0BA8}\u{0BBF}", none)).to eq 1 # tamil, still a mark
+    end
+
     it "counts an indic conjunct as two cells" do
       # The consonants ligate into one glyph and both terminals measured give
       # that glyph two columns, whatever the consonant it opens with is worth

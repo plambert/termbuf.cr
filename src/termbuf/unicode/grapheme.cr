@@ -12,6 +12,11 @@ module TermBuf::Unicode
   # Variation selector 16, forcing emoji presentation and so a width of two.
   EMOJI_PRESENTATION = '\uFE0F'
 
+  # The Thai and Lao vowel sign AM: letters that UAX #29 clusters as spacing
+  # marks, and the only two it does that to. Every terminal measured charges
+  # a cell for them, kitty from 0.49.0, whatever it charges a spacing mark.
+  VOWEL_SIGN_AM = {'\u0E33', '\u0EB3'}
+
   # One extended grapheme cluster, located by byte offset within its source
   # string so that scanning a string allocates nothing.
   struct Grapheme
@@ -228,6 +233,8 @@ module TermBuf::Unicode
         # A cluster opening with a combining mark, which happens only at the
         # start of a string, still has to occupy a cell.
         @base_width = measure char
+      elsif VOWEL_SIGN_AM.includes? char
+        @base_width += measure char
       elsif Unicode.grapheme_class(char).spacing_mark?
         # The one kind of mark that takes a cell of its own. The Tamil vowel
         # sign of `நி` sits beside its consonant rather than over it, and a

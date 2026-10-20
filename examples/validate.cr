@@ -77,7 +77,7 @@ module Validate
     {"🏳️‍🌈", "rainbow flag, a ZWJ sequence"},
     {"क्षि", "devanagari conjunct plus a spacing vowel sign"},
     {"நி", "tamil na plus a spacing vowel sign"},
-    {"กำ", "thai ko kai plus sara am, also spacing"},
+    {"กำ", "thai ko kai plus sara am, a letter clustered as a mark"},
     {"ﷺ", "U+FDFA arabic ligature"},
   ]
 

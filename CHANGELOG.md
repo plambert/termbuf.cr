@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+
+- The Thai and Lao vowel sign AM (U+0E33, U+0EB3) take a cell whatever the `spacing_marks` rule
+  says. They are letters that UAX #29 clusters as marks, and every terminal measured charges for
+  them, kitty since 0.49.0; the validate widths page sat that row a cell short on kitty.
+
 ## [0.10.0] - 2026-10-20
 
 This release needs termbuf-input 0.8.
