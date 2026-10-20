@@ -186,9 +186,12 @@ module TermBuf
     # `CursorShape` stays: DECSCUSR reached the terminal through `tmux` and
     # through `screen` 5.0.2, and `screen` 4.00.03 swallowing it costs nothing
     # visible. See `measurements/CAPS.md`.
+    #
+    # `MousePixels` is here until a pixel report has been seen through a
+    # multiplexer.
     THROUGH_MULTIPLEXER = KITTY_EXTRAS | Capability::KittyGraphicsTempFile |
                           Capability::SynchronizedOutput | Capability::FocusEvents |
-                          Capability::Titles
+                          Capability::Titles | Capability::MousePixels
 
     # What GNU `screen` costs on top of `THROUGH_MULTIPLEXER`.
     #
@@ -217,7 +220,11 @@ module TermBuf
     # 2026, 2027 and 2004 are handled by the multiplexer itself rather than
     # forwarded, and the measurement agrees that synchronized output through
     # `tmux` works.
-    MULTIPLEXER_ANSWERS_FOR_ITSELF = Capability::FocusEvents
+    #
+    # Mode 1016 is here as 1004 is: a multiplexer that implements it can say
+    # yes without the terminal behind it sending pixels, and nobody has yet
+    # watched one forward a pixel report.
+    MULTIPLEXER_ANSWERS_FOR_ITSELF = Capability::FocusEvents | Capability::MousePixels
 
     # Which mode reports this environment cannot take at face value: what a
     # multiplexer answers for itself, and under `screen` what `THROUGH_SCREEN`

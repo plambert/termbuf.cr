@@ -107,6 +107,14 @@ module TermBuf
     # terminal being modern says nothing about whether it will touch the
     # clipboard.
     Osc52Clipboard
+
+    # DEC private mode 1016, the SGR mouse encoding with the coordinates in
+    # pixels. `Terminal#enable` upgrades the cell mouse modes to it when the
+    # cell size is known as well. See `Terminal#mouse_pixels?`.
+    #
+    # Detected but not in any preset: `Prober` asks for it with DECRQM, and
+    # which terminals deliver pixel reports has not been measured yet.
+    MousePixels
   end
 
   # Stability: stable — changes only in a major release.

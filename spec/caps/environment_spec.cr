@@ -591,16 +591,16 @@ Spectator.describe TermBuf::EnvironmentDetector do
     # `?1006;1$y` is believed.
     it "names the modes a multiplexer answers for itself" do
       expect(TermBuf::EnvironmentDetector.distrusted({"TMUX" => "/tmp/x,1,0"}))
-        .to eq Cap::FocusEvents
+        .to eq(Cap::FocusEvents | Cap::MousePixels)
     end
 
     # `screen` answers no DECRQM at all, so a yes for 1006 under it is the
     # terminal behind it answering about a click 4.00.03 will not forward.
     it "distrusts the mouse as well under screen" do
       expect(TermBuf::EnvironmentDetector.distrusted({"STY" => "1.pts-0.host"}))
-        .to eq(Cap::FocusEvents | Cap::MouseSgr)
+        .to eq(Cap::FocusEvents | Cap::MousePixels | Cap::MouseSgr)
       expect(TermBuf::EnvironmentDetector.distrusted({"TERM" => "screen"}))
-        .to eq(Cap::FocusEvents | Cap::MouseSgr)
+        .to eq(Cap::FocusEvents | Cap::MousePixels | Cap::MouseSgr)
     end
 
     # 2026, 2027 and 2004 are handled by the multiplexer rather than forwarded,

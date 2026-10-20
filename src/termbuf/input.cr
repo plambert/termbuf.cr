@@ -51,6 +51,7 @@ module TermBuf
     alias TextAreaSize = Input::Events::TextAreaSize
     alias TextAreaPixels = Input::Events::TextAreaPixels
     alias CellPixels = Input::Events::CellPixels
+    alias Pixel = Input::Events::Pixel
     alias ModeReport = Input::Events::ModeReport
     alias KittyKeyboard = Input::Events::KittyKeyboard
     alias Color = Input::Events::Color

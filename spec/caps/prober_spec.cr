@@ -138,7 +138,9 @@ Spectator.describe TermBuf::Prober do
       expect(queries).to contain "\e[?1004$p"
       expect(queries).to contain "\e[?1006$p"
       expect(queries).to contain "\e[?2004$p"
+      expect(queries).to contain "\e[?1016$p"
       expect(queries).to contain "\e[?u"
+      expect(queries).to contain "\e[16t"
       expect(queries).to contain "\e_G"
     end
 
@@ -164,6 +166,65 @@ Spectator.describe TermBuf::Prober do
       _, queries = probe KITTY
 
       expect(queries).to contain "\eP$q q\e\\"
+    end
+  end
+
+  describe "the pixel mouse" do
+    it "asks about mode 1016 for the pixel mouse" do
+      expect(TermBuf::Prober::MODE_CAPABILITIES[1016]).to eq Cap::MousePixels
+      expect(TermBuf::Prober::MODE_QUERIES[1016]).to eq :mouse_pixels
+    end
+
+    it "reads a yes for 1016 as the pixel mouse being there" do
+      result, _ = probe "\e[?1016;2$y\e[1;1R"
+
+      expect(result.capabilities.includes?(Cap::MousePixels)).to be_true
+      expect(result.answered).to contain :mouse_pixels
+    end
+
+    it "takes the pixel mouse off a terminal that does not know 1016" do
+      base = TermBuf::Capabilities.new Cap::MousePixels
+      result, _ = probe "\e[?1016;0$y\e[1;1R", base
+
+      expect(result.capabilities.includes?(Cap::MousePixels)).to be_false
+    end
+
+    # A multiplexer can implement 1016 itself and say yes without the terminal
+    # behind it sending pixels.
+    it "adds nothing for a yes it was told to distrust" do
+      result, _ = probe "\e[?1016;1$y\e[1;1R", distrusted: Cap::MousePixels
+
+      expect(result.capabilities.includes?(Cap::MousePixels)).to be_false
+      expect(result.answered).to contain :mouse_pixels
+    end
+  end
+
+  describe "the cell size report" do
+    it "keeps the size of a cell from a CSI 6 ; h ; w t reply" do
+      result, _ = probe "\e[6;20;10t\e[1;1R"
+
+      expect(result.cell_pixels).to eq TermBuf::Events::CellPixels.new(10, 20)
+      expect(result.answered).to contain :cell_pixels
+    end
+
+    it "has no cell size when the terminal does not answer" do
+      result, _ = probe "\e[1;1R"
+
+      expect(result.cell_pixels).to be_nil
+    end
+
+    # Nothing can be divided by it.
+    it "keeps no cell size of zero" do
+      result, _ = probe "\e[6;0;0t\e[1;1R"
+
+      expect(result.cell_pixels).to be_nil
+      expect(result.answered).to contain :cell_pixels
+    end
+
+    it "takes no keystroke out of the reply" do
+      result, _ = probe "\e[6;20;10t\e[1;1R"
+
+      expect(result.input).to be_empty
     end
   end
 

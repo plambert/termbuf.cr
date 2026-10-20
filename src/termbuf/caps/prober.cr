@@ -35,7 +35,10 @@ module TermBuf
       # What the terminal called itself, if it said.
       name : String?,
       # Where the cursor was, which the sentinel reports for free.
-      cursor : {Int32, Int32}?
+      cursor : {Int32, Int32}?,
+      # How big one cell is in pixels, if the terminal said and the answer
+      # can divide a pixel report.
+      cell_pixels : Input::Events::CellPixels? = nil
 
     # How long to wait for the sentinel before giving up on the batch.
     getter timeout : Time::Span
@@ -92,6 +95,7 @@ module TermBuf
       1004 => Capability::FocusEvents,
       1006 => Capability::MouseSgr,
       2004 => Capability::BracketedPaste,
+      1016 => Capability::MousePixels,
     }
 
     # Which query a mode report answered, for `Result#answered`. A separate
@@ -102,6 +106,7 @@ module TermBuf
       1004 => :focus_events,
       1006 => :mouse_sgr,
       2004 => :bracketed_paste,
+      1016 => :mouse_pixels,
     }
 
     QUERIES = String.build do |io|
@@ -116,6 +121,7 @@ module TermBuf
       io << Input::Query::KITTY_KEYBOARD.request
       io << CURSOR_STYLE_QUERY # DECSCUSR, asked with DECRQSS
       io << KITTY_GRAPHICS_QUERY
+      io << Input::Query::CELL_PIXELS.request # what a pixel mouse report divides by
 
       # The sentinel, always answered.
       io << Input::Query::CURSOR_POSITION.request
@@ -148,6 +154,7 @@ module TermBuf
       input = IO::Memory.new
       name = nil.as(String?)
       cursor = nil.as({Int32, Int32}?)
+      cell = nil.as(Input::Events::CellPixels?)
 
       collect do |kind, bytes|
         if kind.text?
@@ -164,11 +171,12 @@ module TermBuf
         end
         name ||= reading.name
         cursor ||= reading.cursor
+        cell ||= reading.cell
         reading.query == :cursor_position
       end
 
       denied &= ~distrusted_refusals
-      Result.new Capabilities.new(flags & ~denied), input.to_slice, answered, name, cursor
+      Result.new Capabilities.new(flags & ~denied), input.to_slice, answered, name, cursor, cell
     end
 
     # Reads until the block reports the sentinel has arrived, or the deadline
@@ -241,24 +249,17 @@ module TermBuf
       query : Symbol?,
       name : String? = nil,
       cursor : {Int32, Int32}? = nil,
+      cell : Input::Events::CellPixels? = nil,
       # Capabilities the terminal said outright that it does not have.
       denied : Capability = Capability::None
 
-    # The replies termbuf-input decodes are read with `Input::Replies`; the
-    # three it does not — kitty graphics, XTGETTCAP and DECRQSS — are read
-    # here.
+    # The replies termbuf-input decodes are read with `Input::Replies`, the
+    # CSI ones in `#interpret_csi`. The three it does not decode — kitty
+    # graphics, XTGETTCAP and DECRQSS — are read here.
     private def interpret(sequence : Input::Sequence, flags : Capability,
                           distrusted : Capability) : Reading
-      if position = Input::Replies.cursor_position sequence
-        return Reading.new flags, :cursor_position, cursor: {position.x, position.y}
-      end
-
-      if report = Input::Replies.mode_report sequence
-        return interpret_decrpm report, flags, distrusted
-      end
-
-      if Input::Replies.kitty_keyboard sequence
-        return Reading.new flags | Capability::KittyKeyboard, :kitty_keyboard
+      if reading = interpret_csi(sequence, flags, distrusted)
+        return reading
       end
 
       response = String.new sequence.bytes
@@ -286,6 +287,29 @@ module TermBuf
       end
 
       Reading.new flags, nil
+    end
+
+    # The CSI replies: the sentinel, the cell size, a mode report, and the
+    # kitty keyboard flags. `nil` for anything else.
+    private def interpret_csi(sequence : Input::Sequence, flags : Capability,
+                              distrusted : Capability) : Reading?
+      if position = Input::Replies.cursor_position sequence
+        return Reading.new flags, :cursor_position, cursor: {position.x, position.y}
+      end
+
+      if cell = Input::Replies.cell_pixels sequence
+        # A zero cannot divide a mouse report, so it is no answer.
+        cell = nil unless cell.width > 0 && cell.height > 0
+        return Reading.new flags, :cell_pixels, cell: cell
+      end
+
+      if report = Input::Replies.mode_report sequence
+        return interpret_decrpm report, flags, distrusted
+      end
+
+      return unless Input::Replies.kitty_keyboard sequence
+
+      Reading.new flags | Capability::KittyKeyboard, :kitty_keyboard
     end
 
     # `CSI ? Pm ; Ps $ y`, the DECRPM reply. A value of 1 means the mode is

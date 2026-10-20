@@ -12,6 +12,12 @@ private COLOURFUL = TermBuf::Capabilities.new(
 private KEYBOARD = TermBuf::Capabilities.new(
   TermBuf::Capabilities::MODERN.flags | TermBuf::Capability::KittyKeyboard)
 
+private PIXEL_MOUSE = TermBuf::Capabilities.new(
+  TermBuf::Capabilities::MODERN.flags | TermBuf::Capability::MousePixels)
+
+# What a probe hears from a terminal with 10 by 20 pixel cells.
+private CELL = TermBuf::Events::CellPixels.new 10, 20
+
 private class Harness
   getter terminal : TermBuf::Terminal
   getter output : IO::Memory
@@ -32,14 +38,16 @@ private class Harness
                  capabilities = TermBuf::Capabilities::XTERM,
                  pending : Bytes = Bytes.empty,
                  quirks : TermBuf::Quirk = TermBuf::Quirk::None,
-                 detect_composed_drift : Bool = true)
+                 detect_composed_drift : Bool = true,
+                 cell_pixels : TermBuf::Events::CellPixels? = nil)
     reader, @keyboard = IO.pipe
     @output = IO::Memory.new
     tty = TermBuf::Tty.new reader, @output, managed: false
 
     @terminal = TermBuf::Terminal.new tty, capabilities: capabilities,
       size: TermBuf::ScreenSize.new(columns, rows), pending_input: pending,
-      quirks: quirks, detect_composed_drift: detect_composed_drift
+      quirks: quirks, detect_composed_drift: detect_composed_drift,
+      cell_pixels: cell_pixels
     @terminal.start
   end
 
@@ -1078,6 +1086,149 @@ Spectator.describe TermBuf::Terminal do
       harness.close
 
       expect(harness.output.to_s).to contain "\e[?1006l\e[?1002l"
+    end
+  end
+
+  # Mode 1016 reports pixels only, so it is worth asking for only where the
+  # cell size is known to turn them back into cells.
+  describe "the pixel mouse" do
+    it "has pixels with the capability and a cell size" do
+      with_harness capabilities: PIXEL_MOUSE, cell_pixels: CELL do |harness|
+        expect(harness.terminal.mouse_pixels?).to be_true
+      end
+    end
+
+    it "has none without a cell size" do
+      with_harness capabilities: PIXEL_MOUSE do |harness|
+        expect(harness.terminal.mouse_pixels?).to be_false
+      end
+    end
+
+    it "has none without the capability" do
+      with_harness capabilities: TermBuf::Capabilities::MODERN, cell_pixels: CELL do |harness|
+        expect(harness.terminal.mouse_pixels?).to be_false
+      end
+    end
+
+    # A pipe has no cell size to give, which is the case the probed answer
+    # stands in for.
+    it "takes the cell size from the probe when the ioctl has none" do
+      with_harness cell_pixels: CELL do |harness|
+        expect(harness.terminal.cell_size).to eq({10, 20})
+      end
+
+      with_harness do |harness|
+        expect(harness.terminal.cell_size).to be_nil
+      end
+    end
+
+    it "upgrades button-event tracking to pixels" do
+      with_harness capabilities: PIXEL_MOUSE, cell_pixels: CELL do |harness|
+        harness.drain
+        harness.terminal.enable TermBuf::Tty::MOUSE_SGR
+        harness.terminal.paint!
+
+        written = harness.drain
+        expect(written).to contain "\e[?1002h\e[?1016h"
+        expect(written).not_to contain "\e[?1006h"
+        expect(harness.terminal.input.mouse_cell).to eq CELL
+      end
+    end
+
+    it "upgrades any-event tracking to pixels" do
+      with_harness capabilities: PIXEL_MOUSE, cell_pixels: CELL do |harness|
+        harness.drain
+        harness.terminal.enable TermBuf::Tty::MOUSE_SGR_ANY
+        harness.terminal.paint!
+
+        expect(harness.drain).to contain "\e[?1003h\e[?1016h"
+        expect(harness.terminal.input.mouse_cell).to eq CELL
+      end
+    end
+
+    it "stays on cells without pixels to be had" do
+      with_harness capabilities: PIXEL_MOUSE do |harness|
+        harness.drain
+        harness.terminal.enable TermBuf::Tty::MOUSE_SGR
+        harness.terminal.paint!
+
+        expect(harness.drain).to contain "\e[?1002h\e[?1006h"
+        expect(harness.terminal.input.mouse_cell).to be_nil
+      end
+    end
+
+    # It exists to measure mode 1000.
+    it "leaves press-and-release tracking on cells" do
+      with_harness capabilities: PIXEL_MOUSE, cell_pixels: CELL do |harness|
+        harness.drain
+        harness.terminal.enable TermBuf::Tty::MOUSE_SGR_CLICKS
+        harness.terminal.paint!
+
+        expect(harness.drain).to contain "\e[?1000h\e[?1006h"
+        expect(harness.terminal.input.mouse_cell).to be_nil
+      end
+    end
+
+    it "delivers a pixel report as the cell, with the pixel beside it" do
+      with_harness capabilities: PIXEL_MOUSE, cell_pixels: CELL do |harness|
+        harness.terminal.enable TermBuf::Tty::MOUSE_SGR
+        harness.terminal.paint!
+        harness.type "\e[<0;35;41M"
+
+        event = harness.event_of TermBuf::Events::Mouse
+        fail "no mouse event arrived" unless event
+
+        expect(event.x).to eq 3
+        expect(event.y).to eq 2
+        pixel = event.pixel
+        fail "no pixel in the report" unless pixel
+        expect(pixel.offset_x).to eq 4
+        expect(pixel.offset_y).to eq 0
+      end
+    end
+
+    it "gives the stream its cell before the takeover when enabled early" do
+      reader, keyboard = IO.pipe
+      output = IO::Memory.new
+      tty = TermBuf::Tty.new reader, output, managed: false
+      terminal = TermBuf::Terminal.new tty, capabilities: PIXEL_MOUSE,
+        size: TermBuf::ScreenSize.new(20, 6), cell_pixels: CELL
+      terminal.enable TermBuf::Tty::MOUSE_SGR
+
+      expect(output.to_s).to eq ""
+      expect(terminal.input.mouse_cell).to eq CELL
+
+      begin
+        terminal.start
+
+        expect(output.to_s).to contain "\e[?1002h\e[?1016h"
+      ensure
+        terminal.close
+        keyboard.close rescue nil
+      end
+    end
+
+    it "takes the cell away when the mouse is turned off" do
+      with_harness capabilities: PIXEL_MOUSE, cell_pixels: CELL do |harness|
+        harness.terminal.enable TermBuf::Tty::MOUSE_SGR
+        harness.terminal.paint!
+        harness.drain
+        harness.terminal.disable TermBuf::Tty::MOUSE_SGR
+        harness.terminal.paint!
+
+        expect(harness.drain).to contain "\e[?1016l\e[?1002l"
+        expect(harness.terminal.input.mouse_cell).to be_nil
+      end
+    end
+
+    it "takes the cell away when the terminal closes" do
+      harness = Harness.new capabilities: PIXEL_MOUSE, cell_pixels: CELL
+      harness.terminal.enable TermBuf::Tty::MOUSE_SGR
+      harness.terminal.paint!
+      harness.close
+
+      expect(harness.output.to_s).to contain "\e[?1016l\e[?1002l"
+      expect(harness.terminal.input.mouse_cell).to be_nil
     end
   end
 

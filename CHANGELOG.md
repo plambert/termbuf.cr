@@ -6,10 +6,29 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+This release needs termbuf-input 0.8.
+
 ### Added
 
 - `caps_check` rows `mouse_pixels`, `mouse_pixels_report` and `mouse_pixel_origin`, and pixel
   tracking modes on the validate example's mouse page, which shows `pixel` beside the cell.
+- `Capability::MousePixels`, DEC mode 1016, asked about with DECRQM in the probe. Distrusted under a
+  multiplexer as mode 1004 is, and in no preset until it has been measured.
+- `Terminal#mouse_pixels?`, whether a mouse mode enabled here reports pixels: the capability and a
+  known cell size.
+- `Terminal#cell_size`, the ioctl's answer or, where it has none, the terminal's reply to
+  `CSI 16 t`, which the prober now sends. `Prober::Result#cell_pixels` and
+  `CapabilityResolver::Result#cell_pixels` carry the reply.
+- `Tty::MOUSE_SGR_PIXELS` and `Tty::MOUSE_SGR_ANY_PIXELS`, and the `Events::Pixel` alias.
+
+### Changed
+
+- `Terminal#enable` turns `Tty::MOUSE_SGR` and `MOUSE_SGR_ANY` into their pixel siblings when
+  `#mouse_pixels?`, and gives the input stream the cell size first. `Events::Mouse#x` and `#y` stay
+  cells; `#pixel` carries the pixel. Disabling the mouse, closing, and suspending take the cell size
+  off the stream after the reset is written, and a resize measures it again.
+- `ImageStore` gets its cell size from `Terminal#cell_size`, so the probed answer fits pictures
+  where the ioctl answers nothing.
 
 ## [0.9.0] - 2026-10-05
 

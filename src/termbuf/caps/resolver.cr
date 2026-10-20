@@ -41,7 +41,9 @@ module TermBuf
       # Whether the terminal answered anything at all.
       probed : Bool,
       # What this terminal is known to get wrong. See `Quirk`.
-      quirks : Quirk
+      quirks : Quirk,
+      # How big one cell is in pixels, when the terminal was asked and said.
+      cell_pixels : Input::Events::CellPixels? = nil
 
     # Runs the four stages. Probes only when both *input* and *output* are
     # given.
@@ -53,6 +55,7 @@ module TermBuf
       name = nil.as(String?)
       keystrokes = Bytes.empty
       probed = false
+      cell = nil.as(Input::Events::CellPixels?)
 
       if input && output
         # The environment says more than which capabilities to start from: it
@@ -65,13 +68,14 @@ module TermBuf
         keystrokes = probe.input
         name = probe.name
         probed = !probe.answered.empty?
+        cell = probe.cell_pixels
       end
 
       overridden = CapabilityOverrides.apply detected, env
       quirks = QuirkOverrides.apply EnvironmentDetector.quirks(env), env
 
       Result.new overridden.capabilities, keystrokes,
-        overridden.warnings + quirks.warnings, name, probed, quirks.quirks
+        overridden.warnings + quirks.warnings, name, probed, quirks.quirks, cell
     end
   end
 end

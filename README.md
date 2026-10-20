@@ -428,6 +428,21 @@ button is down — read `Events::Mouse#button`. `scripts/caps_check.cr` measures
 A report arrives as `Events::Mouse`, with its coordinates already converted to 0-based buffer
 cells.
 
+DEC mode 1016 reports the pointer in pixels instead. `MOUSE_SGR` and `MOUSE_SGR_ANY` ask for it on
+their own where the terminal has it, and the cells stay what they were:
+
+| Part | What it does |
+| --- | --- |
+| `Events::Mouse#x`, `#y` | Always buffer cells, from zero, under either mode |
+| `Events::Mouse#pixel` | `nil` for a report in cells; an `Events::Pixel` with the offset into the cell otherwise |
+| `Terminal#mouse_pixels?` | Whether enabling a mouse mode here delivers pixels: `Capability::MousePixels` and a known `Terminal#cell_size` |
+| The upgrade | `enable MOUSE_SGR` or `MOUSE_SGR_ANY` writes mode 1016 in place of 1006 when `#mouse_pixels?`; `MOUSE_SGR_CLICKS` stays on cells |
+| Motion | A pixel motion within the cell of the last one delivered is dropped while events are waiting; `terminal.input.motion_every_pixel = true` keeps every one |
+
+`Terminal#cell_size` is the ioctl's answer, or the terminal's reply to `CSI 16 t` during the probe
+where the ioctl has none. The input stream gets that size before the 1016 bytes go out and loses it
+once the reset is written, and a resize measures it again, since a font change arrives as one.
+
 ### Focus
 
 `Events::Focus` arrives when the window gains or loses focus, once mode 1004 is on. Detection says
@@ -986,9 +1001,10 @@ every member after it. New capabilities go on the end and a retired one keeps it
 makes appending a minor-release change rather than a breaking one. The names, the numbering, and
 the snake case spellings `TERMBUF_CAPS` accepts are the part that is frozen.
 
-Two members are detected but in no preset: `GraphemeClusters`, which the probe asks about with
-DECRQM, and `Osc52Clipboard`, which comes from a table of terminals that document the write. A
-mask built from `Capabilities::MODERN` rather than from detection carries neither.
+Three members are detected but in no preset: `GraphemeClusters` and `MousePixels`, which the probe
+asks about with DECRQM, and `Osc52Clipboard`, which comes from a table of terminals that document
+the write. A mask built from `Capabilities::MODERN` rather than from detection carries none of
+them.
 
 ### The environment variables are interface
 

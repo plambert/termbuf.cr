@@ -57,8 +57,9 @@ module TermBuf
 
     # A terminal mode turned on or off, once the current frame is out. Like
     # `Quiet` these move no cursor and set no attribute, so the encoder's
-    # idea of the screen survives them.
-    record Mode, mode : Tty::Mode, enabled : Bool
+    # idea of the screen survives them. *cell* is what the input stream
+    # divides by when *mode* reports the mouse in pixels.
+    record Mode, mode : Tty::Mode, enabled : Bool, cell : Events::CellPixels? = nil
 
     # The window changed size.
     record Resize, size : ScreenSize

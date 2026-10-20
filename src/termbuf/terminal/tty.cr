@@ -79,11 +79,24 @@ module TermBuf
     # As `MOUSE_SGR`, with mode 1003: motion with no button held too, which is
     # what hover needs. Every cell the pointer crosses is a report.
     #
-    # All three mouse modes share the name `mouse-sgr`, because the terminal
+    # All the mouse modes share the name `mouse-sgr`, because the terminal
     # has one tracking mode. `Tty#enable` writes a replacement of the same name
     # whose bytes differ, and `#leave` sends the reset of whichever was asked
     # for last.
     MOUSE_SGR_ANY = Input::Mode::MOUSE_SGR_ANY
+
+    # As `MOUSE_SGR`, with the coordinates in pixels: mode 1002 with 1016.
+    #
+    # Rarely worth naming. `Terminal#enable` turns `MOUSE_SGR` into this on
+    # its own when `Terminal#mouse_pixels?`, and gives the input stream the
+    # cell size first. Enabled directly, it needs a known
+    # `Terminal#cell_size`, or the reports cannot be turned into cells.
+    MOUSE_SGR_PIXELS = Input::Mode::MOUSE_SGR_PIXELS
+
+    # As `MOUSE_SGR_ANY`, with the coordinates in pixels: mode 1003 with
+    # 1016. `Terminal#enable` turns `MOUSE_SGR_ANY` into this on its own. See
+    # `MOUSE_SGR_PIXELS`.
+    MOUSE_SGR_ANY_PIXELS = Input::Mode::MOUSE_SGR_ANY_PIXELS
 
     # The kitty keyboard protocol. The set pushes a flag set onto the
     # terminal's own stack and the reset pops it.

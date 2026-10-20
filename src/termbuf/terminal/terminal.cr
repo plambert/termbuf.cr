@@ -186,7 +186,7 @@ module TermBuf
     @resize_handlers = [] of ResizeHandler
 
     # The device is the one thing a terminal cannot be built without, so it
-    # stays positional; everything else is named. There are ten of them and
+    # stays positional; everything else is named. There are eleven of them and
     # most default, which is exactly the shape that reads wrong positionally.
     def initialize(@tty : Tty, *,
                    @capabilities : Capabilities = Capabilities::NONE,
@@ -198,7 +198,8 @@ module TermBuf
                    @quirks : Quirk = Quirk::None,
                    @detect_composed_drift : Bool = true,
                    clear_overhang : Bool = true,
-                   signals : Bool? = nil)
+                   signals : Bool? = nil,
+                   @cell_pixels : Events::CellPixels? = nil)
       @size = size || @tty.size
       @buffer = Buffer.new @size.columns, @size.rows
       @screen = Region.new Rect.full(@size.columns, @size.rows)
@@ -261,7 +262,8 @@ module TermBuf
         width_spec: env[Unicode::WidthOverrides::VARIABLE]?,
         probe_widths: probe && tty.managed?,
         quirks: resolved.quirks,
-        detect_composed_drift: detect_composed_drift
+        detect_composed_drift: detect_composed_drift,
+        cell_pixels: resolved.cell_pixels
       terminal.start
       terminal
     end
@@ -489,7 +491,7 @@ module TermBuf
       # against. The same ioctl the screen size comes from; many terminals answer
       # it with zeroes, and then a placement fills its box instead of fitting
       # inside it. An application that knows better can say so.
-      store.cell_size = @tty.cell_size
+      store.cell_size = cell_size
 
       # A graphics reply is an escape sequence the application did not ask for,
       # and without a pattern registered the decoder would hand it over as
@@ -768,18 +770,77 @@ module TermBuf
     # the rest of the takeover; afterwards it goes through the owning fibre,
     # since writing to the device from anywhere else would land in the middle
     # of a frame.
+    #
+    # `Tty::MOUSE_SGR` and `Tty::MOUSE_SGR_ANY` go on as their pixel
+    # siblings when `#mouse_pixels?`, and the input stream is given the cell
+    # size to divide the reports by before the terminal is asked to send
+    # them. Events still name cells; `Events::Mouse#pixel` carries the rest.
     def enable(mode : Tty::Mode) : Nil
-      return @tty.enable mode unless @started
+      if (pixels = mode.pixels) && mouse_pixels?
+        mode = pixels
+      end
 
-      issue Commands::Mode.new(mode, true)
+      cell = pixel_mode?(mode) ? mouse_cell : nil
+      return switch_mode(mode, true, cell) unless @started
+
+      issue Commands::Mode.new(mode, true, cell)
     end
 
     # Turns *mode* off and forgets it, so a later takeover does not bring it
     # back. A mode that was never enabled is nothing to turn off.
     def disable(mode : Tty::Mode) : Nil
-      return @tty.disable mode unless @started
+      return switch_mode(mode, false) unless @started
 
       issue Commands::Mode.new(mode, false)
+    end
+
+    # How many pixels one cell measures, as width and height, or `nil` where
+    # nothing says.
+    #
+    # The ioctl answer comes first, since it is asked afresh and follows a
+    # font change. The terminal's answer to `Input::Query::CELL_PIXELS`
+    # during the probe stands in where the ioctl has none, as on Windows.
+    def cell_size : {Int32, Int32}?
+      @tty.cell_size || @cell_pixels.try { |cell| {cell.width, cell.height} }
+    end
+
+    # Whether enabling `Tty::MOUSE_SGR` or `Tty::MOUSE_SGR_ANY` here
+    # delivers mouse reports carrying `Events::Mouse#pixel`.
+    #
+    # It needs the terminal to have DEC mode 1016, `Capability::MousePixels`,
+    # and a known `#cell_size` to turn its pixels into cells. A widget asks
+    # this before drawing finer than a cell.
+    def mouse_pixels? : Bool
+      @capabilities.includes?(Capability::MousePixels) && !mouse_cell.nil?
+    end
+
+    # `#cell_size` as the input stream divides by, or `nil` when there is
+    # nothing to divide by.
+    private def mouse_cell : Events::CellPixels?
+      return unless size = cell_size
+
+      width, height = size
+      Events::CellPixels.new width, height if width > 0 && height > 0
+    end
+
+    # Whether *mode* reports the mouse in pixels.
+    private def pixel_mode?(mode : Tty::Mode) : Bool
+      mode == Tty::MOUSE_SGR_PIXELS || mode == Tty::MOUSE_SGR_ANY_PIXELS
+    end
+
+    # Writes *mode* on or off, and keeps `Input::Stream#mouse_cell` in step
+    # with the mouse mode on the device. The stream gets the cell before the
+    # bytes asking for pixels go out, so the first pixel report finds it, and
+    # loses it only after the bytes asking for anything else, so the last one
+    # does too.
+    private def switch_mode(mode : Tty::Mode, enabled : Bool,
+                            cell : Events::CellPixels? = nil) : Nil
+      mouse = mode.name == Tty::MOUSE_SGR.name
+      @input.mouse_cell = cell if mouse && enabled && cell
+
+      enabled ? @tty.enable(mode) : @tty.disable(mode)
+
+      @input.mouse_cell = nil if mouse && !(enabled && cell)
     end
 
     # ---------------------------------------------------------------- window
@@ -970,6 +1031,8 @@ module TermBuf
       end
 
       @tty.leave
+      # After the reset, so a report sent before it is still read as pixels.
+      @input.mouse_cell = nil
     end
 
     # --------------------------------------------------------------- running
@@ -1210,6 +1273,8 @@ module TermBuf
     end
 
     private def perform_resize(size : ScreenSize) : Nil
+      # A font change arrives as a resize, and may keep the column count.
+      refresh_mouse_cell
       return if size.columns == @size.columns && size.rows == @size.rows
 
       previous = @size
@@ -1228,13 +1293,21 @@ module TermBuf
       images = @images
       if images
         images.resize size.columns, size.rows
-        images.cell_size = @tty.cell_size
+        images.cell_size = cell_size
       end
       @buffer.invalidate
 
       run_resize_handlers size
 
       @input.inject Events::Resize.new(size, previous)
+    end
+
+    # Measures the cell again for a stream that is reading pixel reports.
+    private def refresh_mouse_cell : Nil
+      return unless @input.mouse_cell
+      return unless cell = mouse_cell
+
+      @input.mouse_cell = cell
     end
 
     # The application's layout, run before it is told the screen changed so
@@ -1267,11 +1340,7 @@ module TermBuf
     # As with a colour change, turning a mode on or off moves no cursor and
     # sets no attribute, so the encoder's idea of the screen survives it.
     private def write_mode(command : Commands::Mode) : Nil
-      if command.enabled
-        @tty.enable command.mode
-      else
-        @tty.disable command.mode
-      end
+      switch_mode command.mode, command.enabled, command.cell
     end
 
     # These move no cursor and set no attribute, so unlike a passthrough they
@@ -1383,6 +1452,15 @@ module TermBuf
     #
     # Windows has neither signal. Ctrl+Z there is a keystroke like any other.
     {% unless flag?(:win32) %}
+      # Gives the stream its cell back before a takeover writes a pixel mouse
+      # mode again, since `#restore` took it away.
+      private def resume_mouse_cell : Nil
+        return unless @tty.modes.any? { |mode| pixel_mode? mode }
+        return unless cell = mouse_cell
+
+        @input.mouse_cell = cell
+      end
+
       private def install_suspend_handlers(signals : Input::Signals) : Nil
         signals.on(Signal::TSTP) do
           restore
@@ -1392,6 +1470,7 @@ module TermBuf
 
         signals.on(Signal::CONT) do
           @restored = false
+          resume_mouse_cell
           @tty.enter @capabilities
           issue Commands::Paint.new(true, nil)
         end

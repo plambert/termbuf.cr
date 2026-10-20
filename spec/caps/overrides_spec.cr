@@ -41,6 +41,15 @@ Spectator.describe TermBuf::CapabilityOverrides do
         .to be_true
       expect(override("+osc52_clipboard").capabilities.includes?(Cap::Osc52Clipboard))
         .to be_true
+      expect(override("+mouse_pixels").capabilities.includes?(Cap::MousePixels))
+        .to be_true
+    end
+
+    # A flags enum numbers by position, so a new member goes on the end and
+    # every earlier bit keeps its meaning.
+    it "numbers the newest capability after every other" do
+      expect(Cap::MousePixels.value).to eq(Cap::Osc52Clipboard.value << 1)
+      expect(Cap.values.last).to eq Cap::MousePixels
     end
   end
 
