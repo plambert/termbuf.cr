@@ -160,9 +160,9 @@ apart:
 | environment | version | directory | notes |
 |---|---|---|---|
 | Ghostty | 1.3.2 | `ghostty` | expected to answer everything |
-| Terminal.app | 2.15 (build 470.2) | `apple-terminal-470.2` | answers no DECRQM at all; the table is all there is |
-| kitty | 0.48.2 | `kitty` | answers DECRQM, silent on DECRQSS |
-| iTerm2 | 3.7.0 (3.6.11 in round one) | `iterm2` | Automation approval needed the first time |
+| Terminal.app | 2.15 (build 470.2); 488 in round four | `apple-terminal-470.2`, `apple-terminal-488` | answers no DECRQM at all; the table is all there is |
+| kitty | 0.48.2; 0.49.0 in round four | `kitty` | answers DECRQM, silent on DECRQSS |
+| iTerm2 | 3.7.0 (3.6.11 in round one; 3.7.6 in round four) | `iterm2` | Automation approval needed the first time |
 | `tmux` | 3.7c | `tmux` | `tmux -L termbuf -f /dev/null new-session -- /tmp/caps_check` |
 | GNU `screen` | 5.0.2 | `screen-5.0.2` | `/opt/homebrew/bin/screen -c /dev/null -S termbuf-caps /tmp/caps_check` |
 | GNU `screen` | 4.00.03 | `screen-4.00.03` | the macOS build, `/usr/bin/screen`, same arguments |
@@ -274,11 +274,49 @@ nothing, and the checklist now says silence is an answer.
   drag, the wheel and mode 1003 all work. `APPLE_TERMINAL_WATCHED` stands.
 * **ghostty's motion under 1002 did not reproduce.** Five seconds of moving the pointer with nothing
   held gave no motion reports on ghostty, where round three saw a phantom right-button drag. The
-  build differs, so this says the main branch may have fixed it, not that termbuf can rely on it.
+  build string is the same, `73534c468`, and round four on the same build saw none of it either.
+  So the drag is a state ghostty can get into, most likely a right-button release it never saw,
+  rather than something the build has or lacks, and termbuf cannot rely on its absence.
 * **Pixel sizes are in the terminal's own units.** ghostty and kitty report device pixels, doubled
   on a Retina display; iTerm2 and Terminal.app report points and do not answer `CSI 16 t`.
 * **Mode 2048 and 2031** — in-band resize and colour-scheme updates — are supported by ghostty,
   kitty and iTerm2. Terminal.app does not say.
+
+### Round four: pixel mouse, on 2026-10-20
+
+Four runs between 11:25 and 11:47 with the three mode 1016 rows: `ghostty`, `iterm2` and `kitty`
+overwritten in place, and `apple-terminal-488` new beside `apple-terminal-470.2`, since the OS
+update brought a new Terminal.app. The multiplexers were not run; nothing they do with the mouse
+has changed since round three. Every earlier row came back the same in all four, ghostty's 1002
+motion included, which stayed quiet.
+
+| terminal | version | `mouse_pixels` (DECRQM) | `mouse_pixels_report` | `mouse_pixel_origin` | `CSI 16 t` answered |
+|---|---|---|---|---|---|
+| `ghostty` | 1.3.2-main (`73534c468`) | yes | yes | 4,3 | yes |
+| `kitty` | 0.49.0 | yes | yes | 4,8 | yes |
+| `iterm2` | 3.7.6 | **no** | yes | 1,3 | yes |
+| `apple-terminal-488` | 488 | unanswered | no | none | no |
+
+**`MousePixels` goes into `Capabilities::MODERN`.** The three modern terminals delivered a press
+under 1016 with coordinates past the window's cells, which is the one reading that cannot be a
+cell report in disguise.
+
+**iTerm2 refuses the DECRQM and delivers anyway.** 3.7.6 answers `CSI ? 1016 $ p` with a refusal,
+and the next step's press came in pixels. The probe takes a capability off for a refusal, so
+iTerm2's refusal of 1016 is distrusted by name, the way the Windows console's refusal of the cursor
+style is for WezTerm; the table's credit stands. `TERM_PROGRAM_VERSION` in that window said 3.7.3
+where XTVERSION said 3.7.6, so the variable names the version that opened the window, and the
+record uses XTVERSION.
+
+**Terminal.app 488 ignores 1016.** The press under 1002 with 1016 arrived in no SGR encoding, so
+the row reads `no`, and `CSI 16 t` is unanswered. The ioctl does give a cell size there, so a
+credited `MousePixels` would have had the decoder divide cell coordinates by a cell size; it is not
+credited, and `APPLE_TERMINAL_WATCHED` is unchanged.
+
+**The origin is one.** No run reported a zero. iTerm2 reached `1,3`, so it numbers from one as
+mode 1006 does; ghostty and kitty bottomed out at `4,3` and `4,8`, which is the padding between the
+window edge and the text area rather than the origin, and both report device pixels, doubled on a
+Retina display. The decoder's subtraction of one stands, and its clamp at zero was never reached.
 
 ### Rounds
 
