@@ -740,9 +740,10 @@ has been taken from the channel; presses, releases and wheel notches are never c
 `Stream#motion_every_pixel = true` turns coalescing off for the consumers who want all of it.
 
 Pixel origin: assume 1016 numbers pixels from one, as 1006 numbers cells, and subtract one. D5
-measured it on 2026-10-20: no terminal reported a zero, iTerm2 reached x=1, and ghostty and kitty
-bottomed out at the padding before their text area. The subtraction stands; the decoder still
-clamps rather than rejecting a zero.
+looked on 2026-10-20 and did not settle it: no terminal reported a zero, but the corner cannot be
+aimed at, and the smallest readings were where the pointer stopped. The subtraction stands and the
+decoder clamps rather than rejecting a zero; a drag out of the window, which a terminal clamps to
+its edge, is the reading that would settle it. See `measurements/CAPS.md`.
 
 ### D1. Input: `Pixel`, `mouse_cell`, pixel modes, coalescing (M, termbuf-input)
 

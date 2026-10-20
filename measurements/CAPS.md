@@ -107,6 +107,15 @@ or the terminal offsets the text area, and the run is worth repeating. `none` me
 arrived. Mode 1003 is used because nothing is held down, and motion is the only report that
 arrives.
 
+Round four found the corner too hard to hit: no terminal marks the corner pixel, and every reading
+came back above `1,1`. A reading that does not depend on aim is a drag out of the window. With a
+button held, a terminal keeps reporting motion after the pointer leaves it and clamps the
+coordinates to its edge, so dragging out past the top-left corner should bottom out at the origin
+itself, `0,0` or `1,1`, and dragging out past the bottom-right should top out at the text area's
+size from `CSI 14 t`, or one less. The two readings have to agree with each other for the
+terminal's numbering to be called settled. This is the next change to the instrument and has not
+been run.
+
 ### The three tracking modes
 
 Mode 1000 is defined to report the press and the release and nothing in between. Mode 1002 adds
@@ -313,10 +322,14 @@ the row reads `no`, and `CSI 16 t` is unanswered. The ioctl does give a cell siz
 credited `MousePixels` would have had the decoder divide cell coordinates by a cell size; it is not
 credited, and `APPLE_TERMINAL_WATCHED` is unchanged.
 
-**The origin is one.** No run reported a zero. iTerm2 reached `1,3`, so it numbers from one as
-mode 1006 does; ghostty and kitty bottomed out at `4,3` and `4,8`, which is the padding between the
-window edge and the text area rather than the origin, and both report device pixels, doubled on a
-Retina display. The decoder's subtraction of one stands, and its clamp at zero was never reached.
+**The origin is not settled.** No run reported a zero, but the reading is the smallest position
+the pointer passed through, and nothing on screen says where the corner pixel is. ghostty and kitty
+bottomed out at `4,3` and `4,8`, which is where the pointer stopped rather than where the numbering
+starts, and both report device pixels, doubled on a Retina display. iTerm2 reached `1,3` and never
+`0`, which is one pixel of aim away from the other answer. The decoder keeps subtracting one and
+clamping at zero; a terminal that numbers from zero is a cell off on the first pixel column of
+each cell and nowhere else. A reading that does not depend on aim is under
+[The pixel origin](#the-pixel-origin).
 
 ### Rounds
 
