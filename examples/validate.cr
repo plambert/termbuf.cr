@@ -30,9 +30,11 @@ module Validate
 
   # The mouse tracking modes the mouse page cycles with `m`, in the order it
   # cycles them. All carry the registry name `mouse-sgr`, so asking for the
-  # next replaces the one on rather than stacking on it. The last two report
-  # in pixels (mode 1016) and are cycled to only when the tty knows its cell
-  # size, since that is what divides the pixels back into cells.
+  # next replaces the one on rather than stacking on it. The last two ask for
+  # pixels (mode 1016) by name and are cycled to only when
+  # `Terminal#mouse_pixels?`; buttons and any go on as pixel modes by
+  # themselves on such a terminal, so there the only cell reports are under
+  # clicks.
   #
   # The page starts on `MOUSE_START`, any-event tracking in cells, because
   # that is the one whose reports are hardest to miss. The cell modes are
@@ -43,8 +45,8 @@ module Validate
     {name: "clicks (1000)", mode: TermBuf::Tty::MOUSE_SGR_CLICKS, pixels: false},
     {name: "buttons (1002)", mode: TermBuf::Tty::MOUSE_SGR, pixels: false},
     {name: "any (1003)", mode: TermBuf::Tty::MOUSE_SGR_ANY, pixels: false},
-    {name: "buttons, pixels (1002+1016)", mode: TermBuf::Input::Mode::MOUSE_SGR_PIXELS, pixels: true},
-    {name: "any, pixels (1003+1016)", mode: TermBuf::Input::Mode::MOUSE_SGR_ANY_PIXELS, pixels: true},
+    {name: "buttons, pixels (1002+1016)", mode: TermBuf::Tty::MOUSE_SGR_PIXELS, pixels: true},
+    {name: "any, pixels (1003+1016)", mode: TermBuf::Tty::MOUSE_SGR_ANY_PIXELS, pixels: true},
   ]
 
   MOUSE_START = 2
@@ -1242,10 +1244,23 @@ module Validate
         "reads Release; the wheel gives WheelUp and WheelDown; shift or alt shows in modifiers.",
         expected_tracking,
         "[m] cycles the tracking mode: clicks (1000), buttons (1002), any (1003), then the same two in pixels " \
-        "(1016) when the tty knows its cell size, and clears what arrived under the last one. if Motion lines appear while nothing is held under 1000 or " \
+        "(1016) when this terminal reports pixels, and clears what arrived under the last one. if Motion lines appear while nothing is held under 1000 or " \
         "1002, this terminal over-reports; note it in measurements/CAPS.md.",
+        expected_pixels,
         "selecting text with the mouse stops working here and works again on the next page.",
       ]
+    end
+
+    # What the pixel field should show on this terminal.
+    private def expected_pixels : String
+      if @terminal.mouse_pixels?
+        "this terminal reports pixels: under every mode but clicks the pixel line fills in, and the " \
+        "offset changes as the pointer moves inside one cell while the cell stays put. clicks (1000) " \
+        "reads cell report (no pixel)."
+      else
+        "this terminal does not report pixels (no mode 1016, or no cell size): every mode reads cell " \
+        "report (no pixel), and [m] skips the two pixel modes."
+      end
     end
 
     # What the mode now on is defined to report, which is the claim the screen
@@ -1937,26 +1952,16 @@ module Validate
       @rebuild = true
     end
 
-    # Whether the mode now selected can be used here. A pixel mode needs a
-    # cell size to divide by.
+    # Whether the mode now selected can be used here. A pixel mode needs the
+    # terminal to report pixels and to know its cell size.
     private def tracking_usable? : Bool
-      !MOUSE_TRACKING[@tracking][:pixels] || !@terminal.tty.cell_size.nil?
+      !MOUSE_TRACKING[@tracking][:pixels] || @terminal.mouse_pixels?
     end
 
-    # Turns on the selected mode. The stream is told the cell size before a
-    # pixel mode goes on and forgets it after a cell mode has replaced it, so a
-    # report is never read in the wrong units.
+    # Turns on the selected mode. The terminal hands the stream the cell size
+    # for a pixel mode and takes it back for a cell mode.
     private def enable_tracking : Nil
-      entry = MOUSE_TRACKING[@tracking]
-
-      if entry[:pixels]
-        size = @terminal.tty.cell_size
-        @terminal.input.mouse_cell = size.try { |(width, height)| Input::Events::CellPixels.new width, height }
-        @terminal.enable entry[:mode]
-      else
-        @terminal.enable entry[:mode]
-        @terminal.input.mouse_cell = nil
-      end
+      @terminal.enable MOUSE_TRACKING[@tracking][:mode]
     end
 
     # Whether this page has something to type into.
@@ -2136,7 +2141,6 @@ module Validate
       @mouse = nil
       @mouse_report = nil
       @terminal.disable MOUSE_TRACKING[@tracking][:mode]
-      @terminal.input.mouse_cell = nil
     end
 
     # Sends the screen again without touching what is on it. Whatever scribbled
